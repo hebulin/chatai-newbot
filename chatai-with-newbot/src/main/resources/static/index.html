@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <title>Chat Bot(已接入DeepSeek)</title>
+    <!-- 设置移动设备视口 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="my_css/index_css.css">
+    <link rel="stylesheet" href="my_css/nova.css">
+    <script src="my_js/index_js.js"></script>
+    <script src="js/marked.umd.js"></script>
+    <script src="js/highlight.min.js"></script>
+    <script> hljs.initHighlightingOnLoad() </script>
+</head>
+<body>
+<div class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+        <div class="sidebar-buttons">
+            <button class="styled-button" onclick="newChat()">新建会话</button>
+            <button class="styled-button" onclick="deleteAllChats()">删除会话</button>
+        </div>
+    </div>
+    <!-- 会话列表容器 -->
+    <div class="chat-list-container" id="chatList"></div>
+    <div class="export-container">
+        <button class="styled-button" onclick="exportChats()">导出会话</button>
+    </div>
+</div>
+<!-- 侧边栏切换按钮 -->
+<button class="toggle-sidebar styled-button" id="toggleButton" onclick="toggleSidebar()"></button>
+
+<!-- 主要内容区域 -->
+<div class="main-content">
+    <div class="chat-container" id="chatContainer"></div>
+    <div class="input-area">
+        <div class="controls-row">
+            <div class="deep-thinking" id="deepThinking" onclick="toggleDeepThinking()">深度思考</div>
+            <select id="modelSelect" class="model-select" onchange="switchModel()">
+                <option value="ali">DeepSeek-V3(ali)</option>
+                <option value="deepseek">DeepSeek-V3(官方)</option>
+                <option value="qwen-plus">通义千问-Plus</option>
+                <option value="qwen-turbo">通义千问-Turbo</option>
+            </select>
+        </div>
+        <div class="input-container">
+            <textarea id="userInput" placeholder="输入消息..." onkeypress="handleKeyPress(event)"></textarea>
+            <button class="send-button styled-button" id="sendButton" onclick="sendMessage()">发送</button>
+        </div>
+    </div>
+</div>
+</body>
+</html>
