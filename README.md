@@ -4,7 +4,7 @@
 Chatai With Newbot 是一个基于 Spring Boot 的聊天机器人项目，集成了多种 AI 模型，包括 DeepSeek 和 通义千问。该项目允许用户通过 Web 界面与不同的 AI 模型进行交互。
 
 项目截图：
-![img.png](img.png)![img_1.png](img_1.png)![img_2.png](img_2.png)![img_3.png](img_3.png)![img_4.png](img_4.png)
+![img.png](chatai-with-newbot/img.png)![img_1.png](chatai-with-newbot/img_1.png)![img_2.png](chatai-with-newbot/img_2.png)![img_3.png](chatai-with-newbot/img_3.png)![img_4.png](chatai-with-newbot/img_4.png)
 ## 主要功能
 - **多模型支持**：支持 DeepSeek 和 通义千问等多种 AI 模型。
 - **会话管理**：用户可以新建会话、切换会话、删除会话。
@@ -78,6 +78,3 @@ Chatai With Newbot 是一个基于 Spring Boot 的聊天机器人项目，集成
 ## 许可证
 该项目使用 [MIT 许可证](LICENSE)。
 
-## 联系方式
-如有任何问题或建议，请联系 [hebulin@foxmail.com]。
-```
