@@ -58,36 +58,20 @@ public class AliDeepSeekV3Service {
 
                 Flowable<ApplicationResult> result = application.streamCall(param);
 
-                result.subscribe(
+                result.blockingForEach(
                         data -> {
                             String content = data.getOutput().getText();
-                            if (content != null && !content.isEmpty()) {
-                                log.info("收到响应 chunk: {}", content);
+                            log.info("收到响应 chunk: {}", content);
+                            if (null == content) {
+                                emitter.next("[DONE]");
+                            } else {
                                 // 构建 JSON 响应 发送给客户端
-                                String jsonResponse = String.format(
-                                        "{\"id\":\"%s\",\"object\":\"chat.completion.chunk\",\"created\":%d," +
-                                                "\"model\":\"deepseek-v3\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"%s\"}," +
-                                                "\"finish_reason\":null}]}",
-                                        data.getRequestId(),
-                                        System.currentTimeMillis() / 1000L,
-                                        content.replace("\"", "\\\"")
-                                );
+                                String jsonResponse =
+                                        "{\"id\":\"" + data.getRequestId() + "\",\"object\":\"chat.completion.chunk\",\"created\":" + (System.currentTimeMillis() / 1000L) + "," +
+                                                "\"model\":\"deepseek-v3\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"" + content + "\"}," +
+                                                "\"finish_reason\":null}]}";
                                 emitter.next(jsonResponse);
                             }
-                        },
-                        error -> {
-                            log.error("Error during streaming: {}", error.getMessage(), error);
-                            String errorResponse = String.format(
-                                    "{\"error\":{\"message\":\"%s\",\"type\":\"api_error\"}}",
-                                    error.getMessage().replace("\"", "\\\"")
-                            );
-                            emitter.next(errorResponse);
-                            emitter.complete();
-                        },
-                        () -> {
-                            log.info("Stream completed successfully");
-                            emitter.next("[DONE]");
-                            emitter.complete();
                         }
                 );
 
