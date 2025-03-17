@@ -31,7 +31,7 @@ public class ChatController {
             return tongYiService.chat(request);
         } else {
             switch (request.getModel()) {
-                case "ali":
+                case "ali-deepseek":
                     return aliDeepSeekV3Service.chat(request);
                 case "deepseek":
                     return officialDeepSeekV3Service.chat(request);

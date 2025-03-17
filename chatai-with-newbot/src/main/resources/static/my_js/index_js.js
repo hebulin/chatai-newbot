@@ -162,8 +162,8 @@ function switchModel() {
 
     const modelNames = {
         'deepseek': 'DeepSeek-V3(官方源-慢)',
-        'ali': 'DeepSeek-V3(ali源-稳定)',
-        'qwen-plus': '通义千问-Plus(能力均衡)',
+        'ali-deepseek': 'DeepSeek-V3(ali源-稳定)',
+        'qwen-plus-latest': '通义千问-Plus(能力均衡)',
         'qwen-turbo': '通义千问-Turbo(速度最快)'
     };
 
