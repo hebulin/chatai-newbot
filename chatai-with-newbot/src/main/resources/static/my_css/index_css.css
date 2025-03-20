@@ -947,3 +947,11 @@ tr:hover {
     animation: thinking 1.5s infinite;
 }
 
+img {
+    max-width: 50%; /* 确保图片宽度不超过其容器 */
+    height: auto; /* 保持图片的宽高比 */
+    border-radius: 8px; /* 圆角效果 */
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* 阴影效果 */
+    margin: 10px; /* 外边距 */
+}
+

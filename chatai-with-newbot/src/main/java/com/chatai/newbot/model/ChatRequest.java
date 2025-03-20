@@ -1,5 +1,6 @@
 package com.chatai.newbot.model;
 
+import com.alibaba.dashscope.common.Message;
 import lombok.Data;
 import java.util.List;
 
