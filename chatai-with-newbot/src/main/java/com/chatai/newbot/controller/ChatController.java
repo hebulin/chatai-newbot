@@ -28,7 +28,7 @@ public class ChatController {
     public Flux<String> chat(@RequestBody ChatRequest request) {
         if (request.isDeepThinking()) {
             request.setModel("qwq-32b");
-            return tongYiService.chat(request);
+            return tongYiService.chatWithDeepThink(request);
         } else {
             switch (request.getModel()) {
                 case "ali-deepseek":
