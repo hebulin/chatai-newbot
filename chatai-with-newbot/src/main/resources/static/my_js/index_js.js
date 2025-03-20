@@ -163,8 +163,9 @@ function switchModel() {
     const modelNames = {
         'deepseek': 'DeepSeek-V3(官方源-慢)',
         'ali-deepseek': 'DeepSeek-V3(ali源-稳定)',
+        'qwen-max-latest': '通义千问-Max(能力最强)',
         'qwen-plus-latest': '通义千问-Plus(能力均衡)',
-        'qwen-turbo': '通义千问-Turbo(速度最快)'
+        'qwen-turbo-latest': '通义千问-Turbo(速度最快)'
     };
 
     const tipDiv = document.createElement('div');

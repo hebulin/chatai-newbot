@@ -29,7 +29,7 @@ public class AliDeepSeekV3Service {
     }
 
     public Flux<String> chat(ChatRequest request) {
-        log.info("ali 深度思考 with {}", request.getMessages());
+        log.info("ali deepseek with {}", request.getMessages());
         return Flux.<String>create(emitter -> {
             try {
                 if (aiConfig.getAliApiKey() == null || aiConfig.getAliApiKey().isEmpty()) {
@@ -68,7 +68,7 @@ public class AliDeepSeekV3Service {
                                 // 构建 JSON 响应 发送给客户端
                                 String jsonResponse =
                                         "{\"id\":\"" + data.getRequestId() + "\",\"object\":\"chat.completion.chunk\",\"created\":" + (System.currentTimeMillis() / 1000L) + "," +
-                                                "\"model\":\"deepseek-v3\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"" + content + "\"}," +
+                                                "\"model\":\"" + request.getModel() + "\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"" + content + "\"}," +
                                                 "\"finish_reason\":null}]}";
                                 emitter.next(jsonResponse);
                             }
