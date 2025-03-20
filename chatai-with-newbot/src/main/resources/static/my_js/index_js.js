@@ -8,7 +8,7 @@ let currentChatId = null;
 let chats = JSON.parse(localStorage.getItem('chats')) || {};
 
 // 当前选择的模型
-let currentModel = 'deepseek';
+let currentModel = 'ali-deepseek';
 
 // 添加会话状态管理
 const chatStates = {};
@@ -389,6 +389,7 @@ function sendMessage(retryMessage = null) {
                     try {
                         const chunk = decoder.decode(value, {stream: true});
                         buffer += chunk;
+                        console.log("buffer==="+buffer);
 
                         const lines = buffer.split('data:');
                         buffer = lines.pop() || '';
