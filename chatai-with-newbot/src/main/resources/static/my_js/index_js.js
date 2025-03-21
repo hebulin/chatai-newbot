@@ -8,7 +8,7 @@ let currentChatId = null;
 let chats = JSON.parse(localStorage.getItem('chats')) || {};
 
 // 当前选择的模型
-let currentModel = 'deepseek';
+let currentModel = 'ali-deepseek';
 
 // 添加会话状态管理
 const chatStates = {};
@@ -161,8 +161,9 @@ function switchModel() {
     currentModel = select.value;
 
     const modelNames = {
+        'ali-deepseek': 'DeepSeek-V3(ali源-稳定)',
         'deepseek': 'DeepSeek-V3(官方源-慢)',
-        'ali': 'DeepSeek-V3(ali源-稳定)',
+        'qwen-max': '通义千问-Max(能力最强)',
         'qwen-plus': '通义千问-Plus(能力均衡)',
         'qwen-turbo': '通义千问-Turbo(速度最快)'
     };
