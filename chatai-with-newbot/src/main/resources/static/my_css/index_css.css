@@ -955,3 +955,58 @@ img {
     margin: 10px; /* 外边距 */
 }
 
+/* 代码块容器样式 */
+pre {
+    position: relative;
+    background-color: #f8f9fa;
+    border-radius: 6px;
+    margin: 1em 0;
+    padding-top: 2.5em; /* 为头部留出空间 */
+    overflow: hidden;
+}
+
+/* 代码块头部样式 */
+.code-header {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2.5em;
+    background-color: #585a73; /* 改背景 */
+    border-bottom: 1px solid #333; /* 深色边框 */
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 1em;
+}
+
+/* 语言标签样式 */
+.code-language {
+    font-size: 0.7em;
+    color: #ffffff; /* 改为白色文字 */
+    font-family: Arial, sans-serif; /* 修改字体 */
+}
+
+/* 复制按钮样式 */
+.copy-button {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 0.4em;
+    color: #ffffff; /* 改为白色图标 */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* 复制图标样式 */
+.copy-icon {
+    width: 1em;
+    height: 1em;
+    transition: all 0.2s ease;
+}
+
+/* 复制成功状态 */
+.copy-button.success .copy-icon {
+    color: #00ff3b;
+}
