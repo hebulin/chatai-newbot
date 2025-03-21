@@ -161,11 +161,11 @@ function switchModel() {
     currentModel = select.value;
 
     const modelNames = {
-        'deepseek': 'DeepSeek-V3(官方源-慢)',
         'ali-deepseek': 'DeepSeek-V3(ali源-稳定)',
-        'qwen-max-latest': '通义千问-Max(能力最强)',
-        'qwen-plus-latest': '通义千问-Plus(能力均衡)',
-        'qwen-turbo-latest': '通义千问-Turbo(速度最快)'
+        'deepseek': 'DeepSeek-V3(官方源-慢)',
+        'qwen-max': '通义千问-Max(能力最强)',
+        'qwen-plus': '通义千问-Plus(能力均衡)',
+        'qwen-turbo': '通义千问-Turbo(速度最快)'
     };
 
     const tipDiv = document.createElement('div');
@@ -389,7 +389,6 @@ function sendMessage(retryMessage = null) {
                     try {
                         const chunk = decoder.decode(value, {stream: true});
                         buffer += chunk;
-                        console.log("buffer==="+buffer);
 
                         const lines = buffer.split('data:');
                         buffer = lines.pop() || '';

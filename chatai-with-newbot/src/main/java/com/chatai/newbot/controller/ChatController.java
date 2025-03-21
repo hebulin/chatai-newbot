@@ -1,5 +1,6 @@
 package com.chatai.newbot.controller;
 
+import com.chatai.newbot.enums.ModelEnum;
 import com.chatai.newbot.model.ChatRequest;
 import com.chatai.newbot.service.OfficialDeepSeekV3Service;
 import com.chatai.newbot.service.TongYiService;
@@ -27,19 +28,21 @@ public class ChatController {
     @PostMapping(produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> chat(@RequestBody ChatRequest request) {
         if (request.isDeepThinking()) {
-            request.setModel(DEEP_THINK_ALI_SOURCE);
+            request.setModel(ModelEnum.getModelValueByName(NAME_DEEP_THINK));
             return tongYiService.chatWithDeepThink(request);
         } else {
-            switch (request.getModel()) {
-                case DEEPSEEK_V3_ALI_SOURCE:
+            String modelName = request.getModel();
+            request.setModel(ModelEnum.getModelValueByName(modelName));
+            switch (modelName) {
+                case NAME_ALI_DEEPSEEK:
                     return tongYiService.chat(request);
-                case DEEPSEEK_V3_OFFICIAL_SOURCE:
+                case NAME_OFFICIAL_DEEPSEEK:
                     return officialDeepSeekV3Service.chat(request);
-                case QWEN_MAX_LATEST:
+                case NAME_QWEN_MAX:
                     return tongYiService.chat(request);
-                case QWEN_PLUS_LATEST:
+                case NAME_QWEN_PLUS:
                     return tongYiService.chat(request);
-                case QWEN_TURBO_LATEST:
+                case NAME_QWEN_TURBO:
                     return tongYiService.chat(request);
                 default:
                     return null;
