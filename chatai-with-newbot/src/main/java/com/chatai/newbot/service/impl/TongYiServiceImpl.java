@@ -25,12 +25,11 @@ import static com.chatai.newbot.constant.AiConstant.*;
 
 @Service
 public class TongYiServiceImpl implements TongYiService {
-    private static final Logger log = LoggerFactory.getLogger(AliDeepSeekV3ServiceImpl.class);
+    private static final Logger log = LoggerFactory.getLogger(TongYiServiceImpl.class);
     private AIConfig aiConfig;
     private Application application;
 
     public TongYiServiceImpl(AIConfig aiConfig) {
-        log.info("Initializing AliChatService with API URL: {}", aiConfig.getAliApiUrl());
         this.aiConfig = aiConfig;
         this.application = new Application();
     }
@@ -73,8 +72,7 @@ public class TongYiServiceImpl implements TongYiService {
                 result.subscribe(
                         data -> {
                             String content = data.getOutput().getText();
-                            String finishReason = data.getOutput().getFinishReason();
-                            if (content != null && !content.isEmpty() && !finishReason.equals("stop")) {
+                            if (content != null && !content.isEmpty()) {
                                 log.info(model + "收到响应 chunk: {}", content);
                                 // 构建 JSON 响应 发送给客户端
                                 String jsonResponse =
@@ -83,6 +81,7 @@ public class TongYiServiceImpl implements TongYiService {
                             }
                         },
                         error -> {
+                            log.info("error=============");
                             log.error("Error during streaming: {}", error.getMessage(), error);
                             String errorResponse = String.format(
                                     "{\"error\":{\"message\":\"%s\",\"type\":\"api_error\"}}",
@@ -92,7 +91,7 @@ public class TongYiServiceImpl implements TongYiService {
                             emitter.complete();
                         },
                         () -> {
-                            log.info("Stream completed successfully");
+                            log.info("Stream completed successfully======");
                             emitter.next("[DONE]");
                             emitter.complete();
                         }

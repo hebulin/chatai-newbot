@@ -1,13 +1,13 @@
 package com.chatai.newbot.constant;
 
 public class AiConstant {
-    //模型
-    public static final String DEEP_THINK_ALI_SOURCE = "qwq-32b";
-    public static final String DEEPSEEK_V3_ALI_SOURCE = "ali-deepseek";
-    public static final String DEEPSEEK_V3_OFFICIAL_SOURCE = "deepseek";
-    public static final String QWEN_MAX_LATEST = "qwen-max-latest";
-    public static final String QWEN_PLUS_LATEST = "qwen-plus-latest";
-    public static final String QWEN_TURBO_LATEST = "qwen-turbo-latest";
+    //模型name
+    public static final String NAME_DEEP_THINK = "deepthink";
+    public static final String NAME_ALI_DEEPSEEK = "ali-deepseek";
+    public static final String NAME_OFFICIAL_DEEPSEEK = "deepseek";
+    public static final String NAME_QWEN_MAX = "qwen-max";
+    public static final String NAME_QWEN_PLUS = "qwen-plus";
+    public static final String NAME_QWEN_TURBO = "qwen-turbo";
 
     // 模型配置 动态获取的key
     public static final String API_KEY = "api-key";
