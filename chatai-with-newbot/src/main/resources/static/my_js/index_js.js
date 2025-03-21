@@ -59,6 +59,9 @@ window.onload = function () {
     // 添加输入框事件监听
     const textarea = document.getElementById('userInput');
     textarea.addEventListener('input', autoResizeTextarea);
+    
+    // 初始化代码块处理
+    initializeCodeBlocks();
 };
 
 // 将页面初始化逻辑移到单独的函数
@@ -627,6 +630,9 @@ function displayMessages(messages) {
     });
 
     container.scrollTop = container.scrollHeight;
+    
+    // 在渲染完消息后初始化代码块
+    initializeCodeBlocks();
 }
 
 // 修改侧边栏切换功能
@@ -861,4 +867,116 @@ function autoResizeTextarea() {
     // 设置新高度，但不超过最大高度
     const newHeight = Math.min(textarea.scrollHeight, 120);
     textarea.style.height = newHeight + 'px';
+}
+
+// 添加代码块处理函数
+function initializeCodeBlocks() {
+    // 为所有代码块添加行号和复制按钮
+    document.querySelectorAll('pre code').forEach(block => {
+        addCopyButton(block.parentElement);
+    });
+}
+
+// 修改添加复制按钮函数
+function addCopyButton(preBlock) {
+    // 创建头部容器
+    const header = document.createElement('div');
+    header.className = 'code-header';
+    
+    // 添加语言标签
+    const languageSpan = document.createElement('span');
+    languageSpan.className = 'code-language';
+    
+    // 获取并处理语言标识
+    let language = preBlock.querySelector('code').className;
+    
+    // 清理语言标识中的额外后缀
+    language = language
+        .replace('language-', '')
+        .replace(' hljs', '')
+        .replace('hljs', '')
+        .replace('language-xml', 'xml')
+        .trim();
+    
+    // 语言映射对象
+    const languageMap = {
+        'js': 'JavaScript',
+        'javascript': 'JavaScript',
+        'py': 'Python',
+        'python': 'Python',
+        'html': 'HTML',
+        'css': 'CSS',
+        'java': 'Java',
+        'cpp': 'C++',
+        'c': 'C',
+        'csharp': 'C#',
+        'cs': 'C#',
+        'php': 'PHP',
+        'ruby': 'Ruby',
+        'go': 'Go',
+        'rust': 'Rust',
+        'swift': 'Swift',
+        'kotlin': 'Kotlin',
+        'ts': 'TypeScript',
+        'typescript': 'TypeScript',
+        'shell': 'Shell',
+        'bash': 'Bash',
+        'sql': 'SQL',
+        'json': 'JSON',
+        'xml': 'XML',
+        'yaml': 'YAML',
+        'yml': 'YAML',
+        'md': 'Markdown',
+        'markdown': 'Markdown'
+    };
+
+    // 获取格式化后的语言名称
+    let displayLanguage = languageMap[language.toLowerCase()] || language.toUpperCase() || 'Plain Text';
+    
+    // 检查是否包含多个语言标识
+    const languageParts = displayLanguage.split(' ');
+    if (languageParts.length > 1) {
+        // 如果包含多个语言标识，只保留第一个
+        displayLanguage = languageParts[0];
+    }
+    
+    languageSpan.textContent = displayLanguage;
+    header.appendChild(languageSpan);
+    
+    // 创建复制按钮
+    const button = document.createElement('button');
+    button.className = 'copy-button';
+    button.innerHTML = `
+        <svg class="copy-icon" viewBox="0 0 24 24" width="18" height="18">
+            <path fill="currentColor" d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+        </svg>
+    `;
+    
+    button.addEventListener('click', async () => {
+        const code = preBlock.querySelector('code').textContent;
+        
+        try {
+            await navigator.clipboard.writeText(code);
+            button.innerHTML = `
+                <svg class="copy-icon" viewBox="0 0 24 24" width="18" height="18">
+                    <path fill="currentColor" d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+                </svg>
+            `;
+            button.classList.add('success');
+            
+            setTimeout(() => {
+                button.innerHTML = `
+                    <svg class="copy-icon" viewBox="0 0 24 24" width="18" height="18">
+                        <path fill="currentColor" d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+                    </svg>
+                `;
+                button.classList.remove('success');
+            }, 3000);
+        } catch (err) {
+            console.error('复制失败:', err);
+        }
+    });
+    
+    header.appendChild(button);
+    preBlock.insertBefore(header, preBlock.firstChild);
 }
