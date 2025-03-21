@@ -1,0 +1,75 @@
+# Thymeleaf 配置
+spring:
+  thymeleaf:
+    cache: true
+    check-template: true
+    check-template-location: true
+    content-type: text/html
+    enabled: true
+    encoding: UTF-8
+    excluded-view-names: ""
+    mode: HTML5
+    prefix: classpath:/templates/
+    suffix: .html
+  # WebFlux 配置
+  webflux:
+    max-in-memory-size: 16MB
+    base-path: "/"
+    static-path-pattern: "/*"
+
+# 服务器配置
+server:
+  port: 9092
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
+
+# 日志级别配置
+logging:
+  level:
+    org.springframework.web: DEBUG
+    reactor.netty.http.client: DEBUG
+
+# DeepSeek AI配置
+ai:
+  deepseek-key: sk-xxxx
+  deepseek-url: https://api.deepseek.com/chat/completions
+
+# 阿里通义千问动态模型配置
+ali:
+  tongyi:
+    common:
+      api-key: sk-xxxx
+      api-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+
+# 通义千问系列模型配置
+qwq-32b:
+  ai:
+    api-key: ${ali.tongyi.common.api-key}
+    app-id:
+    api-url: ${ali.tongyi.common.api-url}
+
+qwen-plus-latest:
+  ai:
+    api-key: ${ali.tongyi.common.api-key}
+    app-id: xxxx
+    api-url: ${ali.tongyi.common.api-url}
+
+qwen-max-latest:
+  ai:
+    api-key: ${ali.tongyi.common.api-key}
+    app-id: xxxx
+    api-url: ${ali.tongyi.common.api-url}
+
+qwen-turbo-latest:
+  ai:
+    api-key: ${ali.tongyi.common.api-key}
+    app-id: xxxx
+    api-url: ${ali.tongyi.common.api-url}
+
+ali-deepseek:
+  ai:
+    api-key: ${ali.tongyi.common.api-key}
+    app-id: xxxx
+    api-url: ${ali.tongyi.common.api-url}

@@ -1,7 +1,7 @@
 package com.chatai.newbot.controller;
 
+import com.chatai.newbot.enums.ModelEnum;
 import com.chatai.newbot.model.ChatRequest;
-import com.chatai.newbot.service.AliDeepSeekV3Service;
 import com.chatai.newbot.service.OfficialDeepSeekV3Service;
 import com.chatai.newbot.service.TongYiService;
 import org.springframework.http.MediaType;
@@ -11,32 +11,41 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
 
+import static com.chatai.newbot.constant.AiConstant.*;
+
 @RestController
 @RequestMapping("/api/chat")
 public class ChatController {
     private final OfficialDeepSeekV3Service officialDeepSeekV3Service;
-    private final AliDeepSeekV3Service aliDeepSeekV3Service;
     private final TongYiService tongYiService;
 
-    public ChatController(OfficialDeepSeekV3Service officialDeepSeekV3Service, AliDeepSeekV3Service aliDeepSeekV3Service, TongYiService tongYiService) {
+    public ChatController(OfficialDeepSeekV3Service officialDeepSeekV3Service,
+                          TongYiService tongYiService) {
         this.officialDeepSeekV3Service = officialDeepSeekV3Service;
-        this.aliDeepSeekV3Service = aliDeepSeekV3Service;
         this.tongYiService = tongYiService;
     }
 
     @PostMapping(produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> chat(@RequestBody ChatRequest request) {
         if (request.isDeepThinking()) {
-            request.setModel("qwq-32b");
-            return tongYiService.chat(request);
+            request.setModel(ModelEnum.getModelValueByName(NAME_DEEP_THINK));
+            return tongYiService.chatWithDeepThink(request);
         } else {
-            switch (request.getModel()) {
-                case "ali":
-                    return aliDeepSeekV3Service.chat(request);
-                case "deepseek":
-                    return officialDeepSeekV3Service.chat(request);
-                default:
+            String modelName = request.getModel();
+            request.setModel(ModelEnum.getModelValueByName(modelName));
+            switch (modelName) {
+                case NAME_ALI_DEEPSEEK:
                     return tongYiService.chat(request);
+                case NAME_OFFICIAL_DEEPSEEK:
+                    return officialDeepSeekV3Service.chat(request);
+                case NAME_QWEN_MAX:
+                    return tongYiService.chat(request);
+                case NAME_QWEN_PLUS:
+                    return tongYiService.chat(request);
+                case NAME_QWEN_TURBO:
+                    return tongYiService.chat(request);
+                default:
+                    return null;
             }
         }
 
