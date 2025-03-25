@@ -19,6 +19,13 @@
             <button class="styled-button" onclick="newChat()">新建会话</button>
             <button class="styled-button" onclick="deleteAllChats()">删除会话</button>
         </div>
+        <!-- 添加关闭按钮 - 移动端显示 -->
+        <div class="close-sidebar" onclick="toggleSidebar()">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+        </div>
     </div>
     <!-- 会话列表容器 -->
     <div class="chat-list-container" id="chatList"></div>
@@ -26,15 +33,53 @@
         <button class="styled-button" onclick="exportChats()">导出会话</button>
     </div>
 </div>
-<!-- 侧边栏切换按钮 -->
-<button class="toggle-sidebar styled-button" id="toggleButton" onclick="toggleSidebar()"></button>
 
 <!-- 主要内容区域 -->
 <div class="main-content">
+    <div class="chat-title">
+        <!-- 修改展开/折叠按钮的SVG图标 -->
+        <div class="toggle-sidebar" onclick="toggleSidebar()">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="3" y1="12" x2="21" y2="12"></line>
+                <line x1="3" y1="6" x2="21" y2="6"></line>
+                <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+        </div>
+        <div class="chat-title-text" id="chatTitle">新会话</div>
+    </div>
+
     <div class="chat-container" id="chatContainer"></div>
     <div class="input-area">
         <div class="controls-row">
-            <div class="deep-thinking" id="deepThinking" onclick="toggleDeepThinking()">深度思考</div>
+            <div style="display: flex; align-items: center; gap: 4px;">
+                <div class="deep-thinking" id="deepThinking" onclick="toggleDeepThinking()">深度思考</div>
+                <div class="control-separator">|</div>
+                <!-- 修改温度系数设置 -->
+                <div class="temperature-control">
+                    <span class="temperature-label">
+                        温度系数
+                        <div class="temperature-info" onclick="toggleTemperatureInfo()">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <path d="M12 16v-4"></path>
+                                <path d="M12 8h.01"></path>
+                            </svg>
+                        </div>
+                    </span>
+                    <input type="number"
+                           id="temperatureInput"
+                           value="1.3"
+                           step="0.1"
+                           min="0"
+                           max="2"
+                           onchange="updateTemperature(this.value)"
+                    >
+                    <div class="temperature-buttons">
+                        <button onclick="adjustTemperature(0.1)" class="temp-up">▲</button>
+                        <button onclick="adjustTemperature(-0.1)" class="temp-down">▼</button>
+                    </div>
+                </div>
+            </div>
             <select id="modelSelect" class="model-select" onchange="switchModel()">
                 <option value="ali-deepseek">DeepSeek-V3(ali源-稳定)</option>
                 <option value="deepseek">DeepSeek-V3(官方源-慢)</option>
