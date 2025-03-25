@@ -37,59 +37,152 @@ body {
 /* ================ 布局容器 ================ */
 /* 主内容区域 */
 .main-content {
-    flex: 1;  /* 占用剩余空间 */
-    padding: 20px;
-    padding-bottom: 30px;
-    transition: all 0.3s ease;  /* 平滑过渡效果 */
+    flex: 1; /* 这将确保它占用所有可用空间 */
+    padding: 0 20px 30px 20px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     display: flex;
     flex-direction: column;
-    height: 100vh;  /* 视口高度 */
-    width: calc(100% - 200px);  /* 减去侧边栏宽度 */
+    height: 100vh;
+    overflow-y: auto;
 }
 
 /* 主内容区域全宽状态 */
 .main-content.full-width {
-    width: 100%;
+    width: 100% !important;
+}
+
+/* 确保侧边栏折叠时主内容区域撑满 */
+.sidebar.collapsed + .main-content {
+    width: 100% !important;
 }
 
 /* 侧边栏 */
 .sidebar {
-    width: 200px;  /* 固定宽度 */
-    border-right: 1px solid rgba(156, 39, 176, 0.2);  /* 右边框 */
+    width: 260px;
+    min-width: 260px; /* 添加最小宽度确保不被挤压 */
+    border-right: 1px solid rgba(156, 39, 176, 0.2);
     padding: 20px;
-    transition: all 0.3s ease;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     height: 100%;
     background: white;
-    box-shadow: 2px 0 10px rgba(156, 39, 176, 0.1);  /* 阴影效果 */
+    box-shadow: 2px 0 15px rgba(156, 39, 176, 0.1);
     display: flex;
     flex-direction: column;
     z-index: 1010;
+    flex-shrink: 0; /* 防止flex布局下被压缩 */
 }
 
 /* 侧边栏折叠状态 */
 .sidebar.collapsed {
-    transform: translateX(-100%);  /* 向左移出视口 */
     width: 0;
+    min-width: 0;
     padding: 0;
     margin: 0;
     overflow: hidden;
 }
 
-/* 侧边栏头部 */
+/* 侧边栏头部样式调整 */
 .sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 15px;
     position: sticky;
     top: 0;
     background: white;
-    z-index: 1;
+    z-index: 1011;
     padding-bottom: 10px;
 }
 
-/* 侧边栏按钮组 */
+/* 侧边栏按钮组样式调整 */
 .sidebar-buttons {
     display: flex;
-    gap: 5px;
-    margin-bottom: 10px;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+}
+
+/* 关闭侧边栏按钮 - 默认隐藏 */
+.close-sidebar {
+    display: none;
+    padding: 8px;
+    cursor: pointer;
+    color: #666;
+    transition: color 0.3s;
+}
+
+.close-sidebar:hover {
+    color: #333;
+}
+
+.close-sidebar svg {
+    width: 24px;  /* 增大移动端关闭按钮的图标尺寸 */
+    height: 24px;
+}
+
+/* 更新展开/折叠按钮的基础样式 - 修改为透明/无色背景 */
+.toggle-sidebar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 4px;
+    margin-right: 12px;
+    cursor: pointer;
+    background: transparent; /* 确保背景透明 */
+    border: none;
+    border-radius: 4px;
+    color: #666; /* 图标颜色 */
+    transition: color 0.2s ease;
+    position: static;
+}
+
+/* 悬停效果只改变颜色，不改变位置和背景 */
+.toggle-sidebar:hover {
+    color: #333;
+    background: transparent;
+}
+
+/* 确保所有可能导致位置变化的样式被重置 */
+.toggle-sidebar::before,
+.sidebar.collapsed + .toggle-sidebar::before {
+    content: none;
+    display: none;
+}
+
+/* 重置所有悬停和状态样式 */
+.toggle-sidebar:hover,
+.toggle-sidebar:active,
+.toggle-sidebar:focus,
+.sidebar.collapsed + .toggle-sidebar {
+    transform: none !important;
+    background-color: transparent !important;
+    width: 32px !important;
+    left: auto;
+    position: static;
+}
+
+/* 聊天标题区域调整 */
+.chat-title {
+    display: flex;
+    align-items: center;
+    padding: 8px 15px; /* 减小上下内边距 */
+    background: white;
+    border-radius: 0; /* 改为直角 */
+    margin-bottom: 0;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    margin-top: 0; /* 确保紧贴顶部 */
+    height: 40px; /* 固定高度 */
+}
+
+.chat-title-text {
+    flex: 1;
+    text-align: center;
+    font-size: 1.1em; /* 稍微减小字体大小 */
+    font-weight: 500;
+    margin-right: 32px;
 }
 
 /* 会话列表容器 */
@@ -109,63 +202,28 @@ body {
     padding-top: 10px;
 }
 
-/* 侧边栏切换按钮 */
+/* 侧边栏切换按钮 - 确保背景透明 */
 .toggle-sidebar {
-    position: fixed !important;
-    left: 200px;
-    top: 50%;
-    width: 24px;
-    height: 40px;
-    line-height: 40px;
-    text-align: center;
-    font-size: 16px;
-    border-radius: 0 4px 4px 0;
-    margin: 0;
-    padding: 0;
-    transform: translate(0, -50%) !important;
-    transition: left 0.3s ease, background-color 0.3s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1020;
-    box-shadow: 2px 0 5px rgba(0, 0, 0, 0.2);
-}
-
-/* 侧边栏切换按钮悬停效果 */
-.toggle-sidebar:hover {
-    background-color: #5a4ec9;
-    transform: translate(0, -50%) !important;
-}
-
-/* 侧边栏切换按钮点击效果 */
-.toggle-sidebar:active {
-    background-color: #4a3e9c;
-    transform: translate(0, -50%) !important;
+    position: static;
+    background-color: transparent !important; /* 添加!important确保覆盖其他样式 */
 }
 
 /* 侧边栏切换按钮箭头 */
 .toggle-sidebar::before {
-    content: "\276E";  /* 左箭头Unicode */
-    position: relative;
-    left: 0px;
+    content: none;
 }
 
-/* 侧边栏折叠时的切换按钮位置 */
-.sidebar.collapsed + .toggle-sidebar {
-    left: 0;
-}
-
-/* 侧边栏折叠时的切换按钮箭头 */
-.sidebar.collapsed + .toggle-sidebar::before {
-    content: "\276F";  /* 右箭头Unicode */
-    left: 0px;
+/* 侧边栏切换按钮悬停效果 */
+.toggle-sidebar:hover {
+    background-color: transparent;
+    transform: none;
 }
 
 /* 聊天容器 */
 .chat-container {
     flex: 1;
     border: 1px solid rgba(156, 39, 176, 0.2);
-    border-radius: 12px;
+    border-radius: 0; /* 改为直角 */
     padding: 20px;
     overflow-y: auto;
     margin-bottom: 20px;
@@ -214,25 +272,28 @@ body {
 #userInput {
     flex: 1;
     min-height: 20px;
-    max-height: 80px;
+    max-height: 120px;
     padding: 8px 12px;
-    border: 1px solid rgba(156, 39, 176, 0.2);
+    border: 1px solid #ccc;
     border-radius: 6px;
     transition: all 0.3s ease;
     font-size: 16px;
-    resize: none;  /* 禁止手动调整大小 */
+    resize: none;
     overflow-y: auto;
     line-height: 1.5;
     white-space: pre-wrap;
     word-wrap: break-word;
     min-width: 20px;
+    background-color: white;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 /* 输入框焦点状态 */
 #userInput:focus {
     outline: none;
     border-color: #9c27b0;
-    box-shadow: 0 0 0 2px rgba(156, 39, 176, 0.1);
+    box-shadow: 0 0 0 2px rgba(156, 39, 176, 0.1), inset 0 1px 3px rgba(0, 0, 0, 0.1);
+    min-height: 60px; /* 聚焦时增加最小高度 */
 }
 
 /* 深度思考按钮 */
@@ -346,6 +407,11 @@ button.styled-button:active {
 /* 侧边栏按钮 */
 .sidebar-buttons button {
     background-color: #6c5ce7;
+    white-space: nowrap; /* 防止文字换行 */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-height: 38px; /* 固定最小高度 */
+    height: 38px; /* 固定高度 */
 }
 
 /* 侧边栏按钮悬停效果 */
@@ -379,6 +445,8 @@ button.styled-button:active {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    height: auto; /* 自动高度 */
+    min-height: 40px; /* 设置最小高度 */
 }
 
 /* 会话列表按钮悬停效果 */
@@ -395,16 +463,18 @@ button.styled-button:active {
 }
 
 /* ================ 消息样式 ================ */
-/* 基础消息样式 */
+/* 修改消息基础样式 */
 .message {
-    margin-bottom: 15px;
+    margin: 0;
     padding: 12px 16px;
     border-radius: 12px;
     max-width: 80%;
-    width: fit-content;
+    width: fit-content; /* 自适应内容宽度 */
     word-wrap: break-word;
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-    transition: all 0.2s ease;
+    transition: none;
+    font-size: 14px;
+    line-height: 1.5;
 }
 
 /* 用户消息样式 */
@@ -412,7 +482,6 @@ button.styled-button:active {
     background-color: #666666;
     color: white;
     margin-left: auto;
-    margin-right: 0;
 }
 
 /* 助手消息样式 */
@@ -420,30 +489,43 @@ button.styled-button:active {
     background-color: #f5f5f5;
     color: #4a4a4a;
     margin-right: auto;
-    margin-left: 0;
 }
 
 /* 消息时间戳 */
 .message-time {
     font-size: 12px;
     color: #888;
-    margin: 4px 0;
+    margin-bottom: 4px;
+}
+
+.assistant-message-container .message-time {
+    text-align: left;
+}
+
+/* 消息内容行样式 - 修复用户消息头像在右侧 */
+.message-content-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    width: 100%;
 }
 
 /* 用户消息容器 */
 .user-message-container {
     display: flex;
     flex-direction: column;
+    margin-bottom: 15px;
+    width: 100%;
     align-items: flex-end;
-    margin-bottom: 10px;
 }
 
 /* 助手消息容器 */
 .assistant-message-container {
     display: flex;
     flex-direction: column;
+    margin-bottom: 15px;
+    width: 100%;
     align-items: flex-start;
-    margin-bottom: 10px;
 }
 
 /* 系统消息和错误消息 */
@@ -612,93 +694,118 @@ tr:hover {
     }
 
     .main-content {
-        padding: 10px;
+        margin-left: 0;
         width: 100%;
-        padding-left: 10px;
-        padding-right: 10px;
-        padding-bottom: 20px;
+        padding: 0 10px 20px 10px;
     }
 
-    /* 侧边栏调整 */
     .sidebar {
         position: fixed;
         top: 0;
         left: 0;
         height: 100%;
-        width: 80%;
-        max-width: 240px;
+        width: 85%;
+        max-width: 300px;
+        min-width: auto; /* 在移动端移除最小宽度限制 */
         z-index: 1000;
         padding: 15px;
-        transform: translateX(0);
-        transition: transform 0.3s ease;
-    }
-
-    .sidebar.collapsed {
         transform: translateX(-100%);
-        width: 0;
-        padding: 0;
+        box-shadow: 2px 0 15px rgba(0, 0, 0, 0.1);
     }
 
-    /* 切换按钮调整 */
+    .sidebar.expanded {
+        transform: translateX(0);
+    }
+
+    .close-sidebar {
+        display: block; /* 在移动端显示关闭按钮 */
+    }
+
     .toggle-sidebar {
-        position: fixed !important;
-        top: 50%;
-        width: 20px;
-        height: 40px;
-        border-radius: 0 4px 4px 0;
-        background-color: rgba(108, 92, 231, 0.9);
-        box-shadow: 2px 0 5px rgba(0, 0, 0, 0.3);
-        transform: translate(0, -50%) !important;
-        transition: left 0.3s ease;
-        z-index: 1020;
+        margin-right: 8px;
     }
 
-    .sidebar.collapsed + .toggle-sidebar {
-        left: 0 !important;
+    .chat-title {
+        height: 36px; /* 移动端更小的标题栏高度 */
+        padding: 6px 10px; /* 调整移动端内边距 */
     }
 
-    .sidebar:not(.collapsed) + .toggle-sidebar {
-        left: min(calc(80%), 240px) !important;
+    .chat-title-text {
+        margin-right: 24px; /* 移动端稍微减小边距 */
+    }
+
+    /* 遮罩层样式 */
+    #sidebar-overlay {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 999;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+        backdrop-filter: blur(2px);
+    }
+
+    #sidebar-overlay.active {
+        display: block;
+        opacity: 1;
     }
 
     /* 消息样式调整 */
     .message {
-        max-width: 85%;
+        max-width: 75%; /* 移动端稍微减小最大宽度 */
+        width: fit-content; /* 确保不会强制占满整行 */
+        font-size: 14px;
         padding: 10px 14px;
+    }
+
+    /* 用户消息容器在移动设备上的调整 */
+    .user-message-container .message-content-row {
+        justify-content: flex-end; /* 确保用户消息靠右对齐 */
+        width: 100%;
+    }
+
+    /* 助手消息容器在移动设备上的调整 */
+    .assistant-message-container .message-content-row {
+        justify-content: flex-start; /* 确保助手消息靠左对齐 */
+        width: 100%;
     }
 
     /* 输入区域调整 */
     .input-area {
         padding: 8px;
     }
-    
+
     .controls-row {
         margin-bottom: 8px;
     }
-    
+
     .input-container {
         padding: 8px;
     }
-    
+
     #userInput {
         padding: 6px 10px;
         font-size: 15px;
         min-height: 36px;
     }
-    
+
     .deep-thinking {
         padding: 2px 8px;
         font-size: 12px;
         height: 22px;
     }
-    
+
     .model-select {
         padding: 2px 20px 2px 8px;
         font-size: 12px;
         height: 22px;
         background-position: right 6px center;
     }
-    
+
     .send-button {
         height: 36px;
         min-width: 50px;
@@ -723,10 +830,30 @@ tr:hover {
         font-size: 0.9em;
         padding: 10px;
     }
-    
+
     .thinking-content::before,
     .answer-content::before {
         font-size: 0.8em;
+    }
+
+    /* 移除任何可能影响按钮位置的fixed定位 */
+    .toggle-sidebar.fixed {
+        position: static !important;
+    }
+
+    .toggle-sidebar svg {
+        width: 24px;  /* 增大移动端展开按钮的图标尺寸 */
+        height: 24px;
+    }
+
+    .toggle-sidebar,
+    .toggle-sidebar:hover,
+    .toggle-sidebar.fixed,
+    .toggle-sidebar:hover.fixed {
+        position: static !important;
+        transform: none !important;
+        width: 32px !important;
+        background-color: transparent !important;
     }
 }
 
@@ -743,9 +870,10 @@ tr:hover {
     }
 
     .message {
-        max-width: 90%;
-        padding: 8px 12px;
+        max-width: 80%; /* 在更小的屏幕上适当调整最大宽度 */
+        width: fit-content;
         font-size: 14px;
+        padding: 8px 12px;
     }
 
     .sidebar {
@@ -765,23 +893,23 @@ tr:hover {
         padding: 6px;
         gap: 6px;
     }
-    
+
     #userInput {
         min-height: 32px;
     }
-    
+
     .deep-thinking {
         font-size: 11px;
         padding: 2px 6px;
         height: 20px;
     }
-    
+
     .model-select {
         font-size: 11px;
         padding: 2px 18px 2px 6px;
         height: 20px;
     }
-    
+
     .send-button {
         min-width: 45px;
         padding: 0 10px;
@@ -867,12 +995,12 @@ tr:hover {
         padding: 15px;
         width: 85%;
     }
-    
+
     .confirm-dialog p {
         font-size: 14px;
         margin-bottom: 15px;
     }
-    
+
     .confirm-dialog-buttons button {
         min-width: 80px;
         padding: 8px 12px;
@@ -886,9 +1014,9 @@ tr:hover {
     margin: 5px 0;
     padding: 12px;
     border-radius: 8px;
-    font-size: 0.85em;
+    font-size: 14px; /* 固定字号 */
+    line-height: 1.5; /* 固定行高 */
     color: #ffffff;
-    line-height: 1.2;
     position: relative;
 }
 
@@ -933,6 +1061,8 @@ tr:hover {
 /* 回答内容样式 */
 .answer-content {
     color: #2c3e50;
+    font-size: 14px; /* 固定字号 */
+    line-height: 1.5; /* 固定行高 */
 }
 
 /* 思考中的动画效果 */
@@ -955,14 +1085,21 @@ img {
     margin: 10px; /* 外边距 */
 }
 
-/* 代码块容器样式 */
+/* 代码块样式 */
 pre {
     position: relative;
     background-color: #f8f9fa;
     border-radius: 6px;
     margin: 1em 0;
-    padding-top: 2.5em; /* 为头部留出空间 */
+    padding-top: 2.5em;
     overflow: hidden;
+    font-size: 13px; /* 固定代码块字号 */
+    line-height: 1.45; /* 固定代码块行高 */
+}
+
+pre code {
+    font-size: inherit; /* 继承父元素字号 */
+    line-height: inherit; /* 继承父元素行高 */
 }
 
 /* 代码块头部样式 */
@@ -1009,4 +1146,241 @@ pre {
 /* 复制成功状态 */
 .copy-button.success .copy-icon {
     color: #00ff3b;
+}
+
+/* 聊天标题样式 */
+.chat-title {
+    background-color: white;
+    padding: 15px;
+    text-align: center;
+    font-size: 1.2em;
+    font-weight: 500;
+    border-bottom: none;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    border-radius: 12px 12px 0 0;
+    margin-bottom: 0;
+}
+
+/* 分隔符样式 */
+.control-separator {
+    color: #aaa;
+    font-size: 16px;
+    margin: 0 6px;
+}
+
+/* 温度控制样式调整 */
+.temperature-control {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    background-color: #eef1ff;
+    border-radius: 16px;
+    padding: 2px 8px;
+    height: 24px;
+}
+
+.temperature-label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
+    color: #2b7af6;
+}
+
+.temperature-control input {
+    width: 40px;
+    border: none;
+    background: transparent;
+    color: #2b7af6;
+    font-size: 13px;
+    padding: 0 2px;
+    appearance: textfield;
+    -moz-appearance: textfield;
+    text-align: center;
+}
+
+.temperature-buttons {
+    display: flex;
+    flex-direction: column;
+    margin-left: 2px;
+}
+
+.temperature-buttons button {
+    border: none;
+    background: transparent;
+    color: #2b7af6;
+    padding: 0;
+    height: 12px;
+    line-height: 8px;
+    font-size: 8px;
+    cursor: pointer;
+}
+
+.temperature-buttons button:hover {
+    color: #1a5fd1;
+}
+
+/* 温度信息图标样式 */
+.temperature-info {
+    margin: 0;
+}
+
+.temperature-info:hover {
+    color: #1a5fd1;
+}
+
+/* 温度信息弹窗样式调整 */
+.temperature-tooltip {
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    transform: none;
+    margin-bottom: 8px;
+    background: white;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    z-index: 1000;
+    width: 300px;
+    display: none;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+.temperature-tooltip.show {
+    display: block;
+}
+
+.temperature-tooltip table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 8px;
+}
+
+.temperature-tooltip th,
+.temperature-tooltip td {
+    padding: 6px;
+    text-align: left;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.temperature-tooltip h4 {
+    margin-top: 0;
+    margin-bottom: 8px;
+    color: #333;
+}
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+    .temperature-control {
+        padding: 2px 6px;
+        height: 22px;
+    }
+
+    .temperature-label {
+        font-size: 12px;
+    }
+
+    .temperature-control input {
+        width: 36px;
+        font-size: 12px;
+    }
+
+    .control-separator {
+        margin: 0 4px;
+    }
+}
+
+/* 消息头像样式 */
+.message-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.user-avatar {
+    background: #6c5ce7;
+}
+
+.assistant-avatar {
+    background: linear-gradient(135deg, #9c27b0, #673ab7);
+}
+
+/* 会话列表项样式 */
+.chat-list-item {
+    margin: 5px 0;
+}
+
+.chat-list-item button {
+    width: 100%;
+    background-color: #f0f0f0;
+    color: #333;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    padding: 10px 12px;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.3s, color 0.3s;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.chat-list-item button:hover {
+    background-color: #e0e0e0;
+    color: #000;
+}
+
+.chat-list-item button.active {
+    background-color: #e3f2fd;
+    color: #007bff;
+    font-weight: bold;
+}
+
+/* 删除按钮样式 */
+.chat-delete-btn {
+    opacity: 0.6;
+    color: #666;
+    transition: opacity 0.3s, color 0.3s;
+    display: flex;
+    align-items: center;
+    padding: 4px;
+    border-radius: 4px;
+}
+
+.chat-delete-btn:hover {
+    opacity: 1;
+    color: #ff4757;
+}
+
+/* 无色图标 - 图标完全透明 */
+.toggle-sidebar svg {
+    color: transparent;
+    stroke: #666; /* 仅保留图标轮廓 */
+}
+
+.toggle-sidebar:hover svg {
+    stroke: #333; /* 悬停时轮廓颜色变深 */
+}
+
+/* 主内容区域跟随侧边栏变化 */
+body:has(.sidebar.collapsed) .main-content {
+    margin-left: 0; /* 侧边栏折叠时取消左边距 */
+}
+
+/* 针对不支持:has选择器的浏览器提供备用方案 */
+@supports not selector(:has(*)) {
+    .main-content.full-width {
+        margin-left: 0;
+        width: 100%;
+    }
 }

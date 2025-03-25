@@ -23,6 +23,9 @@ let currentThinkingContent = ''; // 用于存储思考内容
 let currentAnswerContent = ''; // 用于存储回答内容
 let thinkingStartTime = null; // 记录思考开始时间
 
+// 添加全局变量
+let currentTemperature = 1.3;
+
 // 页面加载时初始化
 window.onload = function () {
     // 配置 marked
@@ -46,22 +49,39 @@ window.onload = function () {
 
     // 初始化页面
     initializePage();
-    
+
     // 初始化响应式布局
     const isMobile = window.innerWidth <= 768;
     const sidebar = document.getElementById('sidebar');
-    
+
     // 在移动设备上默认折叠侧边栏
     if (isMobile && !sidebar.classList.contains('collapsed')) {
         sidebar.classList.add('collapsed');
     }
-    
+
     // 添加输入框事件监听
     const textarea = document.getElementById('userInput');
     textarea.addEventListener('input', autoResizeTextarea);
-    
+
+    // 添加输入框失去焦点事件
+    textarea.addEventListener('blur', function() {
+        if (this.value.trim() === '') {
+            this.style.height = 'auto'; // 如果输入框为空，重置高度
+        }
+    });
+
     // 初始化代码块处理
     initializeCodeBlocks();
+
+    // 设置默认温度系数
+    const storedTemperature = localStorage.getItem('currentTemperature');
+    if (storedTemperature) {
+        currentTemperature = parseFloat(storedTemperature);
+        document.getElementById('temperatureInput').value = currentTemperature;
+    } else {
+        currentTemperature = 1.3;
+        document.getElementById('temperatureInput').value = currentTemperature;
+    }
 };
 
 // 将页面初始化逻辑移到单独的函数
@@ -113,9 +133,14 @@ function newChat() {
     chats[currentChatId] = [];
     localStorage.setItem('lastChatId', currentChatId);
     updateChatList();
+
+    // 立即更新UI，确保标题显示"新会话"
     document.getElementById('chatContainer').innerHTML = '';
+    document.getElementById('chatTitle').textContent = '新会话';
+
     saveChats();
 
+    // 显示创建成功的提示
     const tipDiv = document.createElement('div');
     tipDiv.className = 'system-message';
     tipDiv.textContent = `新会话`;
@@ -124,7 +149,6 @@ function newChat() {
     setTimeout(() => {
         tipDiv.remove();
     }, 3000);
-
 }
 
 // 更新会话列表
@@ -132,22 +156,82 @@ function updateChatList() {
     const chatList = document.getElementById('chatList');
     chatList.innerHTML = '';
     Object.keys(chats).forEach(chatId => {
+        const chatItem = document.createElement('div');
+        chatItem.className = 'chat-list-item';
+        chatItem.id = `chat-${chatId}`;
+
+        // 创建会话按钮
         const button = document.createElement('button');
-        button.id = `chat-${chatId}`;  // 添加 ID
-        // 获取会话的第一条消息作为标题
+        button.onclick = () => switchChat(chatId);
+
+        // 创建会话标题容器
+        const titleSpan = document.createElement('span');
         const firstMessage = chats[chatId].find(msg => msg.role === 'user');
         const title = firstMessage
             ? firstMessage.content.slice(0, 12) + (firstMessage.content.length > 12 ? '...' : '')
             : `新会话`;
+        titleSpan.textContent = title;
 
-        button.textContent = title;
-        button.onclick = () => switchChat(chatId);
-        button.style.margin = '5px 0';
-        button.style.width = '100%';
+        // 创建删除按钮
+        const deleteBtn = document.createElement('span');
+        deleteBtn.className = 'chat-delete-btn';
+        deleteBtn.innerHTML = `
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 6h18"></path>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
+                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+        `;
+        deleteBtn.onclick = (e) => {
+            e.stopPropagation();
+            deleteSingleChat(chatId);
+        };
+
         if (chatId === currentChatId) {
-            button.style.backgroundColor = '#e3f2fd';
+            button.classList.add('active');
         }
-        chatList.appendChild(button);
+
+        button.appendChild(titleSpan);
+        button.appendChild(deleteBtn);
+        chatItem.appendChild(button);
+        chatList.appendChild(chatItem);
+    });
+}
+
+// 添加删除单个会话的函数
+function deleteSingleChat(chatId) {
+    // 创建确认对话框
+    const confirmDialog = document.createElement('div');
+    confirmDialog.className = 'confirm-dialog';
+    confirmDialog.innerHTML = `
+        <div class="confirm-dialog-content">
+            <p>确定要删除这个会话吗？</p>
+            <div class="confirm-dialog-buttons">
+                <button id="confirmDelete" class="styled-button">确认删除</button>
+                <button id="cancelDelete" class="styled-button">取消</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(confirmDialog);
+
+    // 添加确认和取消按钮的事件监听
+    document.getElementById('confirmDelete').addEventListener('click', function() {
+        delete chats[chatId];
+        localStorage.setItem('chats', JSON.stringify(chats));
+
+        // 如果删除的是当前会话，创建新会话
+        if (chatId === currentChatId) {
+            newChat();
+        } else {
+            updateChatList();
+        }
+
+        confirmDialog.remove();
+        showNotification('会话已删除');
+    });
+
+    document.getElementById('cancelDelete').addEventListener('click', function() {
+        confirmDialog.remove();
     });
 }
 
@@ -295,11 +379,12 @@ function sendMessage(retryMessage = null) {
 
     const requestData = {
         messages: [
-            {role: 'system', content: 'You are a helpful assistant.'}, // 系统消息
-            ...chats[currentChatId] // 当前会话的消息
+            {role: 'system', content: 'You are a helpful assistant.'},
+            ...chats[currentChatId]
         ],
-        model: currentModel, // 当前选择的模型
-        deepThinking: isDeepThinking // 深度思考模式
+        model: currentModel,
+        deepThinking: isDeepThinking,
+        temperature: currentTemperature // 添加温度参数
     };
 
     isResponding = true; // 设置响应状态为true
@@ -537,6 +622,9 @@ function displayMessages(messages) {
     const container = document.getElementById('chatContainer');
     container.innerHTML = '';
 
+    // 更新聊天标题
+    updateChatTitle(messages);
+
     messages.forEach(msg => {
         const messageContainer = document.createElement('div');
         messageContainer.className = `${msg.role}-message-container`;
@@ -547,9 +635,29 @@ function displayMessages(messages) {
         timeDiv.textContent = msg.time || new Date().toLocaleString('zh-CN');
         messageContainer.appendChild(timeDiv);
 
+        // 创建消息内容行
+        const contentRow = document.createElement('div');
+        contentRow.className = 'message-content-row';
+
         // 创建消息内容div
         const contentDiv = document.createElement('div');
         contentDiv.className = `message ${msg.role}-message`;
+
+        // 添加头像
+        const avatar = document.createElement('div');
+        avatar.className = `message-avatar ${msg.role}-avatar`;
+        avatar.innerHTML = msg.role === 'user' ?
+            '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><circle cx="12" cy="8" r="5"/><path d="M3 21v-2a7 7 0 0 1 7-7h4a7 7 0 0 1 7 7v2"/></svg>' :
+            '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>';
+
+        // 根据消息角色确定内容和头像的顺序
+        if (msg.role === 'user') {
+            contentRow.appendChild(contentDiv);
+            contentRow.appendChild(avatar);
+        } else {
+            contentRow.appendChild(avatar);
+            contentRow.appendChild(contentDiv);
+        }
 
         if (msg.isError || msg.isTimeout) {
             contentDiv.className = 'error-message';
@@ -595,26 +703,8 @@ function displayMessages(messages) {
                     contentDiv.appendChild(answerDiv);
                 }
 
-                // 处理表格
-                contentDiv.querySelectorAll('table').forEach(table => {
-                    if (!table.parentElement.classList.contains('table-container')) {
-                        const wrapper = document.createElement('div');
-                        wrapper.className = 'table-container';
-                        table.parentNode.insertBefore(wrapper, table);
-                        wrapper.appendChild(table);
-                    }
-                });
-
-                // 处理代码块
-                contentDiv.querySelectorAll('pre code').forEach(block => {
-                    // 获取语言
-                    const language = block.className.replace(/language-/, '').trim();
-                    if (language) {
-                        block.parentElement.setAttribute('data-language', language);
-                    }
-                    // 应用高亮
-                    hljs.highlightBlock(block);
-                });
+                // 处理表格和代码块
+                processMessageContent(contentDiv);
 
             } catch (e) {
                 console.error('Markdown 渲染失败:', e);
@@ -625,74 +715,91 @@ function displayMessages(messages) {
             contentDiv.textContent = msg.content;
         }
 
-        messageContainer.appendChild(contentDiv);
+        messageContainer.appendChild(contentRow);
         container.appendChild(messageContainer);
     });
 
     container.scrollTop = container.scrollHeight;
-    
+
     // 在渲染完消息后初始化代码块
     initializeCodeBlocks();
+}
+
+// 添加处理消息内容的辅助函数
+function processMessageContent(contentDiv) {
+    // 处理表格
+    contentDiv.querySelectorAll('table').forEach(table => {
+        if (!table.parentElement.classList.contains('table-container')) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'table-container';
+            table.parentNode.insertBefore(wrapper, table);
+            wrapper.appendChild(table);
+        }
+    });
+
+    // 处理代码块
+    contentDiv.querySelectorAll('pre code').forEach(block => {
+        // 获取语言
+        const language = block.className.replace(/language-/, '').trim();
+        if (language) {
+            block.parentElement.setAttribute('data-language', language);
+        }
+        // 应用高亮
+        hljs.highlightBlock(block);
+    });
+}
+
+// 添加更新聊天标题的函数
+function updateChatTitle(messages) {
+    const chatTitle = document.getElementById('chatTitle');
+    const firstUserMessage = messages.find(msg => msg.role === 'user');
+    chatTitle.textContent = firstUserMessage ?
+        (firstUserMessage.content.slice(0, 20) + (firstUserMessage.content.length > 20 ? '...' : '')) :
+        '新会话';
 }
 
 // 修改侧边栏切换功能
 function toggleSidebar() {
     const sidebar = document.getElementById('sidebar');
-    const button = document.getElementById('toggleButton');
     const mainContent = document.querySelector('.main-content');
     const isMobile = window.innerWidth <= 768;
 
     sidebar.classList.toggle('collapsed');
-
-    // 在移动设备上
     if (isMobile) {
-        if (sidebar.classList.contains('collapsed')) {
-            button.style.left = '0';
-            mainContent.style.width = '100%';
-        } else {
-            // 获取实际宽度
-            const sidebarRect = sidebar.getBoundingClientRect();
-            button.style.left = `${sidebarRect.width}px`;
-            mainContent.style.width = '100%';
-        }
-    } else {
-        // 在桌面设备上
-        const sidebarWidth = sidebar.classList.contains('collapsed') ? 0 : 200;
-        button.style.left = `${sidebarWidth}px`;
-        mainContent.style.width = sidebar.classList.contains('collapsed') ? '100%' : `calc(100% - ${sidebarWidth}px)`;
+        sidebar.classList.toggle('expanded');
+        handleOverlay(!sidebar.classList.contains('collapsed'));
     }
 
-    // 处理遮罩层
-    handleOverlay(sidebar.classList.contains('collapsed'));
+    // 调整主内容区域宽度
+    if (!isMobile) {
+        mainContent.style.width = sidebar.classList.contains('collapsed') ? '100%' : `calc(100% - 260px)`;
+    }
 }
 
-// 添加遮罩层处理函数
-function handleOverlay(isCollapsed) {
-    // 移除现有遮罩层
-    const existingOverlay = document.getElementById('sidebar-overlay');
-    if (existingOverlay) {
-        existingOverlay.remove();
-    }
+// 改进遮罩层处理
+function handleOverlay(show) {
+    let overlay = document.getElementById('sidebar-overlay');
 
-    // 如果是移动设备且侧边栏展开，添加遮罩层
-    if (window.innerWidth <= 768 && !isCollapsed) {
-        const overlay = document.createElement('div');
-        overlay.id = 'sidebar-overlay';
-        overlay.style.position = 'fixed';
-        overlay.style.top = '0';
-        overlay.style.left = '0';
-        overlay.style.width = '100%';
-        overlay.style.height = '100%';
-        overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-        overlay.style.zIndex = '999';
-        overlay.style.transition = 'opacity 0.3s ease';
+    if (show) {
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'sidebar-overlay';
+            document.body.appendChild(overlay);
 
-        // 点击遮罩层关闭侧边栏
-        overlay.addEventListener('click', function() {
-            toggleSidebar();
+            overlay.addEventListener('click', () => {
+                toggleSidebar();
+            });
+        }
+        // 强制重绘后添加活动类
+        requestAnimationFrame(() => {
+            overlay.classList.add('active');
         });
-
-        document.body.appendChild(overlay);
+    } else if (overlay) {
+        overlay.classList.remove('active');
+        // 等待动画完成后移除元素
+        setTimeout(() => {
+            overlay.remove();
+        }, 300);
     }
 }
 
@@ -700,34 +807,26 @@ function handleOverlay(isCollapsed) {
 window.addEventListener('resize', function() {
     const sidebar = document.getElementById('sidebar');
     const mainContent = document.querySelector('.main-content');
-    const button = document.getElementById('toggleButton');
     const isMobile = window.innerWidth <= 768;
 
-    // 在移动设备上
     if (isMobile) {
         mainContent.style.width = '100%';
-
-        if (sidebar.classList.contains('collapsed')) {
-            button.style.left = '0';
-        } else {
-            // 获取实际宽度
-            const sidebarRect = sidebar.getBoundingClientRect();
-            button.style.left = `${sidebarRect.width}px`;
-
-            // 确保遮罩层存在
-            handleOverlay(false);
+        if (!sidebar.classList.contains('collapsed')) {
+            handleOverlay(true);
         }
     } else {
-        // 在桌面设备上
-        const sidebarWidth = sidebar.classList.contains('collapsed') ? 0 : 200;
-        button.style.left = `${sidebarWidth}px`;
-        mainContent.style.width = sidebar.classList.contains('collapsed') ? '100%' : `calc(100% - ${sidebarWidth}px)`;
+        mainContent.style.width = sidebar.classList.contains('collapsed') ? '100%' : `calc(100% - 260px)`;
+        handleOverlay(false);
+    }
+});
 
-        // 移除遮罩层
-        const overlay = document.getElementById('sidebar-overlay');
-        if (overlay) {
-            overlay.remove();
-        }
+// 页面加载时初始化侧边栏状态
+window.addEventListener('load', function() {
+    const isMobile = window.innerWidth <= 768;
+    const sidebar = document.getElementById('sidebar');
+
+    if (isMobile) {
+        sidebar.classList.add('collapsed');
     }
 });
 
@@ -860,10 +959,10 @@ function handleKeyPress(event) {
 // 自动调整输入框高度
 function autoResizeTextarea() {
     const textarea = document.getElementById('userInput');
-    
+
     // 重置高度以获取正确的scrollHeight
     textarea.style.height = 'auto';
-    
+
     // 设置新高度，但不超过最大高度
     const newHeight = Math.min(textarea.scrollHeight, 120);
     textarea.style.height = newHeight + 'px';
@@ -882,14 +981,14 @@ function addCopyButton(preBlock) {
     // 创建头部容器
     const header = document.createElement('div');
     header.className = 'code-header';
-    
+
     // 添加语言标签
     const languageSpan = document.createElement('span');
     languageSpan.className = 'code-language';
-    
+
     // 获取并处理语言标识
     let language = preBlock.querySelector('code').className;
-    
+
     // 清理语言标识中的额外后缀
     language = language
         .replace('language-', '')
@@ -897,7 +996,7 @@ function addCopyButton(preBlock) {
         .replace('hljs', '')
         .replace('language-xml', 'xml')
         .trim();
-    
+
     // 语言映射对象
     const languageMap = {
         'js': 'JavaScript',
@@ -932,17 +1031,17 @@ function addCopyButton(preBlock) {
 
     // 获取格式化后的语言名称
     let displayLanguage = languageMap[language.toLowerCase()] || language.toUpperCase() || 'Plain Text';
-    
+
     // 检查是否包含多个语言标识
     const languageParts = displayLanguage.split(' ');
     if (languageParts.length > 1) {
         // 如果包含多个语言标识，只保留第一个
         displayLanguage = languageParts[0];
     }
-    
+
     languageSpan.textContent = displayLanguage;
     header.appendChild(languageSpan);
-    
+
     // 创建复制按钮
     const button = document.createElement('button');
     button.className = 'copy-button';
@@ -951,10 +1050,10 @@ function addCopyButton(preBlock) {
             <path fill="currentColor" d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
         </svg>
     `;
-    
+
     button.addEventListener('click', async () => {
         const code = preBlock.querySelector('code').textContent;
-        
+
         try {
             await navigator.clipboard.writeText(code);
             button.innerHTML = `
@@ -963,7 +1062,7 @@ function addCopyButton(preBlock) {
                 </svg>
             `;
             button.classList.add('success');
-            
+
             setTimeout(() => {
                 button.innerHTML = `
                     <svg class="copy-icon" viewBox="0 0 24 24" width="18" height="18">
@@ -976,7 +1075,104 @@ function addCopyButton(preBlock) {
             console.error('复制失败:', err);
         }
     });
-    
+
     header.appendChild(button);
     preBlock.insertBefore(header, preBlock.firstChild);
+}
+
+// 改进温度系数提示函数
+function toggleTemperatureInfo() {
+    const tooltip = document.querySelector('.temperature-tooltip');
+
+    if (!tooltip) {
+        // 创建提示内容
+        const tooltipContent = `
+            <div class="temperature-tooltip">
+                <h4>温度系数推荐设置</h4>
+                <p>根据不同场景，我们建议您使用以下温度系数：</p>
+                <table>
+                    <tr><td><strong>场景</strong></td><td><strong>温度系数</strong></td></tr>
+                    <tr><td>代码生成/数学解题</td><td><button onclick="applyTemperature(0.0)">0.0</button></td></tr>
+                    <tr><td>数据抽取/分析</td><td><button onclick="applyTemperature(1.0)">1.0</button></td></tr>
+                    <tr><td>通用对话</td><td><button onclick="applyTemperature(1.3)">1.3</button></td></tr>
+                    <tr><td>翻译</td><td><button onclick="applyTemperature(1.3)">1.3</button></td></tr>
+                    <tr><td>创意类写作/诗歌创作</td><td><button onclick="applyTemperature(1.5)">1.5</button></td></tr>
+                </table>
+                <p style="font-size: 12px; margin-top: 8px;">点击数值可直接应用对应系数</p>
+            </div>
+        `;
+        document.querySelector('.temperature-control').insertAdjacentHTML('beforeend', tooltipContent);
+
+        // 添加样式到表格按钮
+        const btns = document.querySelectorAll('.temperature-tooltip button');
+        btns.forEach(btn => {
+            btn.style.background = '#eef1ff';
+            btn.style.border = 'none';
+            btn.style.color = '#2b7af6';
+            btn.style.padding = '2px 8px';
+            btn.style.borderRadius = '4px';
+            btn.style.cursor = 'pointer';
+        });
+
+        // 获取新创建的提示元素
+        const newTooltip = document.querySelector('.temperature-tooltip');
+        newTooltip.classList.add('show');
+
+        // 添加点击其他区域关闭提示的功能
+        setTimeout(() => {
+            document.addEventListener('click', closeTooltipOnOutsideClick);
+        }, 100);
+    } else {
+        tooltip.classList.toggle('show');
+
+        if (tooltip.classList.contains('show')) {
+            setTimeout(() => {
+                document.addEventListener('click', closeTooltipOnOutsideClick);
+            }, 100);
+        } else {
+            document.removeEventListener('click', closeTooltipOnOutsideClick);
+        }
+    }
+}
+
+// 添加点击外部关闭提示的处理函数
+function closeTooltipOnOutsideClick(event) {
+    const tooltip = document.querySelector('.temperature-tooltip');
+    const temperatureControl = document.querySelector('.temperature-control');
+
+    if (tooltip && !temperatureControl.contains(event.target)) {
+        tooltip.classList.remove('show');
+        document.removeEventListener('click', closeTooltipOnOutsideClick);
+    }
+}
+
+// 添加一键应用温度系数的函数
+function applyTemperature(value) {
+    currentTemperature = value;
+    document.getElementById('temperatureInput').value = value;
+    const tooltip = document.querySelector('.temperature-tooltip');
+    if (tooltip) {
+        tooltip.classList.remove('show');
+    }
+    showNotification(`已设置温度系数为 ${value}`);
+}
+
+// 更新温度值时保存到本地存储
+function updateTemperature(value) {
+    const numValue = parseFloat(value);
+    if (!isNaN(numValue) && numValue >= 0 && numValue <= 2) {
+        currentTemperature = Math.round(numValue * 10) / 10;
+        document.getElementById('temperatureInput').value = currentTemperature;
+        localStorage.setItem('currentTemperature', currentTemperature);
+    }
+}
+
+// 调整温度值时保存到本地存储
+function adjustTemperature(delta) {
+    const newValue = Math.round((currentTemperature + delta) * 10) / 10;
+    if (newValue >= 0 && newValue <= 2) {
+        currentTemperature = newValue;
+        document.getElementById('temperatureInput').value = currentTemperature;
+        localStorage.setItem('currentTemperature', currentTemperature);
+    }
 }
