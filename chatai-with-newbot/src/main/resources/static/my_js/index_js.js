@@ -26,12 +26,21 @@ let thinkingStartTime = null; // 记录思考开始时间
 // 添加全局变量
 let currentTemperature = 1.3;
 
+// 添加模型温度系数支持映射
+const modelTemperatureSupport = {
+    'deepseek': true,  // 官方源支持温度系数
+    'ali-deepseek': false,
+    'qwen-max': false,
+    'qwen-plus': false,
+    'qwen-turbo': false
+};
+
 // 页面加载时初始化
 window.onload = function () {
     // 配置 marked
     marked.setOptions({
-        gfm: true, // GitHub Flavored Markdown
-        breaks: true, // 允许回车换行
+        gfm: true,
+        breaks: true,
         headerIds: false,
         mangle: false,
         highlight: function (code, lang) {
@@ -46,6 +55,19 @@ window.onload = function () {
             }
         }
     });
+
+    // 创建设置弹窗 - 移到前面
+    createSettingsModal();
+
+    // 设置默认温度系数
+    const storedTemperature = localStorage.getItem('currentTemperature');
+    if (storedTemperature) {
+        currentTemperature = parseFloat(storedTemperature);
+        document.getElementById('temperatureInput').value = currentTemperature;
+    } else {
+        currentTemperature = 1.3;
+        document.getElementById('temperatureInput').value = currentTemperature;
+    }
 
     // 初始化页面
     initializePage();
@@ -66,22 +88,15 @@ window.onload = function () {
     // 添加输入框失去焦点事件
     textarea.addEventListener('blur', function() {
         if (this.value.trim() === '') {
-            this.style.height = 'auto'; // 如果输入框为空，重置高度
+            this.style.height = 'auto';
         }
     });
 
     // 初始化代码块处理
     initializeCodeBlocks();
 
-    // 设置默认温度系数
-    const storedTemperature = localStorage.getItem('currentTemperature');
-    if (storedTemperature) {
-        currentTemperature = parseFloat(storedTemperature);
-        document.getElementById('temperatureInput').value = currentTemperature;
-    } else {
-        currentTemperature = 1.3;
-        document.getElementById('temperatureInput').value = currentTemperature;
-    }
+    // 初始化温度设置状态
+    updateTemperatureSettingsState();
 };
 
 // 将页面初始化逻辑移到单独的函数
@@ -246,6 +261,7 @@ function toggleDeepThinking() {
 function switchModel() {
     const select = document.getElementById('modelSelect');
     currentModel = select.value;
+    updateTemperatureSettingsState();
 
     const modelNames = {
         'ali-deepseek': 'DeepSeek-V3(ali源-稳定)',
@@ -1174,5 +1190,77 @@ function adjustTemperature(delta) {
         currentTemperature = newValue;
         document.getElementById('temperatureInput').value = currentTemperature;
         localStorage.setItem('currentTemperature', currentTemperature);
+    }
+}
+
+// 添加设置弹窗HTML
+function createSettingsModal() {
+    const modal = document.createElement('div');
+    modal.className = 'settings-modal';
+    modal.innerHTML = `
+        <div class="settings-content">
+            <div class="settings-header">
+                <h3>设置</h3>
+                <div class="settings-close" onclick="toggleSettings()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </div>
+            </div>
+            <div class="settings-section">
+                <div class="settings-item" id="temperatureSettings">
+                    <span>温度系数：</span>
+                    <div class="temperature-control">
+                        <input type="number" 
+                            id="temperatureInput" 
+                            value="1.3" 
+                            step="0.1" 
+                            min="0" 
+                            max="2"
+                            onchange="updateTemperature(this.value)"
+                        >
+                        <div class="temperature-buttons">
+                            <button onclick="adjustTemperature(0.1)" class="temp-up">▲</button>
+                            <button onclick="adjustTemperature(-0.1)" class="temp-down">▼</button>
+                        </div>
+                    </div>
+                    <div class="temperature-info" onclick="toggleTemperatureInfo()">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <path d="M12 16v-4"></path>
+                            <path d="M12 8h.01"></path>
+                        </svg>
+                    </div>
+                </div>
+                <div class="settings-tip">注：仅官方源DeepSeek模型支持温度系数调节</div>
+                <br/><br/><br/><br/>
+                <div class="settings-tip">v1.0.5.25326</div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
+
+// 切换设置弹窗显示状态
+function toggleSettings() {
+    const modal = document.querySelector('.settings-modal');
+    if (!modal) {
+        createSettingsModal();
+        updateTemperatureSettingsState();
+    } else {
+        modal.classList.toggle('active');
+    }
+}
+
+// 更新温度设置状态
+function updateTemperatureSettingsState() {
+    const temperatureSettings = document.getElementById('temperatureSettings');
+    const currentModel = document.getElementById('modelSelect').value;
+
+    if (modelTemperatureSupport[currentModel]) {
+        temperatureSettings.classList.remove('disabled');
+    } else {
+        temperatureSettings.classList.add('disabled');
     }
 }
