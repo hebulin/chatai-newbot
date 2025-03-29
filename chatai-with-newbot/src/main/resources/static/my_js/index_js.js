@@ -695,65 +695,71 @@ function displayMessages(messages) {
         if (msg.role === 'user') {
             contentRow.appendChild(contentDiv);
             contentRow.appendChild(avatar);
+
+            // 修改这里：为用户消息添加格式化处理
+            const formattedContent = msg.content
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/\n/g, '<br>')
+                .replace(/\s/g, '&nbsp;');
+            contentDiv.innerHTML = formattedContent;
+
         } else {
             contentRow.appendChild(avatar);
             contentRow.appendChild(contentDiv);
-        }
 
-        if (msg.isError || msg.isTimeout) {
-            contentDiv.className = 'error-message';
-            contentDiv.textContent = msg.content;
-        } else if (msg.role === 'system') {
-            contentDiv.className = 'system-message';
-            contentDiv.textContent = msg.content;
-        } else if (msg.role === 'assistant') {
-            try {
-                // 检查是否包含思考内容
-                if (msg.reasoning_content) {
-                    const thinkingDiv = document.createElement('div');
-                    thinkingDiv.className = 'thinking-content';
-
-                    // 添加思考状态标签
-                    const statusDiv = document.createElement('div');
-                    statusDiv.className = 'thinking-status';
-                    statusDiv.innerHTML = msg.interrupted
-                        ? `回答被中断，已深度思考 用时${msg.thinkingTime || '未知'}秒 <span class="thinking-toggle">﹀</span>`
-                        : `已深度思考 用时${msg.thinkingTime || '未知'}秒 <span class="thinking-toggle">﹀</span>`;
-
-                    // 添加点击事件
-                    statusDiv.addEventListener('click', function() {
-                        thinkingDiv.classList.toggle('collapsed');
-                    });
-
-                    thinkingDiv.appendChild(statusDiv);
-
-                    // 添加思考内容
-                    const thinkingText = document.createElement('div');
-                    thinkingText.className = 'thinking-content-text';
-                    thinkingText.innerHTML = marked.parse(msg.reasoning_content);
-                    thinkingDiv.appendChild(thinkingText);
-
-                    contentDiv.appendChild(thinkingDiv);
-                }
-
-                // 如果有回答内容，添加回答内容区域
-                if (msg.content) {
-                    const answerDiv = document.createElement('div');
-                    answerDiv.className = 'answer-content';
-                    answerDiv.innerHTML = marked.parse(msg.content);
-                    contentDiv.appendChild(answerDiv);
-                }
-
-                // 处理表格和代码块
-                processMessageContent(contentDiv);
-
-            } catch (e) {
-                console.error('Markdown 渲染失败:', e);
+            if (msg.isError || msg.isTimeout) {
+                contentDiv.className = 'error-message';
                 contentDiv.textContent = msg.content;
+            } else if (msg.role === 'system') {
+                contentDiv.className = 'system-message';
+                contentDiv.textContent = msg.content;
+            } else if (msg.role === 'assistant') {
+                try {
+                    // 检查是否包含思考内容
+                    if (msg.reasoning_content) {
+                        const thinkingDiv = document.createElement('div');
+                        thinkingDiv.className = 'thinking-content';
+
+                        // 添加思考状态标签
+                        const statusDiv = document.createElement('div');
+                        statusDiv.className = 'thinking-status';
+                        statusDiv.innerHTML = msg.interrupted
+                            ? `回答被中断，已深度思考 用时${msg.thinkingTime || '未知'}秒 <span class="thinking-toggle">﹀</span>`
+                            : `已深度思考 用时${msg.thinkingTime || '未知'}秒 <span class="thinking-toggle">﹀</span>`;
+
+                        // 添加点击事件
+                        statusDiv.addEventListener('click', function() {
+                            thinkingDiv.classList.toggle('collapsed');
+                        });
+
+                        thinkingDiv.appendChild(statusDiv);
+
+                        // 添加思考内容
+                        const thinkingText = document.createElement('div');
+                        thinkingText.className = 'thinking-content-text';
+                        thinkingText.innerHTML = marked.parse(msg.reasoning_content);
+                        thinkingDiv.appendChild(thinkingText);
+
+                        contentDiv.appendChild(thinkingDiv);
+                    }
+
+                    // 如果有回答内容，添加回答内容区域
+                    if (msg.content) {
+                        const answerDiv = document.createElement('div');
+                        answerDiv.className = 'answer-content';
+                        answerDiv.innerHTML = marked.parse(msg.content);
+                        contentDiv.appendChild(answerDiv);
+                    }
+
+                    // 处理表格和代码块
+                    processMessageContent(contentDiv);
+
+                } catch (e) {
+                    console.error('Markdown 渲染失败:', e);
+                    contentDiv.textContent = msg.content;
+                }
             }
-        } else {
-            // 用户消息直接显示文本
-            contentDiv.textContent = msg.content;
         }
 
         messageContainer.appendChild(contentRow);
