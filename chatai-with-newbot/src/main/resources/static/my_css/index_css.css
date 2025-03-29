@@ -285,15 +285,16 @@ body {
     align-items: center;
 }
 
-/* 输入框样式 */
+/* 修改输入框样式 */
 #userInput {
     flex: 1;
-    min-height: 20px;
-    max-height: 120px;
+    height: 40px; /* 设置固定高度 */
+    min-height: 40px; /* 设置最小高度 */
+    max-height: 40px; /* 设置最大高度，确保不会变化 */
     padding: 8px 12px;
     border: 1px solid #ccc;
     border-radius: 6px;
-    transition: all 0.3s ease;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease; /* 只保留边框和阴影的过渡效果 */
     font-size: 16px;
     resize: none;
     overflow-y: auto;
@@ -305,12 +306,11 @@ body {
     box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
-/* 输入框焦点状态 */
+/* 修改输入框焦点状态 - 只保留边框和阴影变化 */
 #userInput:focus {
     outline: none;
     border-color: #9c27b0;
     box-shadow: 0 0 0 2px rgba(156, 39, 176, 0.1), inset 0 1px 3px rgba(0, 0, 0, 0.1);
-    min-height: 60px; /* 聚焦时增加最小高度 */
 }
 
 /* 深度思考按钮 */
@@ -499,6 +499,9 @@ button.styled-button:active {
     background-color: #666666;
     color: white;
     margin-left: auto;
+    white-space: pre-wrap; /* 保留空格和换行 */
+    word-wrap: break-word; /* 确保长单词也会换行 */
+    font-family: monospace; /* 使用等宽字体，更适合显示代码 */
 }
 
 /* 助手消息样式 */
