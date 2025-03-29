@@ -1515,3 +1515,45 @@ body:has(.sidebar.collapsed) .main-content {
     color: #666;
     margin-top: 4px;
 }
+
+/* 添加助手消息加载动画样式 */
+.assistant-loading {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 15px;
+    background-color: #f5f5f5;
+    border-radius: 12px;
+    margin-bottom: 15px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+    width: fit-content;
+}
+
+.loading-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: #9c27b0;
+    animation: loadingWave 1.4s infinite ease-in-out;
+}
+
+.loading-dot:nth-child(1) {
+    animation-delay: 0s;
+}
+
+.loading-dot:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.loading-dot:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+@keyframes loadingWave {
+    0%, 100% {
+        transform: translateY(0);
+    }
+    50% {
+        transform: translateY(-6px);
+    }
+}

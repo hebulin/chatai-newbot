@@ -383,13 +383,33 @@ function sendMessage(retryMessage = null) {
     };
 
     if (!retryMessage) {
-        chats[currentChatId].push(userMessage); // 将用户消息添加到当前会话
-        displayMessages(chats[currentChatId]); // 显示消息
-        updateChatList(); // 更新会话列表
-        input.value = ''; // 清空输入框
-        input.style.height = 'auto'; // 重置输入框高度
+        chats[currentChatId].push(userMessage);
+        displayMessages(chats[currentChatId]);
+        updateChatList();
+        input.value = '';
+        input.style.height = 'auto';
+
+        // 添加加载动画
+        const chatContainer = document.getElementById('chatContainer');
+        const loadingDiv = document.createElement('div');
+        loadingDiv.className = 'message-content-row';
+        loadingDiv.innerHTML = `
+            <div class="message-avatar assistant-avatar">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M12 16v-4"/>
+                    <path d="M12 8h.01"/>
+                </svg>
+            </div>
+            <div class="assistant-loading">
+                <div class="loading-dot"></div>
+                <div class="loading-dot"></div>
+                <div class="loading-dot"></div>
+            </div>
+        `;
+        chatContainer.appendChild(loadingDiv);
+        chatContainer.scrollTop = chatContainer.scrollHeight;
     } else {
-        // 重试时，确保用户的消息重新显示
         displayMessages(chats[currentChatId]);
     }
 
@@ -450,6 +470,11 @@ function sendMessage(retryMessage = null) {
         .then(response => {
             if (!response.ok) {
                 throw new Error(`服务器响应错误: ${response.status} ${response.statusText}`);
+            }
+            // 收到响应后移除加载动画
+            const loadingDiv = document.querySelector('.message-content-row:last-child');
+            if (loadingDiv && loadingDiv.querySelector('.assistant-loading')) {
+                loadingDiv.remove();
             }
             return response;
         })
