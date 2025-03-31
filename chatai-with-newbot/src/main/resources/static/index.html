@@ -14,27 +14,55 @@
 </head>
 <body>
 <div class="sidebar" id="sidebar">
-    <div class="sidebar-header">
-        <div class="sidebar-buttons">
-            <button class="styled-button" onclick="newChat()">新建会话</button>
-            <button class="styled-button" onclick="deleteAllChats()">删除会话</button>
+    <div class="sidebar-content">
+        <div class="sidebar-header">
+            <div class="sidebar-buttons">
+                <button class="styled-button" onclick="newChat()">新建会话</button>
+                <button class="styled-button" onclick="deleteAllChats()">删除会话</button>
+            </div>
+            <!-- 添加关闭按钮 - 移动端显示 -->
+            <div class="close-sidebar" onclick="toggleSidebar()">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </div>
+        </div>
+        <!-- 会话列表容器 -->
+        <div class="chat-list-container" id="chatList"></div>
+        <div class="export-container">
+            <button class="styled-button" onclick="exportChats()">导出会话</button>
         </div>
     </div>
-    <!-- 会话列表容器 -->
-    <div class="chat-list-container" id="chatList"></div>
-    <div class="export-container">
-        <button class="styled-button" onclick="exportChats()">导出会话</button>
-    </div>
 </div>
-<!-- 侧边栏切换按钮 -->
-<button class="toggle-sidebar styled-button" id="toggleButton" onclick="toggleSidebar()"></button>
 
 <!-- 主要内容区域 -->
 <div class="main-content">
+    <div class="chat-title">
+        <!-- 修改展开/折叠按钮的SVG图标 -->
+        <div class="toggle-sidebar" onclick="toggleSidebar()">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="3" y1="12" x2="21" y2="12"></line>
+                <line x1="3" y1="6" x2="21" y2="6"></line>
+                <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+        </div>
+        <div class="chat-title-text" id="chatTitle">新会话</div>
+    </div>
+
     <div class="chat-container" id="chatContainer"></div>
     <div class="input-area">
         <div class="controls-row">
-            <div class="deep-thinking" id="deepThinking" onclick="toggleDeepThinking()">深度思考</div>
+            <div style="display: flex; align-items: center; gap: 4px;">
+                <div class="deep-thinking" id="deepThinking" onclick="toggleDeepThinking()">深度思考</div>
+                <div class="control-separator">|</div>
+                <div class="settings-button" onclick="toggleSettings()">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                    </svg>
+                </div>
+            </div>
             <select id="modelSelect" class="model-select" onchange="switchModel()">
                 <option value="ali-deepseek">DeepSeek-V3(ali源-稳定)</option>
                 <option value="deepseek">DeepSeek-V3(官方源-慢)</option>
