@@ -1138,7 +1138,7 @@ pre code {
 
 /* 语言标签样式 */
 .code-language {
-    font-size: 0.7em;
+    font-size: 0.9em;
     color: #ffffff; /* 改为白色文字 */
     font-family: Arial, sans-serif; /* 修改字体 */
 }

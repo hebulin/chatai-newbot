@@ -1046,38 +1046,38 @@ function addCopyButton(preBlock) {
 
     // 语言映射对象
     const languageMap = {
-        'js': 'JavaScript',
-        'javascript': 'JavaScript',
-        'py': 'Python',
-        'python': 'Python',
-        'html': 'HTML',
-        'css': 'CSS',
-        'java': 'Java',
-        'cpp': 'C++',
-        'c': 'C',
-        'csharp': 'C#',
-        'cs': 'C#',
-        'php': 'PHP',
-        'ruby': 'Ruby',
-        'go': 'Go',
-        'rust': 'Rust',
-        'swift': 'Swift',
-        'kotlin': 'Kotlin',
-        'ts': 'TypeScript',
-        'typescript': 'TypeScript',
-        'shell': 'Shell',
-        'bash': 'Bash',
-        'sql': 'SQL',
-        'json': 'JSON',
-        'xml': 'XML',
-        'yaml': 'YAML',
-        'yml': 'YAML',
-        'md': 'Markdown',
-        'markdown': 'Markdown'
+        'js': 'javascript',
+        'javascript': 'javascript',
+        'py': 'python',
+        'python': 'python',
+        'html': 'html',
+        'css': 'css',
+        'java': 'java',
+        'cpp': 'c++',
+        'c': 'c',
+        'csharp': 'c#',
+        'cs': 'c#',
+        'php': 'php',
+        'ruby': 'ruby',
+        'go': 'go',
+        'rust': 'rust',
+        'swift': 'swift',
+        'kotlin': 'kotlin',
+        'ts': 'typescript',
+        'typescript': 'typescript',
+        'shell': 'shell',
+        'bash': 'bash',
+        'sql': 'sql',
+        'json': 'json',
+        'xml': 'xml',
+        'yaml': 'yaml',
+        'yml': 'yaml',
+        'md': 'markdown',
+        'markdown': 'markdown'
     };
 
     // 获取格式化后的语言名称
-    let displayLanguage = languageMap[language.toLowerCase()] || language.toUpperCase() || 'Plain Text';
+    let displayLanguage = languageMap[language.toLowerCase()] || language.toLowerCase() || 'plain text';
 
     // 检查是否包含多个语言标识
     const languageParts = displayLanguage.split(' ');
