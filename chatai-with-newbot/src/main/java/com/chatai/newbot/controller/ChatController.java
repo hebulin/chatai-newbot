@@ -4,18 +4,19 @@ import com.chatai.newbot.enums.ModelEnum;
 import com.chatai.newbot.model.ChatRequest;
 import com.chatai.newbot.service.OfficialDeepSeekV3Service;
 import com.chatai.newbot.service.TongYiService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 
 import static com.chatai.newbot.constant.AiConstant.*;
 
 @RestController
-@RequestMapping("/api/chat")
+@RequestMapping("/api")
 public class ChatController {
+    private static final Logger log = LoggerFactory.getLogger(ChatController.class);
     private final OfficialDeepSeekV3Service officialDeepSeekV3Service;
     private final TongYiService tongYiService;
 
@@ -25,7 +26,13 @@ public class ChatController {
         this.tongYiService = tongYiService;
     }
 
-    @PostMapping(produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @GetMapping("/heartbeat")
+    public ResponseEntity<Void> heartbeat() {
+        log.info("心跳监测heartbeat");
+        return ResponseEntity.ok().build();
+    }
+
+    @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> chat(@RequestBody ChatRequest request) {
         if (request.isDeepThinking()) {
             request.setModel(ModelEnum.getModelValueByName(NAME_DEEP_THINK));
@@ -48,6 +55,5 @@ public class ChatController {
                     return null;
             }
         }
-
     }
 }

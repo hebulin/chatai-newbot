@@ -1277,14 +1277,14 @@ tr:hover {
 
 /* 思考中的动画效果 */
 @keyframes thinking {
-    0% { opacity: 0.6; }
+    0% { opacity: 0.85; }
     50% { opacity: 1; }
-    100% { opacity: 0.6; }
+    100% { opacity: 0.85; }
 }
 
 /* 思考状态激活时的动画 */
 .thinking-status.active {
-    animation: thinking 1.5s infinite;
+    animation: thinking 2s infinite ease-in-out;
 }
 
 img {
@@ -1336,16 +1336,26 @@ pre code {
 
 /* 复制按钮样式 */
 .copy-button {
-    background: #f5f5f5;
-    border: 1px solid #e0e0e0;
-    border-radius: 4px;
-    color: #2c3e50;
-    padding: 4px;
+    background: transparent;
+    border: none;
     cursor: pointer;
+    padding: 0.4em;
+    color: #ffffff; /* 改为白色图标 */
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
-.copy-button:hover {
-    background: #e0e0e0;
+/* 复制图标样式 */
+.copy-icon {
+    width: 1em;
+    height: 1em;
+    transition: all 0.2s ease;
+}
+
+/* 复制成功状态 */
+.copy-button.success .copy-icon {
+    color: #00ff3b;
 }
 
 /* 聊天标题样式 */
@@ -1664,12 +1674,12 @@ body:has(.sidebar.collapsed) .main-content {
 
 /* 思考中的动画效果 */
 @keyframes thinking {
-    0% { opacity: 0.6; }
+    0% { opacity: 0.85; }
     50% { opacity: 1; }
-    100% { opacity: 0.6; }
+    100% { opacity: 0.85; }
 }
 
 /* 思考状态激活时的动画 */
 .thinking-status.active {
-    animation: thinking 1.5s infinite;
+    animation: thinking 2s infinite ease-in-out;
 }
