@@ -318,9 +318,10 @@ body {
     display: inline-flex;
     align-items: center;
     padding: 4px 10px;
-    border-radius: 16px;
-    background: #f3e5f5;
-    color: #9c27b0;
+    background: #e0e0e0;
+    color: #2c3e50;
+    border-radius: 8px;
+    border: 1px solid #d0d0d0;
     cursor: pointer;
     transition: all 0.3s ease;
     font-size: 13px;
@@ -330,24 +331,25 @@ body {
 
 /* 深度思考按钮激活状态 */
 .deep-thinking.active {
-    background: #9c27b0;
+    background: #42b983;
     color: white;
+    border-color: #3aa876;
 }
 
 /* 模型选择下拉框 */
 .model-select {
-    background-color: #eef1ff;
-    border: none;
-    border-radius: 16px;
+    background-color: #f5f5f5;
+    color: #2c3e50;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
     padding: 4px 10px;
     font-size: 13px;
     cursor: pointer;
     transition: all 0.3s;
     height: 24px;
-    color: #2b7af6;
     appearance: none;
     -webkit-appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24'%3E%3Cpath fill='%239c27b0' d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24'%3E%3Cpath fill='%232c3e50' d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: right 8px center;
     padding-right: 24px;
@@ -355,7 +357,8 @@ body {
 
 /* 模型选择下拉框悬停效果 */
 .model-select:hover {
-    background-color: #ffffff;
+    background-color: #e0e0e0;
+    color: #2c3e50;
 }
 
 /* 模型选择下拉框焦点状态 */
@@ -366,93 +369,119 @@ body {
 
 /* 发送按钮 */
 .send-button {
+    background-color: #42b983; /* Vue主题绿色 */
+    color: white;
+    border: 1px solid #3aa876;
     height: 36px;
     min-width: 60px;
     padding: 0 15px;
-    white-space: nowrap;
+    line-height: 34px; /* 添加行高，略小于高度以适应边框 */
+    display: inline-flex; /* 改为inline-flex布局 */
+    align-items: center; /* 垂直居中 */
+    justify-content: center; /* 水平居中 */
+}
+
+.send-button:hover {
+    background-color: #3aa876;
+    color: white;
 }
 
 /* ================ 按钮样式 ================ */
-/* 统一按钮样式 */
+/* 统一按钮样式 - 修改为Vue风格 */
 button.styled-button {
-    background-color: #6c5ce7;
-    color: white;
-    border: none;
-    border-radius: 6px;
-    padding: 10px 18px;
+    background-color: #f5f5f5; /* 浅灰色背景 */
+    color: #2c3e50; /* 深色文字 */
+    border: 1px solid #e0e0e0; /* 浅灰色边框 */
+    border-radius: 8px; /* 更大的圆角 */
+    padding: 0 18px; /* 修改padding，去掉上下padding */
     font-size: 15px;
     cursor: pointer;
     transition: all 0.3s ease;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+    box-shadow: none; /* 移除阴影 */
     font-weight: 500;
+    height: 36px; /* 添加固定高度 */
+    line-height: 36px; /* 添加行高等于高度 */
+    display: inline-flex; /* 改为inline-flex布局 */
+    align-items: center; /* 垂直居中 */
+    justify-content: center; /* 水平居中 */
 }
 
 /* 统一按钮悬停效果 */
 button.styled-button:hover {
-    background-color: #5a4ec9;
-    transform: translateY(-1px);
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+    background-color: #e0e0e0; /* 悬停时稍深的灰色 */
+    color: #2c3e50;
+    transform: none; /* 移除Y轴移动 */
+    box-shadow: none; /* 移除阴影 */
+    border-color: #d0d0d0;
 }
 
 /* 统一按钮点击效果 */
 button.styled-button:active {
-    background-color: #4a3e9c;
-    transform: translateY(0);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    background-color: #d0d0d0;
+    color: #2c3e50;
+    transform: none;
+    box-shadow: none;
 }
 
-/* 特殊按钮样式 */
+/* 特殊按钮样式 - 发送按钮 */
+.send-button {
+    background-color: #42b983; /* Vue主题绿色 */
+    color: white;
+    border: 1px solid #3aa876;
+    height: 36px;
+    min-width: 60px;
+    padding: 0 15px;
+}
+
 .send-button:hover {
-    background-color: #555555;
+    background-color: #3aa876;
+    color: white;
 }
 
 /* 停止状态的发送按钮 */
 .send-button.stop {
     background-color: #ff4757;
-}
-
-/* 侧边栏切换按钮 */
-.toggle-sidebar {
-    background-color: #6c5ce7;
-}
-
-/* 侧边栏切换按钮悬停效果 */
-.toggle-sidebar:hover {
-    background-color: #5a4ec9;
+    border-color: #e84142;
 }
 
 /* 侧边栏按钮 */
 .sidebar-buttons button {
-    background-color: #6c5ce7;
-    white-space: nowrap; /* 防止文字换行 */
+    background-color: #f5f5f5;
+    color: #2c3e50;
+    border: 1px solid #e0e0e0;
+    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    min-height: 38px; /* 固定最小高度 */
-    height: 38px; /* 固定高度 */
+    min-height: 38px;
+    height: 38px;
 }
 
 /* 侧边栏按钮悬停效果 */
 .sidebar-buttons button:hover {
-    background-color: #5a4ec9;
+    background-color: #e0e0e0;
+    color: #2c3e50;
 }
 
 /* 导出容器按钮 */
 .export-container button {
+    background-color: #f5f5f5;
+    color: #2c3e50;
+    border: 1px solid #e0e0e0;
     width: 100%;
-    background-color: #6c5ce7;
 }
 
 /* 导出容器按钮悬停效果 */
 .export-container button:hover {
-    background-color: #5a4ec9;
+    background-color: #e0e0e0;
+    color: #2c3e50;
 }
 
 /* 会话列表按钮 */
 #chatList button {
-    background-color: #f0f0f0;
-    color: #333;
-    border: 1px solid #ccc;
-    border-radius: 5px;
+    background-color: #f5f5f5;
+    color: #2c3e50;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
     padding: 10px 12px;
     margin: 5px 0;
     width: 100%;
@@ -462,14 +491,14 @@ button.styled-button:active {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    height: auto; /* 自动高度 */
-    min-height: 40px; /* 设置最小高度 */
+    height: auto;
+    min-height: 40px;
 }
 
 /* 会话列表按钮悬停效果 */
 #chatList button:hover {
     background-color: #e0e0e0;
-    color: #000;
+    color: #2c3e50;
 }
 
 /* 会话列表按钮激活状态 */
@@ -477,6 +506,214 @@ button.styled-button:active {
     background-color: #e3f2fd;
     color: #007bff;
     font-weight: bold;
+    border-color: #bbdefb;
+}
+
+/* 确认对话框按钮基础样式 */
+.confirm-dialog-buttons button {
+    min-width: 100px;
+    border-radius: 8px;
+}
+
+/* 删除确认按钮 */
+#confirmDelete {
+    background-color: #ff4757;
+    color: white;
+    border: 1px solid #e84142;
+}
+
+#confirmDelete:hover {
+    background-color: #e84142;
+    color: white;
+}
+
+/* 取消按钮 */
+#cancelDelete, #cancelExport {
+    background-color: #f5f5f5;
+    color: #2c3e50;
+    border: 1px solid #e0e0e0;
+}
+
+#cancelDelete:hover, #cancelExport:hover {
+    background-color: #e0e0e0;
+    color: #2c3e50;
+}
+
+/* 导出确认按钮 */
+#confirmExport {
+    background-color: #42b983;
+    color: white;
+    border: 1px solid #3aa876;
+}
+
+#confirmExport:hover {
+    background-color: #3aa876;
+    color: white;
+}
+
+/* 温度控制按钮 */
+.temperature-buttons button {
+    color: #2c3e50;
+    border: none;
+    background: transparent;
+    padding: 0;
+    height: 12px;
+    line-height: 8px;
+    font-size: 8px;
+    cursor: pointer;
+}
+
+.temperature-buttons button:hover {
+    color: #42b983;
+}
+
+/* 设置按钮样式 */
+.settings-button {
+    color: #2c3e50;
+    background-color: #f5f5f5;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.settings-button:hover {
+    color: #42b983;
+    background-color: #e0e0e0;
+}
+
+/* 设置弹窗样式 */
+.settings-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: 2000;
+    align-items: center;
+    justify-content: center;
+}
+
+.settings-modal.active {
+    display: flex;
+}
+
+.settings-content {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    width: 90%;
+    max-width: 400px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.settings-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #eee;
+}
+
+.settings-header h3 {
+    margin: 0;
+    font-size: 18px;
+    color: #333;
+}
+
+.settings-close {
+    cursor: pointer;
+    padding: 4px;
+    color: #666;
+}
+
+.settings-section {
+    margin-bottom: 20px;
+}
+
+.settings-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+}
+
+/* 禁用状态样式 */
+.settings-item.disabled {
+    opacity: 0.5;
+    pointer-events: none;
+    cursor: not-allowed;
+}
+
+.settings-item.disabled .temperature-control {
+    background-color: #f0f0f0;
+}
+
+.settings-item.disabled .temperature-label {
+    color: #999;
+}
+
+/* 提示信息样式 */
+.settings-tip {
+    font-size: 12px;
+    color: #666;
+    margin-top: 4px;
+}
+
+/* 添加助手消息加载动画样式 */
+.assistant-loading {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 15px;
+    background-color: #f5f5f5;
+    border-radius: 12px;
+    margin-bottom: 15px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+    width: fit-content;
+}
+
+.loading-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: #9c27b0;
+    animation: loadingWave 1.4s infinite ease-in-out;
+}
+
+.loading-dot:nth-child(1) {
+    animation-delay: 0s;
+}
+
+.loading-dot:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.loading-dot:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+@keyframes loadingWave {
+    0%, 100% {
+        transform: translateY(0);
+    }
+    50% {
+        transform: translateY(-6px);
+    }
+}
+
+.ai-tips-on-bottom {
+    font-size: 12px;
+    color: rgb(163, 163, 163);
+    line-height: 14px;
+    margin-top: 10px;
+    text-align: center;
 }
 
 /* ================ 消息样式 ================ */
@@ -981,52 +1218,6 @@ tr:hover {
     min-width: 100px;
 }
 
-/* 删除确认按钮 */
-#confirmDelete {
-    background-color: #f44336;
-}
-
-#confirmDelete:hover {
-    background-color: #d32f2f;
-}
-
-/* 取消按钮 */
-#cancelDelete, #cancelExport {
-    background-color: #9e9e9e;
-}
-
-#cancelDelete:hover, #cancelExport:hover {
-    background-color: #757575;
-}
-
-/* 导出确认按钮 */
-#confirmExport {
-    background-color: #4caf50;
-}
-
-#confirmExport:hover {
-    background-color: #388e3c;
-}
-
-/* 移动端确认对话框样式 */
-@media (max-width: 480px) {
-    .confirm-dialog-content {
-        padding: 15px;
-        width: 85%;
-    }
-
-    .confirm-dialog p {
-        font-size: 14px;
-        margin-bottom: 15px;
-    }
-
-    .confirm-dialog-buttons button {
-        min-width: 80px;
-        padding: 8px 12px;
-        font-size: 14px;
-    }
-}
-
 /* 思考内容样式 */
 .thinking-content {
     background-color: #747474;
@@ -1086,14 +1277,14 @@ tr:hover {
 
 /* 思考中的动画效果 */
 @keyframes thinking {
-    0% { opacity: 0.6; }
+    0% { opacity: 0.85; }
     50% { opacity: 1; }
-    100% { opacity: 0.6; }
+    100% { opacity: 0.85; }
 }
 
 /* 思考状态激活时的动画 */
 .thinking-status.active {
-    animation: thinking 1.5s infinite;
+    animation: thinking 2s infinite ease-in-out;
 }
 
 img {
@@ -1138,7 +1329,7 @@ pre code {
 
 /* 语言标签样式 */
 .code-language {
-    font-size: 0.7em;
+    font-size: 0.9em;
     color: #ffffff; /* 改为白色文字 */
     font-family: Arial, sans-serif; /* 修改字体 */
 }
@@ -1229,9 +1420,9 @@ pre code {
 }
 
 .temperature-buttons button {
+    color: #2c3e50;
     border: none;
     background: transparent;
-    color: #2b7af6;
     padding: 0;
     height: 12px;
     line-height: 8px;
@@ -1240,7 +1431,7 @@ pre code {
 }
 
 .temperature-buttons button:hover {
-    color: #1a5fd1;
+    color: #42b983;
 }
 
 /* 温度信息图标样式 */
@@ -1369,18 +1560,21 @@ pre code {
 
 /* 删除按钮样式 */
 .chat-delete-btn {
+    background: #f5f5f5;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    color: #2c3e50;
     opacity: 0.6;
-    color: #666;
     transition: opacity 0.3s, color 0.3s;
     display: flex;
     align-items: center;
     padding: 4px;
-    border-radius: 4px;
 }
 
 .chat-delete-btn:hover {
-    opacity: 1;
+    background: #ffebee;
     color: #ff4757;
+    opacity: 1;
 }
 
 /* 无色图标 - 图标完全透明 */
@@ -1421,142 +1615,71 @@ body:has(.sidebar.collapsed) .main-content {
     }
 }
 
-/* 设置按钮样式 */
-.settings-button {
-    cursor: pointer;
-    padding: 4px;
-    border-radius: 4px;
-    color: #666;
-    transition: all 0.2s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.settings-button:hover {
-    color: #333;
-    background-color: rgba(0, 0, 0, 0.05);
-}
-
-/* 设置弹窗样式 */
-.settings-modal {
-    display: none;
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0, 0, 0, 0.5);
-    z-index: 2000;
-    align-items: center;
-    justify-content: center;
-}
-
-.settings-modal.active {
-    display: flex;
-}
-
-.settings-content {
-    background: white;
-    padding: 20px;
+/* 思考内容样式 */
+.thinking-content {
+    background-color: #747474;
+    margin: 5px 0;
+    padding: 12px;
     border-radius: 8px;
-    width: 90%;
-    max-width: 400px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    font-size: 14px; /* 固定字号 */
+    line-height: 1.5; /* 固定行高 */
+    color: #ffffff;
+    position: relative;
 }
 
-.settings-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 20px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid #eee;
-}
-
-.settings-header h3 {
-    margin: 0;
-    font-size: 18px;
-    color: #333;
-}
-
-.settings-close {
+/* 思考状态样式 */
+.thinking-status {
+    font-size: 0.9em;
+    color: #e0e0e0;
+    margin-bottom: 8px;
     cursor: pointer;
-    padding: 4px;
-    color: #666;
-}
-
-.settings-section {
-    margin-bottom: 20px;
-}
-
-.settings-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 0;
-}
-
-/* 禁用状态样式 */
-.settings-item.disabled {
-    opacity: 0.5;
-    pointer-events: none;
-    cursor: not-allowed;
-}
-
-.settings-item.disabled .temperature-control {
-    background-color: #f0f0f0;
-}
-
-.settings-item.disabled .temperature-label {
-    color: #999;
-}
-
-/* 提示信息样式 */
-.settings-tip {
-    font-size: 12px;
-    color: #666;
-    margin-top: 4px;
-}
-
-/* 添加助手消息加载动画样式 */
-.assistant-loading {
+    user-select: none;
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 15px;
-    background-color: #f5f5f5;
-    border-radius: 12px;
-    margin-bottom: 15px;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-    width: fit-content;
 }
 
-.loading-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background-color: #9c27b0;
-    animation: loadingWave 1.4s infinite ease-in-out;
+/* 思考状态悬停效果 */
+.thinking-status:hover {
+    color: #ffffff;
 }
 
-.loading-dot:nth-child(1) {
-    animation-delay: 0s;
+/* 思考内容折叠状态 */
+.thinking-content.collapsed .thinking-content-text {
+    display: none;
 }
 
-.loading-dot:nth-child(2) {
-    animation-delay: 0.2s;
+/* 思考内容切换箭头 */
+.thinking-toggle {
+    display: inline-block;
+    transition: transform 0.3s ease;
 }
 
-.loading-dot:nth-child(3) {
-    animation-delay: 0.4s;
+/* 思考内容折叠时的箭头旋转 */
+.thinking-content.collapsed .thinking-toggle {
+    transform: rotate(180deg);
 }
 
-@keyframes loadingWave {
-    0%, 100% {
-        transform: translateY(0);
-    }
-    50% {
-        transform: translateY(-6px);
-    }
+/* 思考内容和回答内容的间距 */
+.thinking-content + .answer-content {
+    margin-top: 16px;
+}
+
+/* 回答内容样式 */
+.answer-content {
+    color: #2c3e50;
+    font-size: 14px; /* 固定字号 */
+    line-height: 1.5; /* 固定行高 */
+}
+
+/* 思考中的动画效果 */
+@keyframes thinking {
+    0% { opacity: 0.85; }
+    50% { opacity: 1; }
+    100% { opacity: 0.85; }
+}
+
+/* 思考状态激活时的动画 */
+.thinking-status.active {
+    animation: thinking 2s infinite ease-in-out;
 }

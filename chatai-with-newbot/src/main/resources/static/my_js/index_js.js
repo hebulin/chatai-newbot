@@ -35,6 +35,12 @@ const modelTemperatureSupport = {
     'qwen-turbo': false
 };
 
+// 添加连接状态检查变量和心跳检测变量
+let isConnectionAlive = true;
+let heartbeatInterval = null;
+let retryCount = 0;
+const MAX_RETRIES = 3;
+
 // 页面加载时初始化
 window.onload = function () {
     // 配置 marked
@@ -97,6 +103,16 @@ window.onload = function () {
 
     // 初始化温度设置状态
     updateTemperatureSettingsState();
+
+    // 启动心跳检测
+    startHeartbeat();
+
+    // 在页面关闭时清理心跳检测
+    window.addEventListener('beforeunload', () => {
+        if (heartbeatInterval) {
+            clearInterval(heartbeatInterval);
+        }
+    });
 };
 
 // 将页面初始化逻辑移到单独的函数
@@ -264,8 +280,8 @@ function switchModel() {
     updateTemperatureSettingsState();
 
     const modelNames = {
-        'ali-deepseek': 'DeepSeek-V3(ali源-稳定)',
-        'deepseek': 'DeepSeek-V3(官方源-慢)',
+        'ali-deepseek': 'DeepSeek-V3(ali源)',
+        'deepseek': 'DeepSeek-V3(官方源)',
         'qwen-max': '通义千问-Max(能力最强)',
         'qwen-plus': '通义千问-Plus(能力均衡)',
         'qwen-turbo': '通义千问-Turbo(速度最快)'
@@ -429,11 +445,16 @@ function sendMessage(retryMessage = null) {
     sendButton.classList.add('stop'); // 添加停止类
 
     currentController = new AbortController(); // 创建新的控制器
-    activeStreams.set(currentChatId, currentController); // 设置当前会话的控制器
-    let assistantMessage = {role: 'assistant', content: ''}; // 初始化助手消息
+    activeStreams.set(currentChatId, currentController);
+    let assistantMessage = {
+        role: 'assistant',
+        content: '',
+        time: null // 初始化时不设置时间戳
+    }; // 初始化助手消息
     messageBuffers.set(currentChatId, assistantMessage); // 设置当前会话的消息缓冲
 
     let hasResponse = false;  // 添加标志，用于跟踪是否收到任何回答
+    let isThinkingComplete = false; // 添加标志，用于跟踪思考是否完成
 
     // 添加超时处理
     const timeout = setTimeout(() => {
@@ -476,6 +497,9 @@ function sendMessage(retryMessage = null) {
             if (loadingDiv && loadingDiv.querySelector('.assistant-loading')) {
                 loadingDiv.remove();
             }
+
+            // 重置重试计数
+            retryCount = 0;
             return response;
         })
         .then(response => {
@@ -496,8 +520,8 @@ function sendMessage(retryMessage = null) {
                         if (currentThinkingContent || currentAnswerContent) {
                             assistantMessage.reasoning_content = currentThinkingContent;
                             assistantMessage.content = currentAnswerContent;
-                            assistantMessage.time = new Date().toLocaleString('zh-CN');
-                            if (thinkingStartTime) {
+                            // 如果思考时间还未设置（异常情况），在这里设置
+                            if (thinkingStartTime && !assistantMessage.thinkingTime) {
                                 assistantMessage.thinkingTime = Math.round((Date.now() - thinkingStartTime) / 1000);
                             }
                             if (!chats[currentChatId].includes(assistantMessage)) {
@@ -532,17 +556,27 @@ function sendMessage(retryMessage = null) {
                                     const jsonData = JSON.parse(line);
                                     if (jsonData.choices && jsonData.choices[0].delta) {
                                         const delta = jsonData.choices[0].delta;
-                                        hasResponse = true;
+                                        if (!hasResponse) {
+                                            hasResponse = true;
+                                            // 在收到第一个响应时设置时间戳
+                                            assistantMessage.time = new Date().toLocaleString('zh-CN');
+                                        }
 
                                         // 处理思考内容
                                         if (delta.reasoning_content) {
                                             if (!thinkingStartTime) {
                                                 thinkingStartTime = Date.now();
+                                                isThinkingComplete = false;
                                             }
                                             currentThinkingContent += delta.reasoning_content;
                                             assistantMessage.reasoning_content = currentThinkingContent;
                                             contentUpdated = true;
+                                        } else if (delta.content && !isThinkingComplete && thinkingStartTime) {
+                                            // 当开始接收正文内容且思考尚未标记完成时，标记思考完成
+                                            isThinkingComplete = true;
+                                            assistantMessage.thinkingTime = Math.round((Date.now() - thinkingStartTime) / 1000);
                                         }
+
                                         // 处理回答内容
                                         if (delta.content) {
                                             currentAnswerContent += delta.content;
@@ -567,14 +601,7 @@ function sendMessage(retryMessage = null) {
 
                                                         // 添加思考状态标签
                                                         const statusDiv = document.createElement('div');
-                                                        statusDiv.className = 'thinking-status' + (delta.reasoning_content ? ' active' : '');
-
-                                                        if (delta.reasoning_content) {
-                                                            statusDiv.innerHTML = '正在深度思考中... <span class="thinking-toggle">﹀</span>';
-                                                        } else {
-                                                            const thinkingTime = Math.round((Date.now() - thinkingStartTime) / 1000);
-                                                            statusDiv.innerHTML = `已深度思考 用时${thinkingTime}秒 <span class="thinking-toggle">﹀</span>`;
-                                                        }
+                                                        statusDiv.className = 'thinking-status';
 
                                                         // 添加点击事件
                                                         statusDiv.addEventListener('click', function() {
@@ -647,9 +674,25 @@ function sendMessage(retryMessage = null) {
                 }
                 resetSendButton();
                 return;
+            } else if ((error.message.includes('Failed to fetch') ||
+                    error.message.includes('NetworkError') ||
+                    error.message.includes('服务器响应错误')) &&
+                retryCount < MAX_RETRIES) {
+
+                retryCount++;
+                // 自动重试
+                setTimeout(() => {
+                    sendMessage(retryMessage || {
+                        role: 'user',
+                        content: message,
+                        time: new Date().toLocaleString('zh-CN')
+                    });
+                }, 1000 * retryCount);
+
+            } else {
+                clearTimeout(timeout);
+                handleError(error, requestData);
             }
-            clearTimeout(timeout);  // 清除超时计时器
-            handleError(error, requestData); // 处理错误
         });
 }
 
@@ -724,9 +767,17 @@ function displayMessages(messages) {
                         // 添加思考状态标签
                         const statusDiv = document.createElement('div');
                         statusDiv.className = 'thinking-status';
-                        statusDiv.innerHTML = msg.interrupted
-                            ? `回答被中断，已深度思考 用时${msg.thinkingTime || '未知'}秒 <span class="thinking-toggle">﹀</span>`
-                            : `已深度思考 用时${msg.thinkingTime || '未知'}秒 <span class="thinking-toggle">﹀</span>`;
+
+                        if (msg.interrupted) {
+                            statusDiv.innerHTML = `回答被中断 <span class="thinking-toggle">﹀</span>`;
+                        } else if (msg.thinkingTime) {
+                            // 如果有思考时间，说明思考已完成
+                            statusDiv.innerHTML = `已深度思考 用时${msg.thinkingTime}秒 <span class="thinking-toggle">﹀</span>`;
+                        } else {
+                            // 如果没有思考时间，说明正在思考中
+                            statusDiv.className += ' active';
+                            statusDiv.innerHTML = '正在深度思考中... <span class="thinking-toggle">﹀</span>';
+                        }
 
                         // 添加点击事件
                         statusDiv.addEventListener('click', function() {
@@ -1046,38 +1097,38 @@ function addCopyButton(preBlock) {
 
     // 语言映射对象
     const languageMap = {
-        'js': 'JavaScript',
-        'javascript': 'JavaScript',
-        'py': 'Python',
-        'python': 'Python',
-        'html': 'HTML',
-        'css': 'CSS',
-        'java': 'Java',
-        'cpp': 'C++',
-        'c': 'C',
-        'csharp': 'C#',
-        'cs': 'C#',
-        'php': 'PHP',
-        'ruby': 'Ruby',
-        'go': 'Go',
-        'rust': 'Rust',
-        'swift': 'Swift',
-        'kotlin': 'Kotlin',
-        'ts': 'TypeScript',
-        'typescript': 'TypeScript',
-        'shell': 'Shell',
-        'bash': 'Bash',
-        'sql': 'SQL',
-        'json': 'JSON',
-        'xml': 'XML',
-        'yaml': 'YAML',
-        'yml': 'YAML',
-        'md': 'Markdown',
-        'markdown': 'Markdown'
+        'js': 'javascript',
+        'javascript': 'javascript',
+        'py': 'python',
+        'python': 'python',
+        'html': 'html',
+        'css': 'css',
+        'java': 'java',
+        'cpp': 'c++',
+        'c': 'c',
+        'csharp': 'c#',
+        'cs': 'c#',
+        'php': 'php',
+        'ruby': 'ruby',
+        'go': 'go',
+        'rust': 'rust',
+        'swift': 'swift',
+        'kotlin': 'kotlin',
+        'ts': 'typescript',
+        'typescript': 'typescript',
+        'shell': 'shell',
+        'bash': 'bash',
+        'sql': 'sql',
+        'json': 'json',
+        'xml': 'xml',
+        'yaml': 'yaml',
+        'yml': 'yaml',
+        'md': 'markdown',
+        'markdown': 'markdown'
     };
 
     // 获取格式化后的语言名称
-    let displayLanguage = languageMap[language.toLowerCase()] || language.toUpperCase() || 'Plain Text';
+    let displayLanguage = languageMap[language.toLowerCase()] || language.toLowerCase() || 'plain text';
 
     // 检查是否包含多个语言标识
     const languageParts = displayLanguage.split(' ');
@@ -1266,7 +1317,7 @@ function createSettingsModal() {
                 </div>
                 <div class="settings-tip">注：仅官方源DeepSeek模型支持温度系数调节</div>
                 <br/><br/><br/><br/>
-                <div class="settings-tip">v1.0.6.25331</div>
+                <div class="settings-tip">v1.0.6.25409</div>
             </div>
         </div>
     `;
@@ -1293,5 +1344,60 @@ function updateTemperatureSettingsState() {
         temperatureSettings.classList.remove('disabled');
     } else {
         temperatureSettings.classList.add('disabled');
+    }
+}
+
+// 添加心跳检测函数
+function startHeartbeat() {
+    if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+    }
+
+    heartbeatInterval = setInterval(async () => {
+        try {
+            const response = await fetch('/api/heartbeat', {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            isConnectionAlive = response.ok;
+        } catch (error) {
+            isConnectionAlive = false;
+            console.warn('Heartbeat failed:', error);
+        }
+    }, 30000); // 每30秒检查一次
+}
+
+// 添加自动重试函数
+async function retryRequest(requestData, retryCount = 0) {
+    try {
+        const response = await fetch('/api/chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestData)
+        });
+
+        if (!response.ok) {
+            throw new Error(`服务器响应错误: ${response.status} ${response.statusText}`);
+        }
+
+        // 重置重试计数
+        retryCount = 0;
+        return response;
+
+    } catch (error) {
+        if (retryCount < MAX_RETRIES &&
+            (error.message.includes('Failed to fetch') ||
+                error.message.includes('NetworkError') ||
+                error.message.includes('服务器响应错误'))) {
+
+            // 等待一段时间后重试
+            await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
+            return retryRequest(requestData, retryCount + 1);
+        }
+        throw error;
     }
 }
