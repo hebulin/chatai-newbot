@@ -1317,7 +1317,7 @@ function createSettingsModal() {
                 </div>
                 <div class="settings-tip">注：仅官方源DeepSeek模型支持温度系数调节</div>
                 <br/><br/><br/><br/>
-                <div class="settings-tip">v1.0.6.25331</div>
+                <div class="settings-tip">v1.0.6.25409</div>
             </div>
         </div>
     `;
