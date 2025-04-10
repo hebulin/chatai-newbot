@@ -626,13 +626,17 @@ function sendMessage(retryMessage = null) {
                                                         answerDiv.className = 'answer-content';
                                                         answerDiv.innerHTML = marked.parse(currentAnswerContent);
 
-                                                        // 添加模型信息，使用消息中保存的模型信息
+                                                        // 添加复制按钮
+                                                        const copyButton = createCopyButton(currentAnswerContent);
+
+                                                        // 添加模型信息
                                                         const modelInfo = document.createElement('div');
                                                         modelInfo.className = 'model-info';
-                                                        modelInfo.textContent = `使用模型：${msg.usedModel || currentModel}`; // 使用保存的模型信息，如果没有则使用当前模型
-                                                        answerDiv.appendChild(modelInfo);
+                                                        modelInfo.textContent = `使用模型：${assistantMessage.usedModel || currentModel}`;
 
                                                         contentDiv.appendChild(answerDiv);
+                                                        contentDiv.appendChild(modelInfo);
+                                                        contentDiv.appendChild(copyButton);
                                                     }
                                                 }
                                             }
@@ -809,13 +813,17 @@ function displayMessages(messages) {
                         answerDiv.className = 'answer-content';
                         answerDiv.innerHTML = marked.parse(msg.content);
 
-                        // 添加模型信息，使用消息中保存的模型信息
+                        // 添加复制按钮
+                        const copyButton = createCopyButton(msg.content);
+
+                        // 添加模型信息
                         const modelInfo = document.createElement('div');
                         modelInfo.className = 'model-info';
-                        modelInfo.textContent = `使用模型：${msg.usedModel || currentModel}`; // 使用保存的模型信息，如果没有则使用当前模型
-                        answerDiv.appendChild(modelInfo);
+                        modelInfo.textContent = `使用模型：${msg.usedModel || currentModel}`;
 
                         contentDiv.appendChild(answerDiv);
+                        contentDiv.appendChild(modelInfo);
+                        contentDiv.appendChild(copyButton);
                     }
 
                     // 处理表格和代码块
@@ -1415,4 +1423,44 @@ async function retryRequest(requestData, retryCount = 0) {
         }
         throw error;
     }
+}
+
+// 添加复制按钮的公共函数
+function createCopyButton(content) {
+    const copyButton = document.createElement('button');
+    copyButton.className = 'message-copy-button';
+    copyButton.innerHTML = `
+        <svg class="copy-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+        </svg>
+    `;
+
+    // 添加点击事件
+    copyButton.addEventListener('click', async () => {
+        try {
+            await navigator.clipboard.writeText(content);
+            copyButton.classList.add('success');
+            // 更改为对勾图标
+            copyButton.innerHTML = `
+                <svg class="copy-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+            `;
+            setTimeout(() => {
+                copyButton.classList.remove('success');
+                // 恢复原始复制图标
+                copyButton.innerHTML = `
+                    <svg class="copy-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                `;
+            }, 3000);
+        } catch (err) {
+            console.error('复制失败:', err);
+        }
+    });
+
+    return copyButton;
 }
