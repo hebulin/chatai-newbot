@@ -1683,3 +1683,11 @@ body:has(.sidebar.collapsed) .main-content {
 .thinking-status.active {
     animation: thinking 2s infinite ease-in-out;
 }
+
+/* 模型信息标签样式 */
+.model-info {
+    font-size: 12px;
+    color: #888;
+    margin-top: 8px;
+    text-align: left;
+}

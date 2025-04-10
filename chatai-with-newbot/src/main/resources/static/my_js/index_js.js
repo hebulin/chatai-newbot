@@ -558,8 +558,9 @@ function sendMessage(retryMessage = null) {
                                         const delta = jsonData.choices[0].delta;
                                         if (!hasResponse) {
                                             hasResponse = true;
-                                            // 在收到第一个响应时设置时间戳
+                                            // 在收到第一个响应时设置时间戳和使用的模型
                                             assistantMessage.time = new Date().toLocaleString('zh-CN');
+                                            assistantMessage.usedModel = currentModel; // 保存使用的模型信息
                                         }
 
                                         // 处理思考内容
@@ -624,6 +625,13 @@ function sendMessage(retryMessage = null) {
                                                         const answerDiv = document.createElement('div');
                                                         answerDiv.className = 'answer-content';
                                                         answerDiv.innerHTML = marked.parse(currentAnswerContent);
+
+                                                        // 添加模型信息，使用消息中保存的模型信息
+                                                        const modelInfo = document.createElement('div');
+                                                        modelInfo.className = 'model-info';
+                                                        modelInfo.textContent = `使用模型：${msg.usedModel || currentModel}`; // 使用保存的模型信息，如果没有则使用当前模型
+                                                        answerDiv.appendChild(modelInfo);
+
                                                         contentDiv.appendChild(answerDiv);
                                                     }
                                                 }
@@ -800,6 +808,13 @@ function displayMessages(messages) {
                         const answerDiv = document.createElement('div');
                         answerDiv.className = 'answer-content';
                         answerDiv.innerHTML = marked.parse(msg.content);
+
+                        // 添加模型信息，使用消息中保存的模型信息
+                        const modelInfo = document.createElement('div');
+                        modelInfo.className = 'model-info';
+                        modelInfo.textContent = `使用模型：${msg.usedModel || currentModel}`; // 使用保存的模型信息，如果没有则使用当前模型
+                        answerDiv.appendChild(modelInfo);
+
                         contentDiv.appendChild(answerDiv);
                     }
 
