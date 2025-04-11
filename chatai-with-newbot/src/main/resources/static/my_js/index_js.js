@@ -110,10 +110,14 @@ window.onload = function () {
         // 初始化响应式布局
         const isMobile = window.innerWidth <= 768;
         const sidebar = document.getElementById('sidebar');
+        const mainContent = document.querySelector('.main-content');
 
         // 在移动设备上默认折叠侧边栏
-        if (isMobile && !sidebar.classList.contains('collapsed')) {
+        if (isMobile) {
             sidebar.classList.add('collapsed');
+            mainContent.style.width = '100%';
+        } else {
+            mainContent.style.width = sidebar.classList.contains('collapsed') ? '100%' : `calc(100% - 260px)`;
         }
 
         // 添加输入框事件监听
@@ -126,6 +130,19 @@ window.onload = function () {
                 this.style.height = 'auto';
             }
         });
+
+        // 添加移动设备上输入框获取焦点的处理
+        if (isMobile) {
+            textarea.addEventListener('focus', function() {
+                // 滚动容器以显示输入框
+                setTimeout(() => {
+                    document.body.scrollTop = 0;
+                    document.documentElement.scrollTop = 0;
+                    const chatContainer = document.getElementById('chatContainer');
+                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                }, 300);
+            });
+        }
 
         // 初始化代码块处理
         initializeCodeBlocks();
@@ -142,6 +159,9 @@ window.onload = function () {
                 clearInterval(heartbeatInterval);
             }
         });
+
+        // 强制初始滚动到顶部
+        window.scrollTo(0, 0);
     } catch (error) {
         console.error('页面初始化时出错:', error);
     }
@@ -767,7 +787,7 @@ function saveChats() {
     localStorage.setItem('chats', JSON.stringify(chats));
 }
 
-// 修改显示消息函数
+// 修改显示消息函数，确保滚动到底部
 function displayMessages(messages) {
     const container = document.getElementById('chatContainer');
     container.innerHTML = '';
@@ -898,7 +918,13 @@ function displayMessages(messages) {
         container.appendChild(messageContainer);
     });
 
-    container.scrollTop = container.scrollHeight;
+    // 确保在所有消息渲染后滚动到底部
+    setTimeout(() => {
+        container.scrollTop = container.scrollHeight;
+
+        // 强制浏览器重新计算布局
+        window.dispatchEvent(new Event('resize'));
+    }, 50);
 
     // 在渲染完消息后初始化代码块
     initializeCodeBlocks();
@@ -944,6 +970,7 @@ function toggleSidebar() {
     const isMobile = window.innerWidth <= 768;
 
     sidebar.classList.toggle('collapsed');
+
     if (isMobile) {
         sidebar.classList.toggle('expanded');
         handleOverlay(!sidebar.classList.contains('collapsed'));
@@ -953,6 +980,11 @@ function toggleSidebar() {
     if (!isMobile) {
         mainContent.style.width = sidebar.classList.contains('collapsed') ? '100%' : `calc(100% - 260px)`;
     }
+
+    // 强制重新计算布局
+    setTimeout(() => {
+        window.dispatchEvent(new Event('resize'));
+    }, 300);
 }
 
 // 改进遮罩层处理
@@ -977,12 +1009,14 @@ function handleOverlay(show) {
         overlay.classList.remove('active');
         // 等待动画完成后移除元素
         setTimeout(() => {
-            overlay.remove();
+            if (overlay.parentNode) {
+                overlay.parentNode.removeChild(overlay);
+            }
         }, 300);
     }
 }
 
-// 添加窗口大小变化监听
+// 更新窗口大小变化监听
 window.addEventListener('resize', function() {
     const sidebar = document.getElementById('sidebar');
     const mainContent = document.querySelector('.main-content');
@@ -990,23 +1024,114 @@ window.addEventListener('resize', function() {
 
     if (isMobile) {
         mainContent.style.width = '100%';
-        if (!sidebar.classList.contains('collapsed')) {
+        if (!sidebar.classList.contains('collapsed') && !sidebar.classList.contains('expanded')) {
+            sidebar.classList.add('collapsed');
+        } else if (!sidebar.classList.contains('collapsed')) {
             handleOverlay(true);
         }
     } else {
+        sidebar.classList.remove('expanded');
         mainContent.style.width = sidebar.classList.contains('collapsed') ? '100%' : `calc(100% - 260px)`;
         handleOverlay(false);
     }
 });
 
-// 页面加载时初始化侧边栏状态
+// 添加自动调整输入框高度并处理移动设备问题
+function autoResizeTextarea() {
+    const textarea = document.getElementById('userInput');
+
+    // 获取当前是否在移动设备上
+    const isMobile = window.innerWidth <= 768;
+
+    // 重置高度以获取正确的scrollHeight
+    textarea.style.height = 'auto';
+
+    // 设置新高度，但不超过最大高度
+    const maxHeight = isMobile ? 80 : 120; // 移动设备上使用更小的高度限制
+    const newHeight = Math.min(textarea.scrollHeight, maxHeight);
+    textarea.style.height = newHeight + 'px';
+
+    // 滚动聊天容器到底部，确保输入框显示
+    const chatContainer = document.getElementById('chatContainer');
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+}
+
+// 修复移动设备上虚拟键盘弹出时的布局问题
+window.addEventListener('focusin', function(e) {
+    if (e.target.id === 'userInput' && window.innerWidth <= 768) {
+        // 加一点延迟确保虚拟键盘已完全弹出
+        setTimeout(() => {
+            document.body.scrollTop = 0;
+            document.documentElement.scrollTop = 0;
+
+            const chatContainer = document.getElementById('chatContainer');
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }, 300);
+    }
+});
+
+// 移动设备上输入框失去焦点时确保视图恢复正常
+window.addEventListener('focusout', function(e) {
+    if (e.target.id === 'userInput' && window.innerWidth <= 768) {
+        setTimeout(() => {
+            window.scrollTo(0, 0);
+        }, 100);
+    }
+});
+
+// 修复iOS设备上的额外问题
+document.addEventListener('DOMContentLoaded', function() {
+    // 检测iOS设备
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+
+    if (isIOS) {
+        // iOS设备上处理虚拟键盘问题
+        const userInput = document.getElementById('userInput');
+
+        userInput.addEventListener('focus', function() {
+            // 添加一个较小的延迟以适应键盘弹出
+            setTimeout(() => {
+                // 滚动容器以显示输入框
+                const chatContainer = document.getElementById('chatContainer');
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }, 300);
+        });
+
+        // 监听窗口大小变化，键盘出现/消失会触发resize
+        window.addEventListener('resize', function() {
+            // 短暂延迟以适应iOS上的动画
+            setTimeout(() => {
+                // 重置聊天容器滚动位置
+                const chatContainer = document.getElementById('chatContainer');
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }, 100);
+        });
+    }
+});
+
+// 页面加载时初始化侧边栏状态和布局
 window.addEventListener('load', function() {
     const isMobile = window.innerWidth <= 768;
     const sidebar = document.getElementById('sidebar');
+    const mainContent = document.querySelector('.main-content');
 
     if (isMobile) {
         sidebar.classList.add('collapsed');
+        mainContent.style.width = '100%';
+    } else {
+        mainContent.style.width = sidebar.classList.contains('collapsed') ? '100%' : `calc(100% - 260px)`;
     }
+
+    // 强制初始滚动到顶部
+    window.scrollTo(0, 0);
+
+    // 确保在所有设备上元素都完全可见
+    setTimeout(() => {
+        const chatContainer = document.getElementById('chatContainer');
+        if (chatContainer) {
+            chatContainer.scrollTop = 0;
+        }
+    }, 100);
 });
 
 // 修改重置按钮状态函数
@@ -1150,18 +1275,6 @@ function handleKeyPress(event) {
         event.preventDefault(); // 阻止默认的换行行为
         sendMessage();
     }
-}
-
-// 自动调整输入框高度
-function autoResizeTextarea() {
-    const textarea = document.getElementById('userInput');
-
-    // 重置高度以获取正确的scrollHeight
-    textarea.style.height = 'auto';
-
-    // 设置新高度，但不超过最大高度
-    const newHeight = Math.min(textarea.scrollHeight, 120);
-    textarea.style.height = newHeight + 'px';
 }
 
 // 添加代码块处理函数
@@ -1527,7 +1640,7 @@ function createSettingsModal() {
                 </div>
                 <div class="settings-tip">注：仅官方源DeepSeek模型支持温度系数调节</div>
                 <br/><br/><br/><br/>
-                <div class="settings-tip">v1.0.6.25409</div>
+                <div class="settings-tip">v1.0.9.25412</div>
             </div>
         </div>
     `;

@@ -3,7 +3,7 @@
 <head>
     <title>Chat Bot(已接入DeepSeek)</title>
     <!-- 设置移动设备视口 -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <link rel="stylesheet" href="my_css/index_css.css">
     <link rel="stylesheet" href="css/nova.css">
     <script src="my_js/index_js.js"></script>
@@ -13,6 +13,7 @@
     <script> hljs.initHighlightingOnLoad() </script>
 </head>
 <body>
+<!-- 侧边栏 -->
 <div class="sidebar" id="sidebar">
     <div class="sidebar-content">
         <div class="sidebar-header">
@@ -38,6 +39,7 @@
 
 <!-- 主要内容区域 -->
 <div class="main-content">
+    <!-- 聊天标题栏 -->
     <div class="chat-title">
         <!-- 修改展开/折叠按钮的SVG图标 -->
         <div class="toggle-sidebar" onclick="toggleSidebar()">
@@ -50,7 +52,10 @@
         <div class="chat-title-text" id="chatTitle">新会话</div>
     </div>
 
+    <!-- 聊天内容区域 -->
     <div class="chat-container" id="chatContainer"></div>
+
+    <!-- 输入区域 -->
     <div class="input-area">
         <div class="controls-row">
             <div style="display: flex; align-items: center; gap: 4px;">
