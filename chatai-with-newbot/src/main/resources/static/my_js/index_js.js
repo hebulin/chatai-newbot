@@ -172,14 +172,7 @@ function newChat() {
     saveChats();
 
     // 显示创建成功的提示
-    const tipDiv = document.createElement('div');
-    tipDiv.className = 'system-message';
-    tipDiv.textContent = `新会话`;
-    document.getElementById('chatContainer').appendChild(tipDiv);
-
-    setTimeout(() => {
-        tipDiv.remove();
-    }, 3000);
+    showNotification('新会话已创建');
 }
 
 // 更新会话列表
@@ -287,14 +280,7 @@ function switchModel() {
         'qwen-turbo': '通义千问-Turbo(速度最快)'
     };
 
-    const tipDiv = document.createElement('div');
-    tipDiv.className = 'system-message';
-    tipDiv.textContent = `已切换至 ${modelNames[currentModel]} 模型`;
-    document.getElementById('chatContainer').appendChild(tipDiv);
-
-    setTimeout(() => {
-        tipDiv.remove();
-    }, 3000);
+    showNotification(`已切换至 ${modelNames[currentModel]} 模型`);
 }
 
 // 添加错误处理函数
@@ -964,16 +950,33 @@ function resetSendButton() {
 
 // 添加通知提示函数
 function showNotification(message) {
-    const existingNotification = document.querySelector('.floating-notification');
-    if (existingNotification) {
-        existingNotification.remove();
+    // 创建或获取通知容器
+    let container = document.getElementById('notification-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'notification-container';
+        document.body.appendChild(container);
     }
 
+    // 创建新通知
     const notification = document.createElement('div');
     notification.className = 'floating-notification';
     notification.textContent = message;
-    document.body.appendChild(notification);
-    setTimeout(() => notification.remove(), 3000);
+
+    // 添加到容器
+    container.appendChild(notification);
+
+    // 监听动画结束事件
+    notification.addEventListener('animationend', function() {
+        if (notification.parentNode) {
+            notification.parentNode.removeChild(notification);
+
+            // 如果容器中没有通知了，移除容器
+            if (container && container.childNodes.length === 0) {
+                document.body.removeChild(container);
+            }
+        }
+    });
 }
 
 // 修改删除所有会话的功能
