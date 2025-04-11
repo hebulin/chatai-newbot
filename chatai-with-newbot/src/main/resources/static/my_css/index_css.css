@@ -1,4 +1,122 @@
 /* ================ 核心/全局样式 ================ */
+/* CSS变量-主题配色 */
+:root {
+    /* 亮色主题 */
+    --bg-color: #f8f9fa;
+    --card-bg-color: white;
+    --text-color: #2c3e50;
+    --text-secondary-color: #666666;
+    --border-color: #e0e0e0;
+    --sidebar-bg-color: white;
+    --sidebar-border-color: rgba(156, 39, 176, 0.2);
+    --sidebar-shadow-color: rgba(156, 39, 176, 0.1);
+    --overlay-bg-color: rgba(0, 0, 0, 0.5);
+    --user-message-bg: #666666;
+    --user-message-color: white;
+    --assistant-message-bg: #f5f5f5;
+    --assistant-message-color: #4a4a4a;
+    --button-bg: #f5f5f5;
+    --button-color: #2c3e50;
+    --button-border: #e0e0e0;
+    --button-hover-bg: #e0e0e0;
+    --primary-button-bg: #42b983;
+    --primary-button-border: #3aa876;
+    --primary-button-color: white;
+    --primary-button-hover-bg: #3aa876;
+    --accent-color: #42b983;
+    --hover-color: #3aa876;
+    --error-color: #d32f2f;
+    --error-bg: #ffebee;
+    --thinking-bg: #747474;
+    --thinking-color: #ffffff;
+    --table-header-bg: #f5f7fa;
+    --table-border: #e0e0e0;
+    --table-row-even: #f8fafc;
+    --table-row-hover: #f1f5f9;
+    --code-header-bg: #585a73;
+    --code-header-color: #ffffff;
+    --active-chat-bg: #e3f2fd;
+    --active-chat-color: #007bff;
+    --active-chat-border: #bbdefb;
+    --stop-button-bg: #ff4757;
+    --stop-button-border: #e84142;
+    --modal-overlay-bg: rgba(0, 0, 0, 0.5);
+    --tooltip-border: #e0e0e0;
+    --temp-control-bg: #eef1ff;
+    --temp-control-color: #2b7af6;
+}
+
+/* 暗色主题 */
+body.dark-theme {
+    --bg-color: #1a1a1a;
+    --card-bg-color: #2d2d2d;
+    --text-color: #e0e0e0;
+    --text-secondary-color: #aaaaaa;
+    --border-color: #444444;
+    --sidebar-bg-color: #2d2d2d;
+    --sidebar-border-color: rgba(156, 39, 176, 0.4);
+    --sidebar-shadow-color: rgba(156, 39, 176, 0.2);
+    --overlay-bg-color: rgba(0, 0, 0, 0.7);
+    --user-message-bg: #42b983;
+    --user-message-color: #111111;
+    --assistant-message-bg: #3a3a3a;
+    --assistant-message-color: #e0e0e0;
+    --button-bg: #3d3d3d;
+    --button-color: #e0e0e0;
+    --button-border: #555555;
+    --button-hover-bg: #4a4a4a;
+    --primary-button-bg: #42b983;
+    --primary-button-border: #3aa876;
+    --primary-button-color: #111111;
+    --primary-button-hover-bg: #3aa876;
+    --accent-color: #42b983;
+    --hover-color: #3aa876;
+    --error-color: #ff6b6b;
+    --error-bg: #4a2222;
+    --thinking-bg: #4a4a4a;
+    --thinking-color: #e0e0e0;
+    --table-header-bg: #3d3d3d;
+    --table-border: #555555;
+    --table-row-even: #333333;
+    --table-row-hover: #444444;
+    --code-header-bg: #444444;
+    --code-header-color: #e0e0e0;
+    --active-chat-bg: #2c4a6d;
+    --active-chat-color: #88bbff;
+    --active-chat-border: #336699;
+    --stop-button-bg: #ff4757;
+    --stop-button-border: #e84142;
+    --modal-overlay-bg: rgba(0, 0, 0, 0.8);
+    --tooltip-border: #555555;
+    --temp-control-bg: #333848;
+    --temp-control-color: #88bbff;
+}
+
+/* 主题切换按钮样式 */
+.theme-toggle {
+    color: var(--text-color);
+    background-color: var(--button-bg);
+    border: 1px solid var(--button-border);
+    border-radius: 8px;
+    padding: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s ease;
+}
+
+.theme-toggle:hover {
+    color: var(--accent-color);
+    background-color: var(--button-hover-bg);
+}
+
+.theme-toggle svg {
+    width: 16px;
+    height: 16px;
+    stroke-width: 2px;
+}
+
 /* 设置HTML和body的基本样式 */
 html, body {
     height: 100%;
@@ -13,7 +131,9 @@ body {
     display: flex;
     flex-direction: row;
     min-height: 100vh; /* 使用视口高度确保最小高度 */
-    background-color: #f8f9fa;
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 /* 移动端侧边栏遮罩层 */
@@ -24,7 +144,7 @@ body {
     left: 0;
     width: 100%;
     height: 100%;
-    background-color: rgba(0, 0, 0, 0.5);  /* 半透明黑色背景 */
+    background-color: var(--overlay-bg-color);  /* 半透明黑色背景 */
     z-index: 999;  /* 确保在其他元素之上 */
     opacity: 0;
     transition: opacity 0.3s ease;  /* 透明度过渡动画 */
@@ -63,9 +183,9 @@ body {
 .sidebar {
     width: 260px;
     min-width: 260px;
-    border-right: 1px solid rgba(156, 39, 176, 0.2);
-    background: white;
-    box-shadow: 2px 0 15px rgba(156, 39, 176, 0.1);
+    border-right: 1px solid var(--sidebar-border-color);
+    background: var(--sidebar-bg-color);
+    box-shadow: 2px 0 15px var(--sidebar-shadow-color);
     z-index: 1010;
     flex-shrink: 0;
     display: flex; /* 改用flex布局 */
@@ -107,7 +227,7 @@ body {
     align-items: center;
     justify-content: space-between;
     margin-bottom: 15px;
-    background: white;
+    background: var(--sidebar-bg-color);
     z-index: 1011;
 }
 
@@ -124,12 +244,12 @@ body {
     display: none;
     padding: 8px;
     cursor: pointer;
-    color: #666;
+    color: var(--text-secondary-color);
     transition: color 0.3s;
 }
 
 .close-sidebar:hover {
-    color: #333;
+    color: var(--text-color);
 }
 
 .close-sidebar svg {
@@ -150,14 +270,14 @@ body {
     background: transparent; /* 确保背景透明 */
     border: none;
     border-radius: 4px;
-    color: #666; /* 图标颜色 */
+    color: var(--text-secondary-color); /* 图标颜色 */
     transition: color 0.2s ease;
     position: static;
 }
 
 /* 悬停效果只改变颜色，不改变位置和背景 */
 .toggle-sidebar:hover {
-    color: #333;
+    color: var(--text-color);
     background: transparent;
 }
 
@@ -185,7 +305,7 @@ body {
     display: flex;
     align-items: center;
     padding: 8px 15px; /* 减小上下内边距 */
-    background: white;
+    background: var(--card-bg-color);
     border-radius: 0; /* 改为直角 */
     margin-bottom: 0;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
@@ -199,6 +319,7 @@ body {
     font-size: 1.1em; /* 稍微减小字体大小 */
     font-weight: 500;
     margin-right: 32px;
+    color: var(--text-color);
 }
 
 /* 修改会话列表容器样式 */
@@ -215,7 +336,7 @@ body {
     flex-shrink: 0; /* 防止被压缩 */
     padding: 10px 0;
     margin-top: auto; /* 推到底部 */
-    background: white;
+    background: var(--sidebar-bg-color);
     width: 100%; /* 确保宽度100% */
 }
 
@@ -239,13 +360,13 @@ body {
 /* 聊天容器 */
 .chat-container {
     flex: 1;
-    border: 1px solid rgba(156, 39, 176, 0.2);
+    border: 1px solid var(--border-color);
     border-radius: 0; /* 改为直角 */
     padding: 20px;
     overflow-y: auto;
     margin-bottom: 20px;
     transition: all 0.3s ease;
-    background: white;
+    background: var(--card-bg-color);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
     min-height: 200px;
 }
@@ -262,7 +383,7 @@ body {
     margin-bottom: 15px;
     padding: 10px;
     border-radius: 12px;
-    background-color: rgba(255, 255, 255, 0.9);
+    background-color: var(--card-bg-color);
     box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.05);
 }
 
@@ -278,7 +399,7 @@ body {
 .input-container {
     display: flex;
     gap: 10px;
-    background: white;
+    background: var(--card-bg-color);
     padding: 15px;
     border-radius: 8px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
@@ -292,7 +413,7 @@ body {
     min-height: 40px; /* 设置最小高度 */
     max-height: 40px; /* 设置最大高度，确保不会变化 */
     padding: 8px 12px;
-    border: 1px solid #ccc;
+    border: 1px solid var(--border-color);
     border-radius: 6px;
     transition: border-color 0.3s ease, box-shadow 0.3s ease; /* 只保留边框和阴影的过渡效果 */
     font-size: 16px;
@@ -302,15 +423,16 @@ body {
     white-space: pre-wrap;
     word-wrap: break-word;
     min-width: 20px;
-    background-color: white;
+    background-color: var(--card-bg-color);
+    color: var(--text-color);
     box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 /* 修改输入框焦点状态 - 只保留边框和阴影变化 */
 #userInput:focus {
     outline: none;
-    border-color: #9c27b0;
-    box-shadow: 0 0 0 2px rgba(156, 39, 176, 0.1), inset 0 1px 3px rgba(0, 0, 0, 0.1);
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 2px rgba(var(--accent-color), 0.1), inset 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 /* 深度思考按钮 */
@@ -318,10 +440,10 @@ body {
     display: inline-flex;
     align-items: center;
     padding: 4px 10px;
-    background: #e0e0e0;
-    color: #2c3e50;
+    background: var(--button-bg);
+    color: var(--text-color);
     border-radius: 8px;
-    border: 1px solid #d0d0d0;
+    border: 1px solid var(--button-border);
     cursor: pointer;
     transition: all 0.3s ease;
     font-size: 13px;
@@ -331,16 +453,16 @@ body {
 
 /* 深度思考按钮激活状态 */
 .deep-thinking.active {
-    background: #42b983;
-    color: white;
-    border-color: #3aa876;
+    background: var(--accent-color);
+    color: var(--primary-button-color);
+    border-color: var(--primary-button-border);
 }
 
 /* 模型选择下拉框 */
 .model-select {
-    background-color: #f5f5f5;
-    color: #2c3e50;
-    border: 1px solid #e0e0e0;
+    background-color: var(--button-bg);
+    color: var(--text-color);
+    border: 1px solid var(--button-border);
     border-radius: 8px;
     padding: 4px 10px;
     font-size: 13px;
@@ -357,8 +479,8 @@ body {
 
 /* 模型选择下拉框悬停效果 */
 .model-select:hover {
-    background-color: #e0e0e0;
-    color: #2c3e50;
+    background-color: var(--button-hover-bg);
+    color: var(--text-color);
 }
 
 /* 模型选择下拉框焦点状态 */
@@ -369,29 +491,25 @@ body {
 
 /* 发送按钮 */
 .send-button {
-    background-color: #42b983; /* Vue主题绿色 */
-    color: white;
-    border: 1px solid #3aa876;
+    background-color: var(--primary-button-bg); /* Vue主题绿色 */
+    color: var(--primary-button-color);
+    border: 1px solid var(--primary-button-border);
     height: 36px;
     min-width: 60px;
     padding: 0 15px;
-    line-height: 34px; /* 添加行高，略小于高度以适应边框 */
-    display: inline-flex; /* 改为inline-flex布局 */
-    align-items: center; /* 垂直居中 */
-    justify-content: center; /* 水平居中 */
 }
 
 .send-button:hover {
-    background-color: #3aa876;
-    color: white;
+    background-color: var(--primary-button-hover-bg);
+    color: var(--primary-button-color);
 }
 
 /* ================ 按钮样式 ================ */
 /* 统一按钮样式 - 修改为Vue风格 */
 button.styled-button {
-    background-color: #f5f5f5; /* 浅灰色背景 */
-    color: #2c3e50; /* 深色文字 */
-    border: 1px solid #e0e0e0; /* 浅灰色边框 */
+    background-color: var(--button-bg); /* 浅灰色背景 */
+    color: var(--button-color); /* 深色文字 */
+    border: 1px solid var(--button-border); /* 浅灰色边框 */
     border-radius: 8px; /* 更大的圆角 */
     padding: 0 18px; /* 修改padding，去掉上下padding */
     font-size: 15px;
@@ -408,11 +526,11 @@ button.styled-button {
 
 /* 统一按钮悬停效果 */
 button.styled-button:hover {
-    background-color: #e0e0e0; /* 悬停时稍深的灰色 */
-    color: #2c3e50;
+    background-color: var(--button-hover-bg); /* 悬停时稍深的灰色 */
+    color: var(--button-color);
     transform: none; /* 移除Y轴移动 */
     box-shadow: none; /* 移除阴影 */
-    border-color: #d0d0d0;
+    border-color: var(--border-color);
 }
 
 /* 统一按钮点击效果 */
@@ -425,30 +543,30 @@ button.styled-button:active {
 
 /* 特殊按钮样式 - 发送按钮 */
 .send-button {
-    background-color: #42b983; /* Vue主题绿色 */
-    color: white;
-    border: 1px solid #3aa876;
+    background-color: var(--primary-button-bg); /* Vue主题绿色 */
+    color: var(--primary-button-color);
+    border: 1px solid var(--primary-button-border);
     height: 36px;
     min-width: 60px;
     padding: 0 15px;
 }
 
 .send-button:hover {
-    background-color: #3aa876;
-    color: white;
+    background-color: var(--primary-button-hover-bg);
+    color: var(--primary-button-color);
 }
 
 /* 停止状态的发送按钮 */
 .send-button.stop {
-    background-color: #ff4757;
-    border-color: #e84142;
+    background-color: var(--stop-button-bg);
+    border-color: var(--stop-button-border);
 }
 
 /* 侧边栏按钮 */
 .sidebar-buttons button {
-    background-color: #f5f5f5;
-    color: #2c3e50;
-    border: 1px solid #e0e0e0;
+    background-color: var(--button-bg);
+    color: var(--button-color);
+    border: 1px solid var(--button-border);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -458,29 +576,29 @@ button.styled-button:active {
 
 /* 侧边栏按钮悬停效果 */
 .sidebar-buttons button:hover {
-    background-color: #e0e0e0;
-    color: #2c3e50;
+    background-color: var(--button-hover-bg);
+    color: var(--button-color);
 }
 
 /* 导出容器按钮 */
 .export-container button {
-    background-color: #f5f5f5;
-    color: #2c3e50;
-    border: 1px solid #e0e0e0;
+    background-color: var(--button-bg);
+    color: var(--button-color);
+    border: 1px solid var(--button-border);
     width: 100%;
 }
 
 /* 导出容器按钮悬停效果 */
 .export-container button:hover {
-    background-color: #e0e0e0;
-    color: #2c3e50;
+    background-color: var(--button-hover-bg);
+    color: var(--button-color);
 }
 
 /* 会话列表按钮 */
 #chatList button {
-    background-color: #f5f5f5;
-    color: #2c3e50;
-    border: 1px solid #e0e0e0;
+    background-color: var(--button-bg);
+    color: var(--button-color);
+    border: 1px solid var(--button-border);
     border-radius: 8px;
     padding: 10px 12px;
     margin: 5px 0;
@@ -497,16 +615,16 @@ button.styled-button:active {
 
 /* 会话列表按钮悬停效果 */
 #chatList button:hover {
-    background-color: #e0e0e0;
-    color: #2c3e50;
+    background-color: var(--button-hover-bg);
+    color: var(--button-color);
 }
 
 /* 会话列表按钮激活状态 */
 #chatList button.active {
-    background-color: #e3f2fd;
-    color: #007bff;
+    background-color: var(--active-chat-bg);
+    color: var(--active-chat-color);
     font-weight: bold;
-    border-color: #bbdefb;
+    border-color: var(--active-chat-border);
 }
 
 /* 确认对话框按钮基础样式 */
@@ -517,43 +635,43 @@ button.styled-button:active {
 
 /* 删除确认按钮 */
 #confirmDelete {
-    background-color: #ff4757;
+    background-color: var(--stop-button-bg);
     color: white;
-    border: 1px solid #e84142;
+    border: 1px solid var(--stop-button-border);
 }
 
 #confirmDelete:hover {
-    background-color: #e84142;
+    background-color: var(--stop-button-border);
     color: white;
 }
 
 /* 取消按钮 */
 #cancelDelete, #cancelExport {
-    background-color: #f5f5f5;
-    color: #2c3e50;
-    border: 1px solid #e0e0e0;
+    background-color: var(--button-bg);
+    color: var(--button-color);
+    border: 1px solid var(--button-border);
 }
 
 #cancelDelete:hover, #cancelExport:hover {
-    background-color: #e0e0e0;
-    color: #2c3e50;
+    background-color: var(--button-hover-bg);
+    color: var(--button-color);
 }
 
 /* 导出确认按钮 */
 #confirmExport {
-    background-color: #42b983;
-    color: white;
-    border: 1px solid #3aa876;
+    background-color: var(--primary-button-bg);
+    color: var(--primary-button-color);
+    border: 1px solid var(--primary-button-border);
 }
 
 #confirmExport:hover {
-    background-color: #3aa876;
-    color: white;
+    background-color: var(--primary-button-hover-bg);
+    color: var(--primary-button-color);
 }
 
 /* 温度控制按钮 */
 .temperature-buttons button {
-    color: #2c3e50;
+    color: var(--button-color);
     border: none;
     background: transparent;
     padding: 0;
@@ -564,14 +682,14 @@ button.styled-button:active {
 }
 
 .temperature-buttons button:hover {
-    color: #42b983;
+    color: var(--accent-color);
 }
 
 /* 设置按钮样式 */
 .settings-button {
-    color: #2c3e50;
-    background-color: #f5f5f5;
-    border: 1px solid #e0e0e0;
+    color: var(--button-color);
+    background-color: var(--button-bg);
+    border: 1px solid var(--button-border);
     border-radius: 8px;
     padding: 6px;
     cursor: pointer;
@@ -581,8 +699,8 @@ button.styled-button:active {
 }
 
 .settings-button:hover {
-    color: #42b983;
-    background-color: #e0e0e0;
+    color: var(--accent-color);
+    background-color: var(--button-hover-bg);
 }
 
 /* 设置弹窗样式 */
@@ -593,7 +711,7 @@ button.styled-button:active {
     left: 0;
     width: 100%;
     height: 100%;
-    background-color: rgba(0, 0, 0, 0.5);
+    background-color: var(--modal-overlay-bg);
     z-index: 2000;
     align-items: center;
     justify-content: center;
@@ -604,7 +722,7 @@ button.styled-button:active {
 }
 
 .settings-content {
-    background: white;
+    background: var(--card-bg-color);
     padding: 20px;
     border-radius: 8px;
     width: 90%;
@@ -618,19 +736,19 @@ button.styled-button:active {
     align-items: center;
     margin-bottom: 20px;
     padding-bottom: 10px;
-    border-bottom: 1px solid #eee;
+    border-bottom: 1px solid var(--border-color);
 }
 
 .settings-header h3 {
     margin: 0;
     font-size: 18px;
-    color: #333;
+    color: var(--text-color);
 }
 
 .settings-close {
     cursor: pointer;
     padding: 4px;
-    color: #666;
+    color: var(--text-secondary-color);
 }
 
 .settings-section {
@@ -640,8 +758,37 @@ button.styled-button:active {
 .settings-item {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 10px 0;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.settings-item:last-child {
+    border-bottom: none;
+}
+
+/* 设置中的主题切换按钮样式 */
+#themeSettings .theme-toggle {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    padding: 5px;
+    justify-content: center;
+    align-items: center;
+    transition: all 0.3s ease;
+    background-color: var(--button-bg);
+    color: var(--accent-color);
+}
+
+#themeSettings .theme-toggle:hover {
+    transform: rotate(10deg);
+    background-color: var(--button-hover-bg);
+}
+
+#themeSettings span:last-child {
+    min-width: 40px;
+    color: var(--accent-color);
+    font-weight: 500;
 }
 
 /* 禁用状态样式 */
@@ -652,17 +799,17 @@ button.styled-button:active {
 }
 
 .settings-item.disabled .temperature-control {
-    background-color: #f0f0f0;
+    background-color: var(--button-bg);
 }
 
 .settings-item.disabled .temperature-label {
-    color: #999;
+    color: var(--text-secondary-color);
 }
 
 /* 提示信息样式 */
 .settings-tip {
     font-size: 12px;
-    color: #666;
+    color: var(--text-secondary-color);
     margin-top: 4px;
 }
 
@@ -672,7 +819,7 @@ button.styled-button:active {
     align-items: center;
     gap: 4px;
     padding: 15px;
-    background-color: #f5f5f5;
+    background-color: var(--button-bg);
     border-radius: 12px;
     margin-bottom: 15px;
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
@@ -683,7 +830,7 @@ button.styled-button:active {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background-color: #9c27b0;
+    background-color: var(--accent-color);
     animation: loadingWave 1.4s infinite ease-in-out;
 }
 
@@ -710,7 +857,7 @@ button.styled-button:active {
 
 .ai-tips-on-bottom {
     font-size: 12px;
-    color: rgb(163, 163, 163);
+    color: var(--text-secondary-color);
     line-height: 14px;
     margin-top: 10px;
     text-align: center;
@@ -733,8 +880,8 @@ button.styled-button:active {
 
 /* 用户消息样式 */
 .user-message {
-    background-color: #666666;
-    color: white;
+    background-color: var(--user-message-bg);
+    color: var(--user-message-color);
     margin-left: auto;
     white-space: pre-wrap; /* 保留空格和换行 */
     word-wrap: break-word; /* 确保长单词也会换行 */
@@ -743,8 +890,8 @@ button.styled-button:active {
 
 /* 助手消息样式 */
 .assistant-message {
-    background-color: #f5f5f5;
-    color: #4a4a4a;
+    background-color: var(--assistant-message-bg);
+    color: var(--assistant-message-color);
     margin-right: auto;
     position: relative; /* 添加相对定位以支持复制按钮的绝对定位 */
 }
@@ -752,7 +899,7 @@ button.styled-button:active {
 /* 消息时间戳 */
 .message-time {
     font-size: 12px;
-    color: #888;
+    color: var(--text-secondary-color);
     margin-bottom: 4px;
 }
 
@@ -788,8 +935,8 @@ button.styled-button:active {
 
 /* 系统消息和错误消息 */
 .system-message {
-    background: rgba(0, 0, 0, 0.7);
-    color: white;
+    background: var(--overlay-bg-color);
+    color: white; /* 固定为白色，确保在所有主题下都可见 */
     padding: 10px 20px;
     border-radius: 4px;
     z-index: 1000;
@@ -797,12 +944,13 @@ button.styled-button:active {
     max-width: 300px;
     margin: 10px auto;
     text-align: center;
+    font-weight: 500; /* 增加字重以提高可读性 */
 }
 
 /* 错误消息样式 */
 .error-message {
-    background-color: #ffebee;
-    color: #d32f2f;
+    background-color: var(--error-bg);
+    color: var(--error-color);
     padding: 10px;
     border-radius: 4px;
     margin: 10px 0;
@@ -821,7 +969,7 @@ button.styled-button:active {
 table {
     width: 100%;
     border-collapse: collapse;
-    background: white;
+    background: var(--card-bg-color);
     font-size: 14px;
     margin: 0;
 }
@@ -830,24 +978,24 @@ table {
 th, td {
     padding: 12px 16px;
     text-align: left;
-    border: 1px solid #e0e0e0;
+    border: 1px solid var(--table-border);
 }
 
 /* 表头样式 */
 th {
-    background: #f5f7fa;
+    background: var(--table-header-bg);
     font-weight: 600;
-    color: #2c3e50;
+    color: var(--text-color);
 }
 
 /* 表格奇数行样式 */
 tr:nth-child(even) {
-    background: #f8fafc;
+    background: var(--table-row-even);
 }
 
 /* 表格行悬停效果 */
 tr:hover {
-    background: #f1f5f9;
+    background: var(--table-row-hover);
 }
 
 /* 助手消息中的表格样式 */
@@ -858,26 +1006,26 @@ tr:hover {
 }
 
 .assistant-message th {
-    background-color: #f8f9fa;
+    background-color: var(--table-header-bg);
     font-weight: bold;
     text-align: left;
     padding: 12px;
-    border: 1px solid #e0e0e0;
-    color: #333;
+    border: 1px solid var(--table-border);
+    color: var(--text-color);
 }
 
 .assistant-message td {
     padding: 12px;
-    border: 1px solid #e0e0e0;
-    color: #666;
+    border: 1px solid var(--table-border);
+    color: var(--text-color);
 }
 
 .assistant-message tr:nth-child(even) {
-    background-color: #f9f9f9;
+    background-color: var(--table-row-even);
 }
 
 .assistant-message tr:hover {
-    background-color: #f5f5f5;
+    background-color: var(--table-row-hover);
 }
 
 /* ================ 通知样式 ================ */
@@ -897,8 +1045,8 @@ tr:hover {
 
 /* 浮动通知 */
 .floating-notification {
-    background-color: rgba(0, 0, 0, 0.8);
-    color: white;
+    background-color: var(--overlay-bg-color);
+    color: white; /* 固定为白色，确保在所有主题下都可见 */
     padding: 15px 30px;
     border-radius: 8px;
     font-size: 14px;
@@ -909,6 +1057,7 @@ tr:hover {
     pointer-events: none;
     opacity: 0;
     transform: translateY(20px);
+    font-weight: 500; /* 增加字重以提高可读性 */
 }
 
 /* ================ 动画效果 ================ */
@@ -987,7 +1136,8 @@ tr:hover {
         width: 85%;
         max-width: 300px;
         transform: translateX(-100%);
-        padding: 0; /* 移除padding */
+        background-color: var(--sidebar-bg-color);
+        z-index: 1000;
     }
 
     .sidebar.expanded {
@@ -1145,6 +1295,29 @@ tr:hover {
         width: 32px !important;
         background-color: transparent !important;
     }
+
+    .floating-notification {
+        font-size: 13px;
+        padding: 12px 20px;
+        max-width: 260px;
+    }
+
+    #sidebar-overlay {
+        backdrop-filter: blur(2px);
+    }
+
+    /* 确保导出按钮在移动端可见且风格一致 */
+    .export-container {
+        background-color: var(--sidebar-bg-color);
+        padding: 10px;
+        border-top: 1px solid var(--border-color);
+    }
+
+    /* 确保模态框在移动端可读 */
+    .settings-content {
+        max-width: 85%;
+        padding: 15px;
+    }
 }
 
 /* 小型手机设备样式 */
@@ -1205,6 +1378,11 @@ tr:hover {
         padding: 0 10px;
         font-size: 13px;
     }
+
+    ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+    }
 }
 
 /* ================ 确认对话框样式 ================ */
@@ -1215,7 +1393,7 @@ tr:hover {
     left: 0;
     width: 100%;
     height: 100%;
-    background-color: rgba(0, 0, 0, 0.5);
+    background-color: var(--modal-overlay-bg);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1224,7 +1402,7 @@ tr:hover {
 
 /* 确认对话框内容 */
 .confirm-dialog-content {
-    background-color: white;
+    background-color: var(--card-bg-color);
     padding: 20px;
     border-radius: 8px;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
@@ -1237,7 +1415,8 @@ tr:hover {
 .confirm-dialog p {
     margin-bottom: 20px;
     font-size: 16px;
-    color: #333;
+    color: var(--text-color);
+    font-weight: 500;
 }
 
 /* 确认对话框按钮容器 */
@@ -1254,31 +1433,32 @@ tr:hover {
 
 /* 思考内容样式 */
 .thinking-content {
-    background-color: #747474;
+    background-color: var(--thinking-bg);
     margin: 5px 0;
     padding: 12px;
     border-radius: 8px;
     font-size: 14px; /* 固定字号 */
     line-height: 1.5; /* 固定行高 */
-    color: #ffffff;
+    color: var(--thinking-color);
     position: relative;
 }
 
 /* 思考状态样式 */
 .thinking-status {
     font-size: 0.9em;
-    color: #e0e0e0;
+    color: var(--thinking-color);
     margin-bottom: 8px;
     cursor: pointer;
     user-select: none;
     display: flex;
     align-items: center;
     gap: 4px;
+    font-weight: 500;
 }
 
 /* 思考状态悬停效果 */
 .thinking-status:hover {
-    color: #ffffff;
+    color: var(--thinking-color);
 }
 
 /* 思考内容折叠状态 */
@@ -1304,7 +1484,7 @@ tr:hover {
 
 /* 回答内容样式 */
 .answer-content {
-    color: #2c3e50;
+    color: var(--text-color);
     font-size: 14px; /* 固定字号 */
     line-height: 1.5; /* 固定行高 */
 }
@@ -1332,13 +1512,13 @@ img {
 /* 代码块样式 */
 pre {
     position: relative;
-    background-color: #f8f9fa;
+    background-color: var(--button-bg);
     border-radius: 6px;
     margin: 1em 0;
     padding-top: 2.5em;
     overflow: hidden;
-    font-size: 13px; /* 固定代码块字号 */
-    line-height: 1.45; /* 固定代码块行高 */
+    font-size: 13px;
+    line-height: 1.45;
 }
 
 pre code {
@@ -1353,8 +1533,8 @@ pre code {
     left: 0;
     right: 0;
     height: 2.5em;
-    background-color: #585a73; /* 改背景 */
-    border-bottom: 1px solid #333; /* 深色边框 */
+    background-color: var(--code-header-bg); /* 改背景 */
+    border-bottom: 1px solid var(--border-color); /* 深色边框 */
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1364,7 +1544,7 @@ pre code {
 /* 语言标签样式 */
 .code-language {
     font-size: 0.9em;
-    color: #ffffff; /* 改为白色文字 */
+    color: var(--code-header-color); /* 改为白色文字 */
     font-family: Arial, sans-serif; /* 修改字体 */
 }
 
@@ -1374,7 +1554,7 @@ pre code {
     border: none;
     cursor: pointer;
     padding: 0.4em;
-    color: #ffffff; /* 改为白色图标 */
+    color: var(--code-header-color); /* 改为白色图标 */
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1389,12 +1569,12 @@ pre code {
 
 /* 复制成功状态 */
 .copy-button.success .copy-icon {
-    color: #00ff3b;
+    color: var(--accent-color);
 }
 
 /* 聊天标题样式 */
 .chat-title {
-    background-color: white;
+    background-color: var(--card-bg-color);
     padding: 15px;
     text-align: center;
     font-size: 1.2em;
@@ -1410,7 +1590,7 @@ pre code {
 
 /* 分隔符样式 */
 .control-separator {
-    color: #aaa;
+    color: var(--text-secondary-color);
     font-size: 16px;
     margin: 0 6px;
 }
@@ -1420,7 +1600,7 @@ pre code {
     position: relative;
     display: inline-flex;
     align-items: center;
-    background-color: #eef1ff;
+    background-color: var(--temp-control-bg);
     border-radius: 16px;
     padding: 2px 8px;
     height: 24px;
@@ -1431,14 +1611,14 @@ pre code {
     align-items: center;
     gap: 4px;
     font-size: 13px;
-    color: #2b7af6;
+    color: var(--temp-control-color);
 }
 
 .temperature-control input {
     width: 40px;
     border: none;
     background: transparent;
-    color: #2b7af6;
+    color: var(--temp-control-color);
     font-size: 13px;
     padding: 0 2px;
     appearance: textfield;
@@ -1454,7 +1634,7 @@ pre code {
 }
 
 .temperature-buttons button {
-    color: #2c3e50;
+    color: var(--text-color);
     border: none;
     background: transparent;
     padding: 0;
@@ -1465,7 +1645,7 @@ pre code {
 }
 
 .temperature-buttons button:hover {
-    color: #42b983;
+    color: var(--accent-color);
 }
 
 /* 温度信息图标样式 */
@@ -1474,7 +1654,7 @@ pre code {
 }
 
 .temperature-info:hover {
-    color: #1a5fd1;
+    color: var(--accent-color);
 }
 
 /* 温度信息弹窗样式调整 */
@@ -1484,8 +1664,8 @@ pre code {
     left: 0;
     transform: none;
     margin-bottom: 8px;
-    background: white;
-    border: 1px solid #e0e0e0;
+    background: var(--card-bg-color);
+    border: 1px solid var(--border-color);
     border-radius: 8px;
     padding: 12px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
@@ -1510,13 +1690,13 @@ pre code {
 .temperature-tooltip td {
     padding: 6px;
     text-align: left;
-    border-bottom: 1px solid #e0e0e0;
+    border-bottom: 1px solid var(--border-color);
 }
 
 .temperature-tooltip h4 {
     margin-top: 0;
     margin-bottom: 8px;
-    color: #333;
+    color: var(--text-color);
 }
 
 /* 移动端适配 */
@@ -1553,11 +1733,11 @@ pre code {
 }
 
 .user-avatar {
-    background: #6c5ce7;
+    background: var(--accent-color);
 }
 
 .assistant-avatar {
-    background: linear-gradient(135deg, #9c27b0, #673ab7);
+    background: linear-gradient(135deg, var(--accent-color), var(--primary-button-bg));
 }
 
 /* 会话列表项样式 */
@@ -1567,9 +1747,9 @@ pre code {
 
 .chat-list-item button {
     width: 100%;
-    background-color: #f0f0f0;
-    color: #333;
-    border: 1px solid #ccc;
+    background-color: var(--button-bg);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
     border-radius: 5px;
     padding: 10px 12px;
     text-align: left;
@@ -1582,22 +1762,23 @@ pre code {
 }
 
 .chat-list-item button:hover {
-    background-color: #e0e0e0;
-    color: #000;
+    background-color: var(--button-hover-bg);
+    color: var(--text-color);
 }
 
 .chat-list-item button.active {
-    background-color: #e3f2fd;
-    color: #007bff;
+    background-color: var(--active-chat-bg);
+    color: var(--active-chat-color);
     font-weight: bold;
+    border-color: var(--active-chat-border);
 }
 
 /* 删除按钮样式 */
 .chat-delete-btn {
-    background: #f5f5f5;
-    border: 1px solid #e0e0e0;
+    background: var(--button-bg);
+    border: 1px solid var(--border-color);
     border-radius: 4px;
-    color: #2c3e50;
+    color: var(--text-color);
     opacity: 0.6;
     transition: opacity 0.3s, color 0.3s;
     display: flex;
@@ -1606,19 +1787,19 @@ pre code {
 }
 
 .chat-delete-btn:hover {
-    background: #ffebee;
-    color: #ff4757;
+    background: var(--button-hover-bg);
+    color: var(--accent-color);
     opacity: 1;
 }
 
 /* 无色图标 - 图标完全透明 */
 .toggle-sidebar svg {
     color: transparent;
-    stroke: #666; /* 仅保留图标轮廓 */
+    stroke: var(--text-secondary-color); /* 仅保留图标轮廓 */
 }
 
 .toggle-sidebar:hover svg {
-    stroke: #333; /* 悬停时轮廓颜色变深 */
+    stroke: var(--text-color); /* 悬停时轮廓颜色变深 */
 }
 
 /* 主内容区域跟随侧边栏变化 */
@@ -1648,16 +1829,16 @@ body:has(.sidebar.collapsed) .main-content {
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #666;
+    color: var(--text-secondary-color);
 }
 
 .message-copy-button:hover {
     opacity: 1;
-    color: #42b983;
+    color: var(--accent-color);
 }
 
 .message-copy-button.success {
-    color: #42b983;
+    color: var(--accent-color);
 }
 
 
@@ -1678,31 +1859,32 @@ body:has(.sidebar.collapsed) .main-content {
 
 /* 思考内容样式 */
 .thinking-content {
-    background-color: #747474;
+    background-color: var(--thinking-bg);
     margin: 5px 0;
     padding: 12px;
     border-radius: 8px;
     font-size: 14px; /* 固定字号 */
     line-height: 1.5; /* 固定行高 */
-    color: #ffffff;
+    color: var(--thinking-color);
     position: relative;
 }
 
 /* 思考状态样式 */
 .thinking-status {
     font-size: 0.9em;
-    color: #e0e0e0;
+    color: var(--thinking-color);
     margin-bottom: 8px;
     cursor: pointer;
     user-select: none;
     display: flex;
     align-items: center;
     gap: 4px;
+    font-weight: 500;
 }
 
 /* 思考状态悬停效果 */
 .thinking-status:hover {
-    color: #ffffff;
+    color: var(--thinking-color);
 }
 
 /* 思考内容折叠状态 */
@@ -1728,7 +1910,7 @@ body:has(.sidebar.collapsed) .main-content {
 
 /* 回答内容样式 */
 .answer-content {
-    color: #2c3e50;
+    color: var(--text-color);
     font-size: 14px; /* 固定字号 */
     line-height: 1.5; /* 固定行高 */
 }
@@ -1748,7 +1930,304 @@ body:has(.sidebar.collapsed) .main-content {
 /* 模型信息标签样式 */
 .model-info {
     font-size: 12px;
-    color: #888;
+    color: var(--text-secondary-color);
     margin-top: 8px;
     text-align: left;
+    margin-right: 30px;
+}
+
+/* 输入框::placeholder伪元素设置颜色 */
+#userInput::placeholder {
+    color: var(--text-secondary-color);
+    opacity: 0.7;
+}
+
+/* 修正代码元素的样式 */
+.hljs {
+    background-color: var(--code-header-bg) !important;
+    color: var(--code-header-color) !important;
+}
+
+/* 修正加载动画颜色 */
+.loading-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: var(--accent-color);
+    animation: loadingWave 1.4s infinite ease-in-out;
+}
+
+/* 修正确认对话框样式 */
+.confirm-dialog {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: var(--modal-overlay-bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+}
+
+/* 确保下拉框选项颜色也符合主题 */
+.model-select option {
+    background-color: var(--card-bg-color);
+    color: var(--text-color);
+}
+
+/* 模型选择下拉箭头SVG颜色调整 */
+.dark-theme .model-select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24'%3E%3Cpath fill='%23e0e0e0' d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+}
+
+/* 亮色主题保持原有下拉箭头 */
+body:not(.dark-theme) .model-select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24'%3E%3Cpath fill='%232c3e50' d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+}
+
+/* 修复滚动条样式 */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--button-bg);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--button-hover-bg);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-secondary-color);
+}
+
+/* 额外的暗色模式优化 */
+.dark-theme .code-language {
+    color: #ffffff;
+}
+
+.dark-theme .message-avatar {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.dark-theme #userInput::placeholder {
+    color: rgba(255, 255, 255, 0.5);
+}
+
+/* 确保边界情况下暗色模式仍然可用 */
+.dark-theme .chat-list-item button.active {
+    border: 1px solid var(--active-chat-border);
+}
+
+/* 修复移动端上的消息提示 */
+@media (max-width: 768px) {
+    .floating-notification {
+        font-size: 13px;
+        padding: 12px 20px;
+        max-width: 260px;
+    }
+
+    #sidebar-overlay {
+        backdrop-filter: blur(2px);
+    }
+
+    /* 确保导出按钮在移动端可见且风格一致 */
+    .export-container {
+        background-color: var(--sidebar-bg-color);
+        padding: 10px;
+        border-top: 1px solid var(--border-color);
+    }
+
+    /* 确保模态框在移动端可读 */
+    .settings-content {
+        max-width: 85%;
+        padding: 15px;
+    }
+}
+
+/* 修复暗色模式下滚动条的可见度 */
+.dark-theme::-webkit-scrollbar-track {
+    background: #333;
+}
+
+.dark-theme::-webkit-scrollbar-thumb {
+    background: #555;
+}
+
+.dark-theme::-webkit-scrollbar-thumb:hover {
+    background: #777;
+}
+
+/* 修复移动端滚动条可用性 */
+@media (max-width: 480px) {
+    ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+    }
+}
+
+/* 确保使用Firefox的用户也有良好的滚动条体验 */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--button-hover-bg) var(--button-bg);
+}
+
+.dark-theme * {
+    scrollbar-color: #555 #333;
+}
+
+/* 修复聊天窗口中可能出现的外部链接颜色 */
+.dark-theme .answer-content a {
+    color: #88bbff;
+}
+
+.answer-content a {
+    color: #007bff;
+    text-decoration: none;
+}
+
+.answer-content a:hover {
+    text-decoration: underline;
+}
+
+/* 修复暗色模式下的标记解析问题 */
+.dark-theme .thinking-content code,
+.dark-theme .answer-content code {
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    padding: 2px 4px;
+}
+
+.thinking-content code,
+.answer-content code {
+    background-color: rgba(0, 0, 0, 0.05);
+    border-radius: 3px;
+    padding: 2px 4px;
+}
+
+/* 修复暗色模式下选中文本的颜色 */
+.dark-theme ::selection {
+    background-color: rgba(136, 187, 255, 0.3);
+    color: white;
+}
+
+::selection {
+    background-color: rgba(0, 123, 255, 0.2);
+    color: black;
+}
+
+/* 暗色模式下的代码块 */
+.dark-theme pre {
+    background-color: #2d2d2d;
+    border: 1px solid #444;
+}
+
+.dark-theme pre code {
+    color: #e0e0e0;
+}
+
+.dark-theme .code-header {
+    background-color: #333;
+    border-bottom: 1px solid #444;
+}
+
+.dark-code .hljs-comment {
+    color: #6a9955;
+}
+
+.dark-code .hljs-keyword {
+    color: #569cd6;
+}
+
+.dark-code .hljs-string {
+    color: #ce9178;
+}
+
+.dark-code .hljs-number {
+    color: #b5cea8;
+}
+
+.dark-code .hljs-function {
+    color: #dcdcaa;
+}
+
+.dark-code .hljs-class {
+    color: #4ec9b0;
+}
+
+.dark-code .hljs-variable {
+    color: #9cdcfe;
+}
+
+/* 修正暗色模式下代码复制按钮 */
+.dark-theme .copy-button {
+    color: #e0e0e0;
+}
+
+.dark-theme .copy-button.success .copy-icon {
+    color: #4ade80;
+}
+
+/* 确保按钮文本在暗色模式下可见 */
+.dark-theme #confirmDelete,
+.dark-theme #confirmExport {
+    color: white;
+}
+
+/* 确保代码高亮样式在暗色模式下可见 */
+.dark-theme .hljs-keyword,
+.dark-theme .hljs-selector-tag,
+.dark-theme .hljs-literal,
+.dark-theme .hljs-section,
+.dark-theme .hljs-link {
+    color: #569cd6;
+}
+
+.dark-theme .hljs-string,
+.dark-theme .hljs-title,
+.dark-theme .hljs-name,
+.dark-theme .hljs-type,
+.dark-theme .hljs-attribute,
+.dark-theme .hljs-symbol,
+.dark-theme .hljs-bullet,
+.dark-theme .hljs-built_in,
+.dark-theme .hljs-addition,
+.dark-theme .hljs-variable,
+.dark-theme .hljs-template-tag,
+.dark-theme .hljs-template-variable {
+    color: #ce9178;
+}
+
+.dark-theme .hljs-comment,
+.dark-theme .hljs-quote,
+.dark-theme .hljs-deletion,
+.dark-theme .hljs-meta {
+    color: #6a9955;
+}
+
+.dark-theme .hljs-emphasis {
+    font-style: italic;
+}
+
+.dark-theme .hljs-strong {
+    font-weight: bold;
+}
+
+/* 修复确认对话框在暗色模式下的按钮颜色 */
+.dark-theme #cancelDelete,
+.dark-theme #cancelExport {
+    background-color: #3d3d3d;
+    color: #e0e0e0;
+    border: 1px solid #555;
+}
+
+.dark-theme #cancelDelete:hover,
+.dark-theme #cancelExport:hover {
+    background-color: #4a4a4a;
 }

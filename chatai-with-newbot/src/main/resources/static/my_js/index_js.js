@@ -26,6 +26,9 @@ let thinkingStartTime = null; // 记录思考开始时间
 // 添加全局变量
 let currentTemperature = 1.3;
 
+// 添加当前主题变量
+let currentTheme = localStorage.getItem('theme') || 'light';
+
 // 添加模型温度系数支持映射
 const modelTemperatureSupport = {
     'deepseek': true,  // 官方源支持温度系数
@@ -43,89 +46,124 @@ const MAX_RETRIES = 3;
 
 // 页面加载时初始化
 window.onload = function () {
-    // 配置 marked
-    marked.setOptions({
-        gfm: true,
-        breaks: true,
-        headerIds: false,
-        mangle: false,
-        highlight: function (code, lang) {
-            try {
-                if (lang && hljs.getLanguage(lang)) {
-                    return hljs.highlight(code, {language: lang}).value;
+    try {
+        // 应用保存的主题
+        applyTheme();
+
+        // 初始化快速主题切换按钮图标
+        const quickThemeToggle = document.getElementById('quickThemeToggle');
+        if (quickThemeToggle) {
+            quickThemeToggle.innerHTML = getThemeIcon();
+        }
+
+        // 配置 marked
+        marked.setOptions({
+            gfm: true,
+            breaks: true,
+            headerIds: false,
+            mangle: false,
+            highlight: function (code, lang) {
+                try {
+                    if (lang && hljs.getLanguage(lang)) {
+                        return hljs.highlight(code, {language: lang}).value;
+                    }
+                    return hljs.highlightAuto(code).value;
+                } catch (e) {
+                    console.error('代码高亮失败:', e);
+                    return code;
                 }
-                return hljs.highlightAuto(code).value;
-            } catch (e) {
-                console.error('代码高亮失败:', e);
-                return code;
             }
+        });
+
+        // 创建设置弹窗 - 移到前面
+        createSettingsModal();
+
+        // 设置默认温度系数
+        const storedTemperature = localStorage.getItem('currentTemperature');
+        if (storedTemperature) {
+            currentTemperature = parseFloat(storedTemperature);
+            document.getElementById('temperatureInput').value = currentTemperature;
+        } else {
+            currentTemperature = 1.3;
+            document.getElementById('temperatureInput').value = currentTemperature;
         }
-    });
 
-    // 创建设置弹窗 - 移到前面
-    createSettingsModal();
+        // 初始化会话数据
+        try {
+            const storedChats = localStorage.getItem('chats');
+            if (storedChats) {
+                chats = JSON.parse(storedChats) || {};
+            }
 
-    // 设置默认温度系数
-    const storedTemperature = localStorage.getItem('currentTemperature');
-    if (storedTemperature) {
-        currentTemperature = parseFloat(storedTemperature);
-        document.getElementById('temperatureInput').value = currentTemperature;
-    } else {
-        currentTemperature = 1.3;
-        document.getElementById('temperatureInput').value = currentTemperature;
+            if (!chats || Object.keys(chats).length === 0) {
+                chats = {};
+                console.log('未找到会话数据或数据为空，创建新的会话数据');
+            }
+        } catch (e) {
+            console.error('解析会话数据时出错:', e);
+            chats = {};
+        }
+
+        // 初始化页面
+        initializePage();
+
+        // 初始化响应式布局
+        const isMobile = window.innerWidth <= 768;
+        const sidebar = document.getElementById('sidebar');
+
+        // 在移动设备上默认折叠侧边栏
+        if (isMobile && !sidebar.classList.contains('collapsed')) {
+            sidebar.classList.add('collapsed');
+        }
+
+        // 添加输入框事件监听
+        const textarea = document.getElementById('userInput');
+        textarea.addEventListener('input', autoResizeTextarea);
+
+        // 添加输入框失去焦点事件
+        textarea.addEventListener('blur', function() {
+            if (this.value.trim() === '') {
+                this.style.height = 'auto';
+            }
+        });
+
+        // 初始化代码块处理
+        initializeCodeBlocks();
+
+        // 初始化温度设置状态
+        updateTemperatureSettingsState();
+
+        // 启动心跳检测
+        startHeartbeat();
+
+        // 在页面关闭时清理心跳检测
+        window.addEventListener('beforeunload', () => {
+            if (heartbeatInterval) {
+                clearInterval(heartbeatInterval);
+            }
+        });
+    } catch (error) {
+        console.error('页面初始化时出错:', error);
     }
-
-    // 初始化页面
-    initializePage();
-
-    // 初始化响应式布局
-    const isMobile = window.innerWidth <= 768;
-    const sidebar = document.getElementById('sidebar');
-
-    // 在移动设备上默认折叠侧边栏
-    if (isMobile && !sidebar.classList.contains('collapsed')) {
-        sidebar.classList.add('collapsed');
-    }
-
-    // 添加输入框事件监听
-    const textarea = document.getElementById('userInput');
-    textarea.addEventListener('input', autoResizeTextarea);
-
-    // 添加输入框失去焦点事件
-    textarea.addEventListener('blur', function() {
-        if (this.value.trim() === '') {
-            this.style.height = 'auto';
-        }
-    });
-
-    // 初始化代码块处理
-    initializeCodeBlocks();
-
-    // 初始化温度设置状态
-    updateTemperatureSettingsState();
-
-    // 启动心跳检测
-    startHeartbeat();
-
-    // 在页面关闭时清理心跳检测
-    window.addEventListener('beforeunload', () => {
-        if (heartbeatInterval) {
-            clearInterval(heartbeatInterval);
-        }
-    });
 };
 
 // 将页面初始化逻辑移到单独的函数
 function initializePage() {
-    // 原来的初始化代码
-    const lastChatId = localStorage.getItem('lastChatId');
-    if (lastChatId) {
-        currentChatId = lastChatId;
-        displayMessages(chats[currentChatId]);
-    } else {
+    try {
+        // 原来的初始化代码
+        const lastChatId = localStorage.getItem('lastChatId');
+        if (lastChatId && chats[lastChatId]) {
+            currentChatId = lastChatId;
+            displayMessages(chats[currentChatId]);
+        } else {
+            newChat();
+        }
+        updateChatList();
+    } catch (error) {
+        console.error('初始化页面时出错:', error);
+        // 如果出错，尝试创建新会话
         newChat();
     }
-    updateChatList();
 }
 
 // 切换会话
@@ -334,364 +372,394 @@ function handleError(error, requestData) {
 
 // 发送消息函数
 function sendMessage(retryMessage = null) {
-    const input = document.getElementById('userInput');
-    const sendButton = document.getElementById('sendButton');
+    try {
+        const input = document.getElementById('userInput');
+        const sendButton = document.getElementById('sendButton');
 
-    // 如果当前会话有活动的流，则停止它
-    if (activeStreams.has(currentChatId) && !retryMessage) {
-        const controller = activeStreams.get(currentChatId);
-        controller.abort();
-        activeStreams.delete(currentChatId);
-        messageBuffers.delete(currentChatId);
+        // 如果当前会话有活动的流，则停止它
+        if (activeStreams.has(currentChatId) && !retryMessage) {
+            const controller = activeStreams.get(currentChatId);
+            controller.abort();
+            activeStreams.delete(currentChatId);
+            messageBuffers.delete(currentChatId);
 
-        // 保存被中断的回答内容
-        if (currentThinkingContent || currentAnswerContent) {
-            const interruptedMessage = {
-                role: 'assistant',
-                content: currentAnswerContent,
-                reasoning_content: currentThinkingContent,
-                time: new Date().toLocaleString('zh-CN'),
-                interrupted: true // 标记为被中断
-            };
-            chats[currentChatId].push(interruptedMessage);
-            saveChats();
+            // 保存被中断的回答内容
+            if (currentThinkingContent || currentAnswerContent) {
+                const interruptedMessage = {
+                    role: 'assistant',
+                    content: currentAnswerContent,
+                    reasoning_content: currentThinkingContent,
+                    time: new Date().toLocaleString('zh-CN'),
+                    interrupted: true // 标记为被中断
+                };
+
+                // 确保chats[currentChatId]存在
+                if (!chats[currentChatId]) {
+                    chats[currentChatId] = [];
+                }
+
+                chats[currentChatId].push(interruptedMessage);
+                saveChats();
+            }
+
+            // 清理所有缓冲区和状态
+            currentThinkingContent = '';
+            currentAnswerContent = '';
+            thinkingStartTime = null;
+            buffer = ''; // 清理解码器缓冲区
+            isStreamActive = false;
+
+            resetSendButton();
+            displayMessages(chats[currentChatId]); // 确保显示被中断的内容
+            return;
         }
 
-        // 清理所有缓冲区和状态
+        // 在开始新的请求前清理所有缓冲区
+        buffer = '';
         currentThinkingContent = '';
         currentAnswerContent = '';
         thinkingStartTime = null;
-        buffer = ''; // 清理解码器缓冲区
-        isStreamActive = false;
 
-        resetSendButton();
-        displayMessages(chats[currentChatId]); // 确保显示被中断的内容
-        return;
-    }
+        const message = retryMessage ? retryMessage.content : input.value.trim(); // 获取消息内容
+        if (!message) return; // 如果消息为空，直接返回
 
-    // 在开始新的请求前清理所有缓冲区
-    buffer = '';
-    currentThinkingContent = '';
-    currentAnswerContent = '';
-    thinkingStartTime = null;
+        const userMessage = retryMessage || {
+            role: 'user',
+            content: message,
+            time: new Date().toLocaleString('zh-CN') // 设置消息时间
+        };
 
-    const message = retryMessage ? retryMessage.content : input.value.trim(); // 获取消息内容
-    if (!message) return; // 如果消息为空，直接返回
-
-    const userMessage = retryMessage || {
-        role: 'user',
-        content: message,
-        time: new Date().toLocaleString('zh-CN') // 设置消息时间
-    };
-
-    if (!retryMessage) {
-        chats[currentChatId].push(userMessage);
-        displayMessages(chats[currentChatId]);
-        updateChatList();
-        input.value = '';
-        input.style.height = 'auto';
-
-        // 添加加载动画
-        const chatContainer = document.getElementById('chatContainer');
-        const loadingDiv = document.createElement('div');
-        loadingDiv.className = 'message-content-row';
-        loadingDiv.innerHTML = `
-            <div class="message-avatar assistant-avatar">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
-                    <circle cx="12" cy="12" r="10"/>
-                    <path d="M12 16v-4"/>
-                    <path d="M12 8h.01"/>
-                </svg>
-            </div>
-            <div class="assistant-loading">
-                <div class="loading-dot"></div>
-                <div class="loading-dot"></div>
-                <div class="loading-dot"></div>
-            </div>
-        `;
-        chatContainer.appendChild(loadingDiv);
-        chatContainer.scrollTop = chatContainer.scrollHeight;
-    } else {
-        displayMessages(chats[currentChatId]);
-    }
-
-    const requestData = {
-        messages: [
-            {role: 'system', content: 'You are a helpful assistant.'},
-            ...chats[currentChatId]
-        ],
-        model: currentModel,
-        deepThinking: isDeepThinking,
-        temperature: currentTemperature // 添加温度参数
-    };
-
-    isResponding = true; // 设置响应状态为true
-    isStreamActive = true; // 设置流状态为true
-    sendButton.textContent = '停止回答'; // 修改发送按钮文本
-    sendButton.classList.add('stop'); // 添加停止类
-
-    currentController = new AbortController(); // 创建新的控制器
-    activeStreams.set(currentChatId, currentController);
-    let assistantMessage = {
-        role: 'assistant',
-        content: '',
-        time: null // 初始化时不设置时间戳
-    }; // 初始化助手消息
-    messageBuffers.set(currentChatId, assistantMessage); // 设置当前会话的消息缓冲
-
-    let hasResponse = false;  // 添加标志，用于跟踪是否收到任何回答
-    let isThinkingComplete = false; // 添加标志，用于跟踪思考是否完成
-
-    // 添加超时处理
-    const timeout = setTimeout(() => {
-        if (isStreamActive && !hasResponse) {  // 只在没有收到任何回答时触发超时
-            currentController.abort(); // 中止流
-            activeStreams.delete(currentChatId); // 删除当前会话的控制器
-            messageBuffers.delete(currentChatId); // 删除当前会话的消息缓冲
-            isStreamActive = false; // 设置流状态为false
-
-            // 创建超时消息
-            const timeoutMessage = {
-                role: 'assistant',
-                content: '回答超时，请重试或更换模型后重试。', // 设置超时消息内容
-                time: new Date().toLocaleString('zh-CN'), // 设置超时消息时间
-                isTimeout: true // 设置超时标志
-            };
-
-            // 添加到会话历史
-            chats[currentChatId].push(timeoutMessage); // 将超时消息添加到当前会话
-            saveChats(); // 保存会话
-            displayMessages(chats[currentChatId]); // 显示消息
-            resetSendButton(); // 重置发送按钮状态
+        // 确保当前会话ID有效
+        if (!currentChatId) {
+            // 如果会话ID为空，创建新会话
+            currentChatId = Date.now().toString();
         }
-    }, 40000);  // 40秒超时
 
-    fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(requestData),
-        signal: currentController.signal
-    })
-        .then(response => {
-            if (!response.ok) {
-                throw new Error(`服务器响应错误: ${response.status} ${response.statusText}`);
-            }
-            // 收到响应后移除加载动画
-            const loadingDiv = document.querySelector('.message-content-row:last-child');
-            if (loadingDiv && loadingDiv.querySelector('.assistant-loading')) {
-                loadingDiv.remove();
-            }
+        // 确保chats[currentChatId]存在
+        if (!chats[currentChatId]) {
+            chats[currentChatId] = [];
+        }
 
-            // 重置重试计数
-            retryCount = 0;
-            return response;
-        })
-        .then(response => {
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            buffer = ''; // 重置解码器缓冲区
+        if (!retryMessage) {
+            chats[currentChatId].push(userMessage);
+            displayMessages(chats[currentChatId]);
+            updateChatList();
+            input.value = '';
+            input.style.height = 'auto';
 
-            function readStream() {
-                return reader.read().then(({done, value}) => {
-                    if (done) {
-                        activeStreams.delete(currentChatId);
-                        messageBuffers.delete(currentChatId);
-                        isStreamActive = false;
-                        clearTimeout(timeout);
-                        buffer = ''; // 清理解码器缓冲区
+            // 添加加载动画
+            const chatContainer = document.getElementById('chatContainer');
+            const loadingDiv = document.createElement('div');
+            loadingDiv.className = 'message-content-row';
+            loadingDiv.innerHTML = `
+                <div class="message-avatar assistant-avatar">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M12 16v-4"/>
+                        <path d="M12 8h.01"/>
+                    </svg>
+                </div>
+                <div class="assistant-loading">
+                    <div class="loading-dot"></div>
+                    <div class="loading-dot"></div>
+                    <div class="loading-dot"></div>
+                </div>
+            `;
+            chatContainer.appendChild(loadingDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        } else {
+            displayMessages(chats[currentChatId]);
+        }
 
-                        // 确保最后的消息被保存
-                        if (currentThinkingContent || currentAnswerContent) {
-                            assistantMessage.reasoning_content = currentThinkingContent;
-                            assistantMessage.content = currentAnswerContent;
-                            // 如果思考时间还未设置（异常情况），在这里设置
-                            if (thinkingStartTime && !assistantMessage.thinkingTime) {
-                                assistantMessage.thinkingTime = Math.round((Date.now() - thinkingStartTime) / 1000);
-                            }
-                            if (!chats[currentChatId].includes(assistantMessage)) {
-                                chats[currentChatId].push(assistantMessage);
-                            }
-                            saveChats();
-                            displayMessages(chats[currentChatId]);
-                        }
-                        resetSendButton();
-                        // 重置所有状态
-                        currentThinkingContent = '';
-                        currentAnswerContent = '';
-                        thinkingStartTime = null;
-                        buffer = '';
-                        return;
-                    }
+        const requestData = {
+            messages: [
+                {role: 'system', content: 'You are a helpful assistant.'},
+                ...chats[currentChatId]
+            ],
+            model: currentModel,
+            deepThinking: isDeepThinking,
+            temperature: currentTemperature // 添加温度参数
+        };
 
-                    try {
-                        const chunk = decoder.decode(value, {stream: true});
-                        buffer += chunk;
+        isResponding = true; // 设置响应状态为true
+        isStreamActive = true; // 设置流状态为true
+        sendButton.textContent = '停止回答'; // 修改发送按钮文本
+        sendButton.classList.add('stop'); // 添加停止类
 
-                        const lines = buffer.split('data:');
-                        buffer = lines.pop() || '';
+        currentController = new AbortController(); // 创建新的控制器
+        activeStreams.set(currentChatId, currentController);
+        let assistantMessage = {
+            role: 'assistant',
+            content: '',
+            time: null // 初始化时不设置时间戳
+        }; // 初始化助手消息
+        messageBuffers.set(currentChatId, assistantMessage); // 设置当前会话的消息缓冲
 
-                        let contentUpdated = false;
+        let hasResponse = false;  // 添加标志，用于跟踪是否收到任何回答
+        let isThinkingComplete = false; // 添加标志，用于跟踪思考是否完成
 
-                        lines.forEach(line => {
-                            if (line.trim().startsWith('{')) {
-                                try {
-                                    if (line.includes('[DONE]')) return;
-
-                                    const jsonData = JSON.parse(line);
-                                    if (jsonData.choices && jsonData.choices[0].delta) {
-                                        const delta = jsonData.choices[0].delta;
-                                        if (!hasResponse) {
-                                            hasResponse = true;
-                                            // 在收到第一个响应时设置时间戳和使用的模型
-                                            assistantMessage.time = new Date().toLocaleString('zh-CN');
-                                            assistantMessage.usedModel = currentModel; // 保存使用的模型信息
-                                        }
-
-                                        // 处理思考内容
-                                        if (delta.reasoning_content) {
-                                            if (!thinkingStartTime) {
-                                                thinkingStartTime = Date.now();
-                                                isThinkingComplete = false;
-                                            }
-                                            currentThinkingContent += delta.reasoning_content;
-                                            assistantMessage.reasoning_content = currentThinkingContent;
-                                            contentUpdated = true;
-                                        } else if (delta.content && !isThinkingComplete && thinkingStartTime) {
-                                            // 当开始接收正文内容且思考尚未标记完成时，标记思考完成
-                                            isThinkingComplete = true;
-                                            assistantMessage.thinkingTime = Math.round((Date.now() - thinkingStartTime) / 1000);
-                                        }
-
-                                        // 处理回答内容
-                                        if (delta.content) {
-                                            currentAnswerContent += delta.content;
-                                            assistantMessage.content = currentAnswerContent;
-                                            contentUpdated = true;
-                                        }
-
-                                        if (contentUpdated) {
-                                            const chatContainer = document.getElementById('chatContainer');
-                                            const lastMessage = chatContainer.lastElementChild;
-
-                                            if (lastMessage && lastMessage.classList.contains('assistant-message-container')) {
-                                                const contentDiv = lastMessage.querySelector('.message');
-                                                if (contentDiv) {
-                                                    // 清空现有内容
-                                                    contentDiv.innerHTML = '';
-
-                                                    // 如果有思考内容，添加思考内容区域
-                                                    if (currentThinkingContent) {
-                                                        const thinkingDiv = document.createElement('div');
-                                                        thinkingDiv.className = 'thinking-content';
-
-                                                        // 添加思考状态标签
-                                                        const statusDiv = document.createElement('div');
-                                                        statusDiv.className = 'thinking-status';
-
-                                                        // 添加点击事件
-                                                        statusDiv.addEventListener('click', function() {
-                                                            thinkingDiv.classList.toggle('collapsed');
-                                                        });
-
-                                                        thinkingDiv.appendChild(statusDiv);
-
-                                                        // 添加思考内容
-                                                        const thinkingText = document.createElement('div');
-                                                        thinkingText.className = 'thinking-content-text';
-                                                        thinkingText.innerHTML = marked.parse(currentThinkingContent);
-                                                        thinkingDiv.appendChild(thinkingText);
-
-                                                        contentDiv.appendChild(thinkingDiv);
-                                                    }
-
-                                                    // 如果有回答内容，添加回答内容区域
-                                                    if (currentAnswerContent) {
-                                                        const answerDiv = document.createElement('div');
-                                                        answerDiv.className = 'answer-content';
-                                                        answerDiv.innerHTML = marked.parse(currentAnswerContent);
-
-                                                        // 添加复制按钮
-                                                        const copyButton = createCopyButton(currentAnswerContent);
-
-                                                        // 添加模型信息
-                                                        const modelInfo = document.createElement('div');
-                                                        modelInfo.className = 'model-info';
-                                                        modelInfo.textContent = `使用模型：${assistantMessage.usedModel || currentModel}`;
-
-                                                        contentDiv.appendChild(answerDiv);
-                                                        contentDiv.appendChild(modelInfo);
-                                                        contentDiv.appendChild(copyButton);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                } catch (e) {
-                                    console.warn('JSON 解析警告:', e.message, '原始数据:', line);
-                                }
-                            }
-                        });
-
-                        if (contentUpdated) {
-                            const tempMessages = [...chats[currentChatId]];
-                            if (!tempMessages.includes(assistantMessage)) {
-                                tempMessages.push(assistantMessage);
-                            }
-                            displayMessages(tempMessages);
-                        }
-
-                        return readStream();
-                    } catch (error) {
-                        throw new Error('处理响应数据时发生错误: ' + error.message);
-                    }
-                });
-            }
-
-            return readStream();
-        })
-        .catch(error => {
-            if (error.name === 'AbortError') {
-                clearTimeout(timeout);  // 清除超时计时器
+        // 添加超时处理
+        const timeout = setTimeout(() => {
+            if (isStreamActive && !hasResponse) {  // 只在没有收到任何回答时触发超时
+                currentController.abort(); // 中止流
                 activeStreams.delete(currentChatId); // 删除当前会话的控制器
                 messageBuffers.delete(currentChatId); // 删除当前会话的消息缓冲
                 isStreamActive = false; // 设置流状态为false
 
-                // 保存已经输出的内容
-                if (currentThinkingContent || currentAnswerContent) {
-                    assistantMessage.reasoning_content = currentThinkingContent;
-                    assistantMessage.content = currentAnswerContent;
-                    assistantMessage.time = new Date().toLocaleString('zh-CN'); // 设置助手消息时间
-                    assistantMessage.interrupted = true;  // 标记为被中断
-                    if (!chats[currentChatId].includes(assistantMessage)) {
-                        chats[currentChatId].push(assistantMessage); // 将助手消息添加到当前会话
-                    }
-                    saveChats(); // 保存会话
-                    displayMessages(chats[currentChatId]);  // 确保显示最终状态
-                }
-                resetSendButton();
-                return;
-            } else if ((error.message.includes('Failed to fetch') ||
-                    error.message.includes('NetworkError') ||
-                    error.message.includes('服务器响应错误')) &&
-                retryCount < MAX_RETRIES) {
+                // 创建超时消息
+                const timeoutMessage = {
+                    role: 'assistant',
+                    content: '回答超时，请重试或更换模型后重试。', // 设置超时消息内容
+                    time: new Date().toLocaleString('zh-CN'), // 设置超时消息时间
+                    isTimeout: true // 设置超时标志
+                };
 
-                retryCount++;
-                // 自动重试
-                setTimeout(() => {
-                    sendMessage(retryMessage || {
-                        role: 'user',
-                        content: message,
-                        time: new Date().toLocaleString('zh-CN')
-                    });
-                }, 1000 * retryCount);
-
-            } else {
-                clearTimeout(timeout);
-                handleError(error, requestData);
+                // 添加到会话历史
+                chats[currentChatId].push(timeoutMessage); // 将超时消息添加到当前会话
+                saveChats(); // 保存会话
+                displayMessages(chats[currentChatId]); // 显示消息
+                resetSendButton(); // 重置发送按钮状态
             }
-        });
+        }, 40000);  // 40秒超时
+
+        fetch('/api/chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestData),
+            signal: currentController.signal
+        })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`服务器响应错误: ${response.status} ${response.statusText}`);
+                }
+                // 收到响应后移除加载动画
+                const loadingDiv = document.querySelector('.message-content-row:last-child');
+                if (loadingDiv && loadingDiv.querySelector('.assistant-loading')) {
+                    loadingDiv.remove();
+                }
+
+                // 重置重试计数
+                retryCount = 0;
+                return response;
+            })
+            .then(response => {
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                buffer = ''; // 重置解码器缓冲区
+
+                function readStream() {
+                    return reader.read().then(({done, value}) => {
+                        if (done) {
+                            activeStreams.delete(currentChatId);
+                            messageBuffers.delete(currentChatId);
+                            isStreamActive = false;
+                            clearTimeout(timeout);
+                            buffer = ''; // 清理解码器缓冲区
+
+                            // 确保最后的消息被保存
+                            if (currentThinkingContent || currentAnswerContent) {
+                                assistantMessage.reasoning_content = currentThinkingContent;
+                                assistantMessage.content = currentAnswerContent;
+                                // 如果思考时间还未设置（异常情况），在这里设置
+                                if (thinkingStartTime && !assistantMessage.thinkingTime) {
+                                    assistantMessage.thinkingTime = Math.round((Date.now() - thinkingStartTime) / 1000);
+                                }
+
+                                // 重要：确保最终保存时，包含使用的模型信息
+                                if (!assistantMessage.usedModel) {
+                                    assistantMessage.usedModel = currentModel;
+                                }
+
+                                if (!chats[currentChatId].includes(assistantMessage)) {
+                                    chats[currentChatId].push(assistantMessage);
+                                }
+                                saveChats();
+                                displayMessages(chats[currentChatId]);
+                            }
+                            resetSendButton();
+                            // 重置所有状态
+                            currentThinkingContent = '';
+                            currentAnswerContent = '';
+                            thinkingStartTime = null;
+                            buffer = '';
+                            return;
+                        }
+
+                        try {
+                            const chunk = decoder.decode(value, {stream: true});
+                            buffer += chunk;
+
+                            const lines = buffer.split('data:');
+                            buffer = lines.pop() || '';
+
+                            let contentUpdated = false;
+
+                            lines.forEach(line => {
+                                if (line.trim().startsWith('{')) {
+                                    try {
+                                        if (line.includes('[DONE]')) return;
+
+                                        const jsonData = JSON.parse(line);
+                                        if (jsonData.choices && jsonData.choices[0].delta) {
+                                            const delta = jsonData.choices[0].delta;
+                                            if (!hasResponse) {
+                                                hasResponse = true;
+                                                // 在收到第一个响应时设置时间戳和使用的模型
+                                                assistantMessage.time = new Date().toLocaleString('zh-CN');
+                                                // 重要：在开始接收响应时就保存使用的模型
+                                                assistantMessage.usedModel = currentModel; // 保存使用的模型信息
+                                            }
+
+                                            // 处理思考内容
+                                            if (delta.reasoning_content) {
+                                                if (!thinkingStartTime) {
+                                                    thinkingStartTime = Date.now();
+                                                    isThinkingComplete = false;
+                                                }
+                                                currentThinkingContent += delta.reasoning_content;
+                                                assistantMessage.reasoning_content = currentThinkingContent;
+                                                contentUpdated = true;
+                                            } else if (delta.content && !isThinkingComplete && thinkingStartTime) {
+                                                // 当开始接收正文内容且思考尚未标记完成时，标记思考完成
+                                                isThinkingComplete = true;
+                                                assistantMessage.thinkingTime = Math.round((Date.now() - thinkingStartTime) / 1000);
+                                            }
+
+                                            // 处理回答内容
+                                            if (delta.content) {
+                                                currentAnswerContent += delta.content;
+                                                assistantMessage.content = currentAnswerContent;
+                                                contentUpdated = true;
+                                            }
+
+                                            if (contentUpdated) {
+                                                const chatContainer = document.getElementById('chatContainer');
+                                                const lastMessage = chatContainer.lastElementChild;
+
+                                                if (lastMessage && lastMessage.classList.contains('assistant-message-container')) {
+                                                    const contentDiv = lastMessage.querySelector('.message');
+                                                    if (contentDiv) {
+                                                        // 清空现有内容
+                                                        contentDiv.innerHTML = '';
+
+                                                        // 如果有思考内容，添加思考内容区域
+                                                        if (currentThinkingContent) {
+                                                            const thinkingDiv = document.createElement('div');
+                                                            thinkingDiv.className = 'thinking-content';
+
+                                                            // 添加思考状态标签
+                                                            const statusDiv = document.createElement('div');
+                                                            statusDiv.className = 'thinking-status';
+
+                                                            // 添加点击事件
+                                                            statusDiv.addEventListener('click', function() {
+                                                                thinkingDiv.classList.toggle('collapsed');
+                                                            });
+
+                                                            thinkingDiv.appendChild(statusDiv);
+
+                                                            // 添加思考内容
+                                                            const thinkingText = document.createElement('div');
+                                                            thinkingText.className = 'thinking-content-text';
+                                                            thinkingText.innerHTML = marked.parse(currentThinkingContent);
+                                                            thinkingDiv.appendChild(thinkingText);
+
+                                                            contentDiv.appendChild(thinkingDiv);
+                                                        }
+
+                                                        // 如果有回答内容，添加回答内容区域
+                                                        if (currentAnswerContent) {
+                                                            const answerDiv = document.createElement('div');
+                                                            answerDiv.className = 'answer-content';
+                                                            answerDiv.innerHTML = marked.parse(currentAnswerContent);
+
+                                                            // 添加复制按钮
+                                                            const copyButton = createCopyButton(currentAnswerContent);
+
+                                                            // 添加模型信息 - 使用assistantMessage中保存的模型信息
+                                                            const modelInfo = document.createElement('div');
+                                                            modelInfo.className = 'model-info';
+                                                            modelInfo.textContent = `使用模型：${assistantMessage.usedModel || currentModel}`;
+
+                                                            contentDiv.appendChild(answerDiv);
+                                                            contentDiv.appendChild(modelInfo);
+                                                            contentDiv.appendChild(copyButton);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } catch (e) {
+                                        console.warn('JSON 解析警告:', e.message, '原始数据:', line);
+                                    }
+                                }
+                            });
+
+                            if (contentUpdated) {
+                                const tempMessages = [...chats[currentChatId]];
+                                if (!tempMessages.includes(assistantMessage)) {
+                                    tempMessages.push(assistantMessage);
+                                }
+                                displayMessages(tempMessages);
+                            }
+
+                            return readStream();
+                        } catch (error) {
+                            throw new Error('处理响应数据时发生错误: ' + error.message);
+                        }
+                    });
+                }
+
+                return readStream();
+            })
+            .catch(error => {
+                if (error.name === 'AbortError') {
+                    clearTimeout(timeout);  // 清除超时计时器
+                    activeStreams.delete(currentChatId); // 删除当前会话的控制器
+                    messageBuffers.delete(currentChatId); // 删除当前会话的消息缓冲
+                    isStreamActive = false; // 设置流状态为false
+
+                    // 保存已经输出的内容
+                    if (currentThinkingContent || currentAnswerContent) {
+                        assistantMessage.reasoning_content = currentThinkingContent;
+                        assistantMessage.content = currentAnswerContent;
+                        assistantMessage.time = new Date().toLocaleString('zh-CN'); // 设置助手消息时间
+                        assistantMessage.interrupted = true;  // 标记为被中断
+                        if (!chats[currentChatId].includes(assistantMessage)) {
+                            chats[currentChatId].push(assistantMessage); // 将助手消息添加到当前会话
+                        }
+                        saveChats(); // 保存会话
+                        displayMessages(chats[currentChatId]);  // 确保显示最终状态
+                    }
+                    resetSendButton();
+                    return;
+                } else if ((error.message.includes('Failed to fetch') ||
+                        error.message.includes('NetworkError') ||
+                        error.message.includes('服务器响应错误')) &&
+                    retryCount < MAX_RETRIES) {
+
+                    retryCount++;
+                    // 自动重试
+                    setTimeout(() => {
+                        sendMessage(retryMessage || {
+                            role: 'user',
+                            content: message,
+                            time: new Date().toLocaleString('zh-CN')
+                        });
+                    }, 1000 * retryCount);
+
+                } else {
+                    clearTimeout(timeout);
+                    handleError(error, requestData);
+                }
+            });
+    } catch (error) {
+        console.error('发送消息时出错:', error);
+        resetSendButton();
+        showNotification('发送消息时出错，请重试');
+    }
 }
 
 // 保存会话到localStorage
@@ -802,10 +870,14 @@ function displayMessages(messages) {
                         // 添加复制按钮
                         const copyButton = createCopyButton(msg.content);
 
-                        // 添加模型信息
+                        // 添加模型信息 - 修改这里，确保使用消息中保存的模型信息
                         const modelInfo = document.createElement('div');
                         modelInfo.className = 'model-info';
-                        modelInfo.textContent = `使用模型：${msg.usedModel || currentModel}`;
+
+                        // 关键修复：确保显示的是消息中保存的模型，而不是当前选择的模型
+                        // 如果消息中有保存的模型信息，使用它；否则才使用当前模型
+                        const usedModelName = msg.usedModel || currentModel;
+                        modelInfo.textContent = `使用模型：${usedModelName}`;
 
                         contentDiv.appendChild(answerDiv);
                         contentDiv.appendChild(modelInfo);
@@ -1097,6 +1169,15 @@ function initializeCodeBlocks() {
     // 为所有代码块添加行号和复制按钮
     document.querySelectorAll('pre code').forEach(block => {
         addCopyButton(block.parentElement);
+
+        // 修复暗色模式下的代码高亮
+        if (currentTheme === 'dark') {
+            if (!block.parentElement.classList.contains('dark-code')) {
+                block.parentElement.classList.add('dark-code');
+            }
+        } else {
+            block.parentElement.classList.remove('dark-code');
+        }
     });
 }
 
@@ -1301,6 +1382,102 @@ function adjustTemperature(delta) {
     }
 }
 
+// 切换主题功能
+function toggleTheme() {
+    currentTheme = currentTheme === 'light' ? 'dark' : 'light';
+    applyTheme();
+    localStorage.setItem('theme', currentTheme);
+
+    // 更新主题切换按钮图标 - 快速切换按钮
+    updateThemeToggleIcons();
+
+    showNotification(`已切换至${currentTheme === 'light' ? '亮色' : '暗色'}主题`);
+}
+
+// 更新所有主题图标
+function updateThemeToggleIcons() {
+    // 更新侧边栏中的图标
+    const settingsThemeToggle = document.querySelector('.settings-modal .theme-toggle');
+    if (settingsThemeToggle) {
+        settingsThemeToggle.innerHTML = getThemeIcon();
+        settingsThemeToggle.nextElementSibling.textContent = currentTheme === 'light' ? '亮色' : '暗色';
+    }
+
+    // 更新快速访问的图标
+    const quickThemeToggle = document.getElementById('quickThemeToggle');
+    if (quickThemeToggle) {
+        quickThemeToggle.innerHTML = getThemeIcon();
+    }
+}
+
+// 获取当前主题对应的图标
+function getThemeIcon() {
+    return currentTheme === 'light'
+        ? `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+           </svg>`
+        : `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5"></circle>
+            <line x1="12" y1="1" x2="12" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="23"></line>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+            <line x1="1" y1="12" x2="3" y2="12"></line>
+            <line x1="21" y1="12" x2="23" y2="12"></line>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+           </svg>`;
+}
+
+// 应用主题到DOM
+function applyTheme() {
+    if (currentTheme === 'dark') {
+        document.body.classList.add('dark-theme');
+    } else {
+        document.body.classList.remove('dark-theme');
+    }
+
+    // 刷新滚动条以确保它们使用正确的主题颜色
+    refreshScrollbars();
+
+    // 确保页面加载后和主题切换时图标是正确的
+    setTimeout(() => updateThemeToggleIcons(), 0);
+}
+
+// 刷新滚动条样式
+function refreshScrollbars() {
+    try {
+        // 对可能含有滚动条的元素进行简单的视觉重载，确保滚动条更新样式
+        const chatContainer = document.querySelector('.chat-container');
+        const chatListContainer = document.querySelector('.chat-list-container');
+        const preElements = document.querySelectorAll('pre');
+
+        // 安全处理单个元素
+        const refreshSingleElement = (el) => {
+            if (el) {
+                const scrollTop = el.scrollTop;
+                el.style.overflow = 'hidden';
+                setTimeout(() => {
+                    el.style.overflow = '';
+                    el.scrollTop = scrollTop;
+                }, 10);
+            }
+        };
+
+        // 处理单个元素
+        refreshSingleElement(chatContainer);
+        refreshSingleElement(chatListContainer);
+
+        // 处理NodeList
+        if (preElements && preElements.length > 0) {
+            preElements.forEach(el => refreshSingleElement(el));
+        }
+    } catch (error) {
+        console.error('刷新滚动条时出错:', error);
+        // 错误发生时不中断程序流程
+    }
+}
+
 // 添加设置弹窗HTML
 function createSettingsModal() {
     const modal = document.createElement('div');
@@ -1317,6 +1494,13 @@ function createSettingsModal() {
                 </div>
             </div>
             <div class="settings-section">
+                <div class="settings-item" id="themeSettings">
+                    <span>主题模式：</span>
+                    <div class="theme-toggle" onclick="toggleTheme()">
+                        ${getThemeIcon()}
+                    </div>
+                    <span>${currentTheme === 'light' ? '亮色' : '暗色'}</span>
+                </div>
                 <div class="settings-item" id="temperatureSettings">
                     <span>温度系数：</span>
                     <div class="temperature-control">
@@ -1343,7 +1527,7 @@ function createSettingsModal() {
                 </div>
                 <div class="settings-tip">注：仅官方源DeepSeek模型支持温度系数调节</div>
                 <br/><br/><br/><br/>
-                <div class="settings-tip">v1.0.8.25411</div>
+                <div class="settings-tip">v1.0.6.25409</div>
             </div>
         </div>
     `;
@@ -1356,8 +1540,15 @@ function toggleSettings() {
     if (!modal) {
         createSettingsModal();
         updateTemperatureSettingsState();
+        // 确保主题图标是正确的
+        updateThemeToggleIcons();
     } else {
         modal.classList.toggle('active');
+
+        // 在显示模态框时更新图标
+        if (modal.classList.contains('active')) {
+            updateThemeToggleIcons();
+        }
     }
 }
 
