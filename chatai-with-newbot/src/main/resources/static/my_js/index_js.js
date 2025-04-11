@@ -959,7 +959,7 @@ function updateChatTitle(messages) {
     const chatTitle = document.getElementById('chatTitle');
     const firstUserMessage = messages.find(msg => msg.role === 'user');
     chatTitle.textContent = firstUserMessage ?
-        (firstUserMessage.content.slice(0, 20) + (firstUserMessage.content.length > 20 ? '...' : '')) :
+        (firstUserMessage.content.slice(0, 11) + (firstUserMessage.content.length > 11 ? '...' : '')) :
         '新会话';
 }
 
