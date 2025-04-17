@@ -1813,6 +1813,10 @@ body:has(.sidebar.collapsed) .main-content {
     position: relative;
 }
 
+/* 思考内容文字 */
+.thinking-content-text{
+    padding: inherit;
+}
 /* 思考状态样式 */
 .thinking-status {
     font-size: 0.9em;

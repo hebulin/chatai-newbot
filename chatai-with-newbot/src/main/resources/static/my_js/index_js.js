@@ -626,13 +626,11 @@ function sendMessage(retryMessage = null) {
                                             const delta = jsonData.choices[0].delta;
                                             if (!hasResponse) {
                                                 hasResponse = true;
-                                                // 在收到第一个响应时设置时间戳和使用的模型
                                                 assistantMessage.time = new Date().toLocaleString('zh-CN');
-                                                // 重要：在开始接收响应时就保存使用的模型
-                                                assistantMessage.usedModel = currentModel; // 保存使用的模型信息
+                                                assistantMessage.usedModel = currentModel;
                                             }
 
-                                            // 处理思考内容
+                                            // 处理思考内容和回答内容
                                             if (delta.reasoning_content) {
                                                 if (!thinkingStartTime) {
                                                     thinkingStartTime = Date.now();
@@ -642,92 +640,37 @@ function sendMessage(retryMessage = null) {
                                                 assistantMessage.reasoning_content = currentThinkingContent;
                                                 contentUpdated = true;
                                             } else if (delta.content && !isThinkingComplete && thinkingStartTime) {
-                                                // 当开始接收正文内容且思考尚未标记完成时，标记思考完成
                                                 isThinkingComplete = true;
                                                 assistantMessage.thinkingTime = Math.round((Date.now() - thinkingStartTime) / 1000);
                                             }
 
-                                            // 处理回答内容
                                             if (delta.content) {
                                                 currentAnswerContent += delta.content;
                                                 assistantMessage.content = currentAnswerContent;
                                                 contentUpdated = true;
                                             }
 
+                                            // 更新UI
                                             if (contentUpdated) {
-                                                const chatContainer = document.getElementById('chatContainer');
-                                                const lastMessage = chatContainer.lastElementChild;
+                                                updateMessageUI(currentThinkingContent, currentAnswerContent, assistantMessage);
 
-                                                if (lastMessage && lastMessage.classList.contains('assistant-message-container')) {
-                                                    const contentDiv = lastMessage.querySelector('.message');
-                                                    if (contentDiv) {
-                                                        // 清空现有内容
-                                                        contentDiv.innerHTML = '';
-
-                                                        // 如果有思考内容，添加思考内容区域
-                                                        if (currentThinkingContent) {
-                                                            const thinkingDiv = document.createElement('div');
-                                                            thinkingDiv.className = 'thinking-content';
-
-                                                            // 添加思考状态标签
-                                                            const statusDiv = document.createElement('div');
-                                                            statusDiv.className = 'thinking-status';
-
-                                                            // 添加点击事件
-                                                            statusDiv.addEventListener('click', function() {
-                                                                thinkingDiv.classList.toggle('collapsed');
-                                                            });
-
-                                                            thinkingDiv.appendChild(statusDiv);
-
-                                                            // 添加思考内容
-                                                            const thinkingText = document.createElement('div');
-                                                            thinkingText.className = 'thinking-content-text';
-                                                            thinkingText.innerHTML = marked.parse(currentThinkingContent);
-                                                            thinkingDiv.appendChild(thinkingText);
-
-                                                            contentDiv.appendChild(thinkingDiv);
-                                                        }
-
-                                                        // 如果有回答内容，添加回答内容区域
-                                                        if (currentAnswerContent) {
-                                                            const answerDiv = document.createElement('div');
-                                                            answerDiv.className = 'answer-content';
-                                                            answerDiv.innerHTML = marked.parse(currentAnswerContent);
-
-                                                            // 添加复制按钮
-                                                            const copyButton = createCopyButton(currentAnswerContent);
-
-                                                            // 添加模型信息 - 使用assistantMessage中保存的模型信息
-                                                            const modelInfo = document.createElement('div');
-                                                            modelInfo.className = 'model-info';
-                                                            modelInfo.textContent = `使用模型：${assistantMessage.usedModel || currentModel}`;
-
-                                                            contentDiv.appendChild(answerDiv);
-                                                            contentDiv.appendChild(modelInfo);
-                                                            contentDiv.appendChild(copyButton);
-                                                        }
-                                                    }
+                                                const tempMessages = [...chats[currentChatId]];
+                                                if (!tempMessages.includes(assistantMessage)) {
+                                                    tempMessages.push(assistantMessage);
                                                 }
+                                                displayMessages(tempMessages);
                                             }
                                         }
-                                    } catch (e) {
-                                        console.warn('JSON 解析警告:', e.message, '原始数据:', line);
+                                    } catch (error) {
+                                        console.warn('JSON 解析警告:', error.message, '原始数据:', line);
                                     }
                                 }
                             });
 
-                            if (contentUpdated) {
-                                const tempMessages = [...chats[currentChatId]];
-                                if (!tempMessages.includes(assistantMessage)) {
-                                    tempMessages.push(assistantMessage);
-                                }
-                                displayMessages(tempMessages);
-                            }
-
                             return readStream();
                         } catch (error) {
-                            throw new Error('处理响应数据时发生错误: ' + error.message);
+                            console.warn('处理响应数据时发生错误:', error);
+                            throw error;
                         }
                     });
                 }
@@ -790,6 +733,10 @@ function saveChats() {
 // 修改显示消息函数，确保滚动到底部
 function displayMessages(messages) {
     const container = document.getElementById('chatContainer');
+    const wasAtBottom = isAtBottom(container);
+    const previousHeight = container.scrollHeight;
+    const previousScroll = container.scrollTop;  // 保存当前滚动位置
+
     container.innerHTML = '';
 
     // 更新聊天标题
@@ -890,12 +837,9 @@ function displayMessages(messages) {
                         // 添加复制按钮
                         const copyButton = createCopyButton(msg.content);
 
-                        // 添加模型信息 - 修改这里，确保使用消息中保存的模型信息
+                        // 添加模型信息
                         const modelInfo = document.createElement('div');
                         modelInfo.className = 'model-info';
-
-                        // 关键修复：确保显示的是消息中保存的模型，而不是当前选择的模型
-                        // 如果消息中有保存的模型信息，使用它；否则才使用当前模型
                         const usedModelName = msg.usedModel || currentModel;
                         modelInfo.textContent = `使用模型：${usedModelName}`;
 
@@ -918,16 +862,31 @@ function displayMessages(messages) {
         container.appendChild(messageContainer);
     });
 
-    // 确保在所有消息渲染后滚动到底部
-    setTimeout(() => {
-        container.scrollTop = container.scrollHeight;
+    // 处理滚动
+    const newHeight = container.scrollHeight;
+    if (wasAtBottom) {
+        // 如果之前在底部，使用 requestAnimationFrame 确保平滑滚动
+        requestAnimationFrame(() => {
+            container.scrollTop = container.scrollHeight;
+        });
+    } else {
+        // 如果不在底部，保持相对滚动位置
+        const heightDiff = newHeight - previousHeight;
+        if (heightDiff > 0) {
+            container.scrollTop = previousScroll + heightDiff;
+        } else {
+            container.scrollTop = previousScroll;
+        }
+    }
 
-        // 强制浏览器重新计算布局
-        window.dispatchEvent(new Event('resize'));
-    }, 50);
-
-    // 在渲染完消息后初始化代码块
+    // 初始化代码块
     initializeCodeBlocks();
+}
+
+// 添加检查是否在底部的辅助函数
+function isAtBottom(element) {
+    const threshold = 100; // 100px的阈值，接近底部就认为是在底部
+    return element.scrollHeight - element.scrollTop - element.clientHeight <= threshold;
 }
 
 // 添加处理消息内容的辅助函数
@@ -1770,4 +1729,86 @@ function createCopyButton(content) {
     });
 
     return copyButton;
+}
+
+// 添加新的辅助函数用于更新消息UI
+function updateMessageUI(thinkingContent, answerContent, assistantMessage) {
+    const chatContainer = document.getElementById('chatContainer');
+    const lastMessage = chatContainer.lastElementChild;
+    const wasAtBottom = isAtBottom(chatContainer);
+    const previousHeight = chatContainer.scrollHeight;
+
+    if (lastMessage && lastMessage.classList.contains('assistant-message-container')) {
+        const contentDiv = lastMessage.querySelector('.message');
+        if (contentDiv) {
+            // 保存当前滚动位置
+            const scrollTop = chatContainer.scrollTop;
+
+            contentDiv.innerHTML = '';
+
+            if (thinkingContent) {
+                const thinkingDiv = document.createElement('div');
+                thinkingDiv.className = 'thinking-content';
+
+                const statusDiv = document.createElement('div');
+                statusDiv.className = 'thinking-status';
+                if (assistantMessage.interrupted) {
+                    statusDiv.innerHTML = `回答被中断 <span class="thinking-toggle">﹀</span>`;
+                } else if (assistantMessage.thinkingTime) {
+                    statusDiv.innerHTML = `已深度思考 用时${assistantMessage.thinkingTime}秒 <span class="thinking-toggle">﹀</span>`;
+                } else {
+                    statusDiv.className += ' active';
+                    statusDiv.innerHTML = '正在深度思考中... <span class="thinking-toggle">﹀</span>';
+                }
+
+                statusDiv.addEventListener('click', function() {
+                    thinkingDiv.classList.toggle('collapsed');
+                });
+
+                thinkingDiv.appendChild(statusDiv);
+
+                const thinkingText = document.createElement('div');
+                thinkingText.className = 'thinking-content-text';
+                thinkingText.innerHTML = marked.parse(thinkingContent);
+                thinkingDiv.appendChild(thinkingText);
+
+                contentDiv.appendChild(thinkingDiv);
+            }
+
+            if (answerContent) {
+                const answerDiv = document.createElement('div');
+                answerDiv.className = 'answer-content';
+                answerDiv.innerHTML = marked.parse(answerContent);
+
+                const copyButton = createCopyButton(answerContent);
+                const modelInfo = document.createElement('div');
+                modelInfo.className = 'model-info';
+                modelInfo.textContent = `使用模型：${assistantMessage.usedModel || currentModel}`;
+
+                contentDiv.appendChild(answerDiv);
+                contentDiv.appendChild(modelInfo);
+                contentDiv.appendChild(copyButton);
+            }
+
+            // 处理表格和代码块
+            processMessageContent(contentDiv);
+
+            // 处理滚动位置
+            const newHeight = chatContainer.scrollHeight;
+            if (wasAtBottom) {
+                // 如果之前在底部，使用 requestAnimationFrame 确保平滑滚动
+                requestAnimationFrame(() => {
+                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                });
+            } else {
+                // 如果不在底部，保持相对滚动位置
+                const heightDiff = newHeight - previousHeight;
+                if (heightDiff > 0) {
+                    chatContainer.scrollTop = scrollTop + heightDiff;
+                } else {
+                    chatContainer.scrollTop = scrollTop;
+                }
+            }
+        }
+    }
 }
