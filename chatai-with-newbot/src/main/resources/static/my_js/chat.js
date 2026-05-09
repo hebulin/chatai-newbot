@@ -77,8 +77,7 @@ function doLogout() {
     localStorage.removeItem('token');
     localStorage.removeItem('username');
     localStorage.removeItem('role');
-    localStorage.removeItem(CHATS_KEY);
-    localStorage.removeItem(LAST_CHAT_KEY);
+    // 不删除 CHATS_KEY 和 LAST_CHAT_KEY，保留会话历史，下次登录同一用户时恢复
     window.location.href = '/login.html';
 }
 
