@@ -81,7 +81,7 @@ body{display:flex}
 .thinking-block.collapsed .thinking-body{display:none}
 
 /* ===== Code Blocks ===== */
-.msg-bubble pre{background:#1e293b;border-radius:10px;margin:10px 0;overflow-x:auto;max-width:100%;position:relative}
+.msg-bubble pre{background:#1e293b!important;border-radius:10px;margin:10px 0;overflow-x:auto;max-width:100%;position:relative}
 .code-header{display:flex;justify-content:space-between;align-items:center;padding:8px 14px;background:#334155;color:#94a3b8;font-size:12px}
 .code-copy-btn{background:none;border:none;color:#94a3b8;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;transition:all .15s}
 .code-copy-btn:hover{color:#fff;background:rgba(255,255,255,.1)}

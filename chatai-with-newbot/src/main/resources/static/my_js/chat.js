@@ -288,7 +288,31 @@ function sendMessage() {
         body: JSON.stringify(requestBody),
         signal: currentController.signal
     }).then(function(resp) {
-        if (!resp.ok) throw new Error('服务器错误: ' + resp.status);
+        // 401未授权：提示登录过期并跳转登录页
+        if (resp.status === 401) {
+            hideLoading();
+            resetState();
+            resetSendBtn();
+            // 移除已添加的用户消息
+            chats[currentChatId].pop();
+            saveChats();
+            displayMessages();
+            showToast('登录已过期，请重新登录');
+            setTimeout(function() { logout(); }, 1500);
+            return;
+        }
+        if (!resp.ok) {
+            // 尝试读取服务端返回的错误信息
+            return resp.text().then(function(text) {
+                var errMsg = '服务器错误 (' + resp.status + ')';
+                try {
+                    var json = JSON.parse(text);
+                    if (json.message) errMsg = json.message;
+                    else if (json.error && json.error.message) errMsg = json.error.message;
+                } catch(e) {}
+                throw new Error(errMsg);
+            });
+        }
         hideLoading();
         var reader = resp.body.getReader();
         var decoder = new TextDecoder();
@@ -347,12 +371,14 @@ function sendMessage() {
         hideLoading();
         if (err.name === 'AbortError') { finishStream(true); return; }
         console.error('请求失败:', err);
-        assistantMsg.content = '请求失败: ' + err.message;
+        // 显示具体错误信息
+        assistantMsg.content = '❌ ' + err.message;
         assistantMsg.time = nowStr();
         chats[currentChatId].push(assistantMsg);
         saveChats();
         displayMessages();
         resetSendBtn();
+        resetState();
     });
 }
 
@@ -454,7 +480,11 @@ function updateStreamingMessage(msg) {
         }
     }
     processSpecialContent(streamEl);
-    container.scrollTop = container.scrollHeight;
+    // 智能自动滚动：仅在用户处于底部附近时自动跟随，用户向上滚动时不干扰
+    var isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+    if (isNearBottom) {
+        container.scrollTop = container.scrollHeight;
+    }
 }
 
 function createMessageEl(msg) {
