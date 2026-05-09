@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Chat - 登录</title>
+    <link rel="stylesheet" href="my_css/login.css">
+</head>
+<body>
+<div class="login-container">
+    <div class="login-card">
+        <div class="login-header">
+            <div class="logo">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M8 12h8M12 8v8"/>
+                </svg>
+            </div>
+            <h1>AI Chat Platform</h1>
+            <p class="subtitle">智能对话，无限可能</p>
+        </div>
+
+        <div class="tab-switch">
+            <button class="tab-btn active" onclick="switchTab('login')">登录</button>
+            <button class="tab-btn" onclick="switchTab('register')">注册</button>
+        </div>
+
+        <form id="loginForm" class="auth-form" onsubmit="return handleLogin(event)">
+            <div class="form-group">
+                <label for="loginUsername">用户名</label>
+                <input type="text" id="loginUsername" placeholder="请输入用户名" required autocomplete="username">
+            </div>
+            <div class="form-group">
+                <label for="loginPassword">密码</label>
+                <input type="password" id="loginPassword" placeholder="请输入密码" required autocomplete="current-password">
+            </div>
+            <button type="submit" class="submit-btn" id="loginBtn">登录</button>
+        </form>
+
+        <form id="registerForm" class="auth-form" style="display:none" onsubmit="return handleRegister(event)">
+            <div class="form-group">
+                <label for="regUsername">用户名</label>
+                <input type="text" id="regUsername" placeholder="2-20个字符" required minlength="2" maxlength="20">
+            </div>
+            <div class="form-group">
+                <label for="regPassword">密码</label>
+                <input type="password" id="regPassword" placeholder="至少4个字符" required minlength="4">
+            </div>
+            <div class="form-group">
+                <label for="regPassword2">确认密码</label>
+                <input type="password" id="regPassword2" placeholder="再次输入密码" required minlength="4">
+            </div>
+            <button type="submit" class="submit-btn" id="regBtn">注册</button>
+        </form>
+
+        <div id="errorMsg" class="error-msg" style="display:none"></div>
+    </div>
+</div>
+<script src="my_js/login.js"></script>
+</body>
+</html>

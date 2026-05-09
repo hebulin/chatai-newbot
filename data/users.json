@@ -1,0 +1,10 @@
+[ {
+  "id" : "4aa4c0bf-09de-4f47-8a27-9aabf81f0b42",
+  "username" : "admin",
+  "password" : "7c19c8e284848d2ff7775c1d3287f9dae52aef0b356380a6a2f8adab21309219",
+  "role" : "admin",
+  "createdAt" : "2026-05-08 15:06:15",
+  "lastLoginAt" : "2026-05-09 12:08:41",
+  "lastLoginIp" : "0:0:0:0:0:0:0:1",
+  "allowedModelIds" : [ ]
+} ]

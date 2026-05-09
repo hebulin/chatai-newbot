@@ -1,0 +1,106 @@
+[
+  {
+    "id": "deepseek",
+    "name": "DeepSeek",
+    "icon": "🔮",
+    "defaultApiUrl": "https://api.deepseek.com/v1",
+    "protocol": "openai",
+    "thinkingParamType": "deepseek",
+    "models": [
+      {"id": "deepseek-v4-pro", "name": "DeepSeek-V4-Pro (旗舰)", "supportsThinking": true},
+      {"id": "deepseek-v4-flash", "name": "DeepSeek-V4-Flash (轻量)", "supportsThinking": true},
+      {"id": "deepseek-chat", "name": "DeepSeek-Chat (即将弃用)", "supportsThinking": true},
+      {"id": "deepseek-reasoner", "name": "DeepSeek-Reasoner (即将弃用)", "supportsThinking": true}
+    ]
+  },
+  {
+    "id": "qwen",
+    "name": "通义千问 (Qwen)",
+    "icon": "🟣",
+    "defaultApiUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "protocol": "openai",
+    "thinkingParamType": "qwen",
+    "models": [
+      {"id": "qwen3.6-max-preview", "name": "Qwen3.6-Max-Preview (旗舰)", "supportsThinking": true},
+      {"id": "qwen3.6-plus", "name": "Qwen3.6-Plus", "supportsThinking": true},
+      {"id": "qwen3.6-flash", "name": "Qwen3.6-Flash (轻量)", "supportsThinking": true},
+      {"id": "qwen3-max", "name": "Qwen3-Max", "supportsThinking": true},
+      {"id": "qwen3.5-plus", "name": "Qwen3.5-Plus", "supportsThinking": true},
+      {"id": "qwen3.5-flash", "name": "Qwen3.5-Flash", "supportsThinking": true},
+      {"id": "qwq-plus", "name": "QwQ-Plus (深度思考)", "supportsThinking": true},
+      {"id": "qwen3-coder-plus", "name": "Qwen3-Coder-Plus (代码)", "supportsThinking": false},
+      {"id": "qwen-long", "name": "Qwen-Long (长文本)", "supportsThinking": false},
+      {"id": "qwen-turbo", "name": "Qwen-Turbo (快速)", "supportsThinking": false}
+    ]
+  },
+  {
+    "id": "kimi",
+    "name": "Kimi (月之暗面)",
+    "icon": "🌙",
+    "defaultApiUrl": "https://api.moonshot.cn/v1",
+    "protocol": "openai",
+    "thinkingParamType": "kimi",
+    "models": [
+      {"id": "kimi-k2.6", "name": "Kimi-K2.6 (最新旗舰)", "supportsThinking": true},
+      {"id": "kimi-k2.5", "name": "Kimi-K2.5", "supportsThinking": true},
+      {"id": "kimi-k2-turbo-preview", "name": "Kimi-K2-Turbo (快速)", "supportsThinking": false},
+      {"id": "kimi-k2-thinking", "name": "Kimi-K2-Thinking (思考)", "supportsThinking": true},
+      {"id": "moonshot-v1-8k", "name": "Moonshot-V1-8K", "supportsThinking": false},
+      {"id": "moonshot-v1-32k", "name": "Moonshot-V1-32K", "supportsThinking": false},
+      {"id": "moonshot-v1-128k", "name": "Moonshot-V1-128K", "supportsThinking": false}
+    ]
+  },
+  {
+    "id": "zhipu",
+    "name": "智谱 (GLM)",
+    "icon": "🟢",
+    "defaultApiUrl": "https://open.bigmodel.cn/api/paas/v4",
+    "protocol": "openai",
+    "thinkingParamType": "zhipu",
+    "models": [
+      {"id": "glm-5.1", "name": "GLM-5.1 (最新旗舰)", "supportsThinking": true},
+      {"id": "glm-5", "name": "GLM-5 (高智能基座)", "supportsThinking": true},
+      {"id": "glm-5-turbo", "name": "GLM-5-Turbo (快速)", "supportsThinking": true},
+      {"id": "glm-4.7", "name": "GLM-4.7", "supportsThinking": true},
+      {"id": "glm-4.7-flash", "name": "GLM-4.7-Flash (轻量)", "supportsThinking": false},
+      {"id": "glm-4.7-flashx", "name": "GLM-4.7-FlashX (极速)", "supportsThinking": false},
+      {"id": "glm-4.6", "name": "GLM-4.6", "supportsThinking": true},
+      {"id": "glm-4.5-air", "name": "GLM-4.5-Air (高性价比)", "supportsThinking": true},
+      {"id": "glm-4.5-flash", "name": "GLM-4.5-Flash (免费)", "supportsThinking": false},
+      {"id": "glm-4-long", "name": "GLM-4-Long (1M上下文)", "supportsThinking": false}
+    ]
+  },
+  {
+    "id": "minimax",
+    "name": "MiniMax",
+    "icon": "⚡",
+    "defaultApiUrl": "https://api.minimaxi.com/v1",
+    "protocol": "openai",
+    "thinkingParamType": "default",
+    "models": [
+      {"id": "MiniMax-M2.7", "name": "MiniMax-M2.7 (最新旗舰)", "supportsThinking": false},
+      {"id": "MiniMax-M2.7-highspeed", "name": "MiniMax-M2.7-HighSpeed (快速)", "supportsThinking": false},
+      {"id": "MiniMax-M2.5", "name": "MiniMax-M2.5 (高性价比)", "supportsThinking": false},
+      {"id": "MiniMax-M2.5-highspeed", "name": "MiniMax-M2.5-HighSpeed (快速)", "supportsThinking": false},
+      {"id": "MiniMax-M2.1", "name": "MiniMax-M2.1 (编程增强)", "supportsThinking": false},
+      {"id": "MiniMax-M2", "name": "MiniMax-M2 (编码/Agent)", "supportsThinking": false}
+    ]
+  },
+  {
+    "id": "doubao",
+    "name": "豆包 (火山引擎)",
+    "icon": "🫘",
+    "defaultApiUrl": "https://ark.cn-beijing.volces.com/api/v3",
+    "protocol": "openai",
+    "thinkingParamType": "doubao",
+    "models": [
+      {"id": "doubao-seed-2-0-pro-260215", "name": "Doubao-Seed-2.0-Pro (旗舰)", "supportsThinking": true},
+      {"id": "doubao-seed-2-0-lite-260428", "name": "Doubao-Seed-2.0-Lite (轻量)", "supportsThinking": true},
+      {"id": "doubao-seed-2-0-mini-260428", "name": "Doubao-Seed-2.0-Mini (经济)", "supportsThinking": true},
+      {"id": "doubao-seed-1-8-251228", "name": "Doubao-Seed-1.8 (上代旗舰)", "supportsThinking": true},
+      {"id": "doubao-seed-1-6-flash-250828", "name": "Doubao-Seed-1.6-Flash (快速)", "supportsThinking": true},
+      {"id": "doubao-1-5-pro-32k-250115", "name": "Doubao-1.5-Pro-32K", "supportsThinking": false},
+      {"id": "doubao-1-5-lite-32k-250115", "name": "Doubao-1.5-Lite-32K (轻量)", "supportsThinking": false}
+    ]
+  }
+]
