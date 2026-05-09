@@ -210,6 +210,7 @@ public class AdminController {
             m.put("createdAt", u.getCreatedAt());
             m.put("lastLoginAt", u.getLastLoginAt());
             m.put("lastLoginIp", u.getLastLoginIp());
+            m.put("lastLoginBrowser", u.getLastLoginBrowser());
             m.put("allowedModelIds", u.getAllowedModelIds());
             return m;
         }).collect(Collectors.toList());
@@ -274,6 +275,89 @@ public class AdminController {
         }
         result.put("success", true);
         result.put("data", storageService.getUsageLogs());
+        return result;
+    }
+
+    /**
+     * 用户维度使用统计
+     * 返回: [{ username, lastUseTime, lastLoginIp, lastLoginBrowser, modelStats: [{modelName, count}], thinkingCount }]
+     */
+    @GetMapping("/usage/stats")
+    public Map<String, Object> getUsageStats(HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+
+        List<User> users = storageService.getAllUsers();
+        List<UsageLog> logs = storageService.getUsageLogs();
+
+        // 按 userId 分组使用记录
+        Map<String, List<UsageLog>> logsByUser = logs.stream()
+                .collect(Collectors.groupingBy(UsageLog::getUserId));
+
+        List<Map<String, Object>> statsList = new ArrayList<>();
+        for (User u : users) {
+            Map<String, Object> stat = new HashMap<>();
+            stat.put("userId", u.getId());
+            stat.put("username", u.getUsername());
+            stat.put("role", u.getRole());
+            stat.put("lastLoginAt", u.getLastLoginAt());
+            stat.put("lastLoginIp", u.getLastLoginIp());
+            stat.put("lastLoginBrowser", u.getLastLoginBrowser());
+
+            List<UsageLog> userLogs = logsByUser.getOrDefault(u.getId(), Collections.emptyList());
+
+            // 最后使用时间
+            String lastUseTime = userLogs.stream()
+                    .map(UsageLog::getTimestamp)
+                    .filter(Objects::nonNull)
+                    .max(String::compareTo)
+                    .orElse(null);
+            stat.put("lastUseTime", lastUseTime);
+
+            // 按模型分组统计次数
+            Map<String, Long> modelCountMap = userLogs.stream()
+                    .collect(Collectors.groupingBy(
+                            l -> l.getModelName() != null ? l.getModelName() : "未知",
+                            Collectors.counting()));
+
+            // 思考模式使用次数
+            long thinkingCount = userLogs.stream()
+                    .filter(UsageLog::isDeepThinking)
+                    .count();
+            stat.put("thinkingCount", thinkingCount);
+
+            // 构建模型统计列表，按次数降序
+            List<Map<String, Object>> modelStats = new ArrayList<>();
+            modelCountMap.entrySet().stream()
+                    .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
+                    .forEach(e -> {
+                        Map<String, Object> ms = new HashMap<>();
+                        ms.put("modelName", e.getKey());
+                        ms.put("count", e.getValue());
+                        modelStats.add(ms);
+                    });
+            stat.put("modelStats", modelStats);
+            stat.put("totalCount", userLogs.size());
+
+            statsList.add(stat);
+        }
+
+        // 按最后使用时间降序
+        statsList.sort((a, b) -> {
+            String ta = (String) a.get("lastUseTime");
+            String tb = (String) b.get("lastUseTime");
+            if (ta == null && tb == null) return 0;
+            if (ta == null) return 1;
+            if (tb == null) return -1;
+            return tb.compareTo(ta);
+        });
+
+        result.put("success", true);
+        result.put("data", statsList);
         return result;
     }
 }

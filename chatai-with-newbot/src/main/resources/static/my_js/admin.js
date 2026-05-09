@@ -27,6 +27,7 @@ function api(url, opts) {
     loadModels();
     loadUsers();
     loadUsage();
+    loadUsageStats();
 })();
 
 function switchSection(name) {
@@ -352,6 +353,7 @@ function renderUsers() {
             '<td>' + (u.createdAt || '-') + '</td>' +
             '<td>' + (u.lastLoginAt || '-') + '</td>' +
             '<td>' + (u.lastLoginIp || '-') + '</td>' +
+            '<td>' + (u.lastLoginBrowser || '-') + '</td>' +
             '<td>' +
             '<button class="action-btn" onclick="showPerms(\'' + u.id + '\')">权限</button> ' +
             (u.role !== 'admin' ? '<button class="danger-btn" onclick="deleteUser(\'' + u.id + '\')">删除</button>' : '') +
@@ -414,7 +416,7 @@ function loadUsage() {
         // 最新的在前面
         logs.reverse().forEach(function(l) {
             var tr = document.createElement('tr');
-            tr.innerHTML = '<td>' + esc(l.timestamp || '-') + '</td><td>' + esc(l.username || '-') + '</td><td>' + esc(l.modelName || '-') + '</td>';
+            tr.innerHTML = '<td>' + esc(l.timestamp || '-') + '</td><td>' + esc(l.username || '-') + '</td><td>' + esc(l.modelName || '-') + '</td><td>' + (l.deepThinking ? '<span class="badge badge-think">🧠 思考</span>' : '-') + '</td>';
             tbody.appendChild(tr);
         });
     });
@@ -425,4 +427,61 @@ function esc(str) {
     var d = document.createElement('div');
     d.textContent = str;
     return d.innerHTML;
+}
+
+// ===== Usage Stats (用户统计) =====
+function loadUsageStats() {
+    api('/api/admin/usage/stats').then(function(data) {
+        if (!data || !data.success) return;
+        var grid = document.getElementById('statsGrid');
+        if (!grid) return;
+        grid.innerHTML = '';
+        var stats = data.data || [];
+        if (stats.length === 0) {
+            grid.innerHTML = '<div class="stats-empty">暂无使用统计数据</div>';
+            return;
+        }
+        stats.forEach(function(s) {
+            var card = document.createElement('div');
+            card.className = 'stats-card';
+
+            // 构建模型统计 HTML
+            var modelStatsHtml = '';
+            var modelStats = s.modelStats || [];
+            if (modelStats.length > 0) {
+                modelStatsHtml = '<div class="stats-models">';
+                modelStats.forEach(function(ms) {
+                    modelStatsHtml += '<span class="stats-model-tag">' + esc(ms.modelName) + ' <strong>' + ms.count + '</strong></span>';
+                });
+                modelStatsHtml += '</div>';
+            } else {
+                modelStatsHtml = '<div class="stats-models"><span class="stats-empty-text">暂无使用记录</span></div>';
+            }
+
+            card.innerHTML =
+                '<div class="stats-card-header">' +
+                    '<div class="stats-user-info">' +
+                        '<span class="stats-avatar">' + esc((s.username || '?')[0].toUpperCase()) + '</span>' +
+                        '<div>' +
+                            '<h3>' + esc(s.username) + '</h3>' +
+                            '<span class="stats-role">' + esc(s.role) + '</span>' +
+                        '</div>' +
+                    '</div>' +
+                    '<span class="stats-total">共 ' + (s.totalCount || 0) + ' 次</span>' +
+                '</div>' +
+                '<div class="stats-card-body">' +
+                    '<div class="stats-info-grid">' +
+                        '<div class="stats-info-item"><label>最后使用</label><span>' + (s.lastUseTime || '-') + '</span></div>' +
+                        '<div class="stats-info-item"><label>最后登录</label><span>' + (s.lastLoginAt || '-') + '</span></div>' +
+                        '<div class="stats-info-item"><label>登录IP</label><span>' + (s.lastLoginIp || '-') + '</span></div>' +
+                        '<div class="stats-info-item"><label>浏览器</label><span>' + (s.lastLoginBrowser || '-') + '</span></div>' +
+                    '</div>' +
+                    '<div class="stats-divider"></div>' +
+                    '<div class="stats-section-title">模型使用明细</div>' +
+                    modelStatsHtml +
+                    (s.thinkingCount > 0 ? '<div class="stats-thinking"><span class="badge badge-think">🧠 思考模式</span> ' + s.thinkingCount + ' 次</div>' : '') +
+                '</div>';
+            grid.appendChild(card);
+        });
+    });
 }

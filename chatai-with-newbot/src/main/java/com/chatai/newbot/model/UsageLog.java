@@ -14,4 +14,5 @@ public class UsageLog {
     private String timestamp;
     private int promptTokens;
     private int completionTokens;
+    private boolean deepThinking;
 }

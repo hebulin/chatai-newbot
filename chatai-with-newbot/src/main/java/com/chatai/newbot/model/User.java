@@ -14,6 +14,7 @@ public class User {
     private String createdAt;
     private String lastLoginAt;
     private String lastLoginIp;
+    private String lastLoginBrowser;
     private List<String> allowedModelIds = new ArrayList<>(); // 特别授权的模型ID列表
 
     @JsonIgnore

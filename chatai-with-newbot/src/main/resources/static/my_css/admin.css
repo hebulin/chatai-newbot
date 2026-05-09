@@ -131,4 +131,29 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
     .data-table{font-size:13px}
     .data-table th,.data-table td{padding:8px 10px}
     .provider-grid{grid-template-columns:1fr}
+    .stats-grid{grid-template-columns:1fr}
 }
+
+/* ===== Stats Grid (用户统计) ===== */
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:16px}
+.stats-card{background:#fff;border-radius:14px;box-shadow:0 1px 4px rgba(0,0,0,.06);border:1.5px solid #e5e7eb;overflow:hidden;transition:all .2s}
+.stats-card:hover{box-shadow:0 4px 16px rgba(99,102,241,.1);border-color:#c7d2fe}
+.stats-card-header{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;background:linear-gradient(135deg,#f8fafc,#eef2ff);border-bottom:1px solid #e5e7eb}
+.stats-user-info{display:flex;align-items:center;gap:10px}
+.stats-avatar{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px}
+.stats-user-info h3{font-size:15px;font-weight:600;color:#1e293b;margin:0}
+.stats-role{font-size:11px;color:#64748b}
+.stats-total{font-size:13px;color:#6366f1;font-weight:600;background:#eef2ff;padding:4px 12px;border-radius:8px}
+.stats-card-body{padding:16px 20px}
+.stats-info-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.stats-info-item{display:flex;flex-direction:column;gap:2px}
+.stats-info-item label{font-size:11px;color:#94a3b8;font-weight:500}
+.stats-info-item span{font-size:13px;color:#374151}
+.stats-divider{height:1px;background:#f1f5f9;margin:12px 0}
+.stats-section-title{font-size:12px;font-weight:600;color:#64748b;margin-bottom:8px}
+.stats-models{display:flex;flex-wrap:wrap;gap:6px}
+.stats-model-tag{font-size:12px;padding:4px 10px;border-radius:8px;background:#f1f5f9;color:#475569;display:inline-flex;align-items:center;gap:4px}
+.stats-model-tag strong{color:#6366f1}
+.stats-thinking{margin-top:10px;font-size:13px;color:#6366f1}
+.stats-empty{text-align:center;padding:40px;color:#94a3b8;font-size:14px}
+.stats-empty-text{font-size:12px;color:#94a3b8}

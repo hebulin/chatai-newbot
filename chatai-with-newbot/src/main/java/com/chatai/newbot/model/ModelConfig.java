@@ -19,7 +19,7 @@ public class ModelConfig {
     private String thinkingParamType; // 思考模式参数类型: deepseek/qwen/kimi/doubao/default
     private boolean supportsThinking; // 是否支持思考模式
     private boolean enabled;        // 是否启用
-    private boolean visibleToAll;   // 是否对所有用户可见
+    private Boolean visibleToAll;    // 是否对所有用户可见，默认true
     private boolean builtIn;        // 是否为系统内置
     private String createdAt;       // 创建时间
 }

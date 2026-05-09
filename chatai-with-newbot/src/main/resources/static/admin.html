@@ -18,6 +18,7 @@
             <button class="nav-tab" onclick="switchSection('models')">模型管理</button>
             <button class="nav-tab" onclick="switchSection('users')">用户管理</button>
             <button class="nav-tab" onclick="switchSection('usage')">使用记录</button>
+            <button class="nav-tab" onclick="switchSection('stats')">用户统计</button>
         </div>
         <div class="nav-actions">
             <button class="nav-btn" onclick="window.location.href='/index.html'">返回聊天</button>
@@ -57,7 +58,7 @@
             </div>
             <div class="card">
                 <table class="data-table" id="userTable">
-                    <thead><tr><th>用户名</th><th>角色</th><th>注册时间</th><th>最近登录</th><th>登录IP</th><th>操作</th></tr></thead>
+                    <thead><tr><th>用户名</th><th>角色</th><th>注册时间</th><th>最近登录</th><th>登录IP</th><th>浏览器</th><th>操作</th></tr></thead>
                     <tbody></tbody>
                 </table>
             </div>
@@ -70,10 +71,19 @@
             </div>
             <div class="card">
                 <table class="data-table" id="usageTable">
-                    <thead><tr><th>时间</th><th>用户</th><th>模型</th></tr></thead>
+                    <thead><tr><th>时间</th><th>用户</th><th>模型</th><th>思考模式</th></tr></thead>
                     <tbody></tbody>
                 </table>
             </div>
+        </section>
+
+        <!-- 用户统计 -->
+        <section id="sec-stats" class="section">
+            <div class="section-header">
+                <h2>用户使用统计</h2>
+                <span class="section-tip">按用户维度统计模型使用情况</span>
+            </div>
+            <div class="stats-grid" id="statsGrid"></div>
         </section>
     </main>
 </div>
