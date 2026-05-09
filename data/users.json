@@ -4,7 +4,18 @@
   "password" : "7c19c8e284848d2ff7775c1d3287f9dae52aef0b356380a6a2f8adab21309219",
   "role" : "admin",
   "createdAt" : "2026-05-08 15:06:15",
-  "lastLoginAt" : "2026-05-09 12:08:41",
+  "lastLoginAt" : "2026-05-09 17:38:10",
+  "lastLoginIp" : "127.0.0.1",
+  "lastLoginBrowser" : "Chrome",
+  "allowedModelIds" : [ "88b9837c-d8e7-45e1-991a-64d986d1ee25" ]
+}, {
+  "id" : "c7b0c0d8-f09a-4d39-9ef2-bba995c094a8",
+  "username" : "xaioguoba",
+  "password" : "46d2fa979ac03db8a91d1ed426b24b379415d09c9e7dfc31410f0462d95bc8d7",
+  "role" : "user",
+  "createdAt" : "2026-05-09 15:13:10",
+  "lastLoginAt" : "2026-05-09 15:59:47",
   "lastLoginIp" : "0:0:0:0:0:0:0:1",
+  "lastLoginBrowser" : "Chrome",
   "allowedModelIds" : [ ]
 } ]

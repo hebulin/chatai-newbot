@@ -8,6 +8,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Flux;
 
 import java.util.*;
@@ -50,6 +51,10 @@ public class UnifiedChatService {
         List<Map<String, String>> messages = new ArrayList<>();
         if (request.getMessages() != null) {
             for (NewBotMessage msg : request.getMessages()) {
+                // 过滤掉content为空的assistant消息，避免API报400错误
+                if ("assistant".equals(msg.getRole()) && (msg.getContent() == null || msg.getContent().trim().isEmpty())) {
+                    continue;
+                }
                 Map<String, String> m = new HashMap<>();
                 m.put("role", msg.getRole());
                 m.put("content", msg.getContent());
@@ -90,11 +95,24 @@ public class UnifiedChatService {
                     requestBody.remove("top_p");
                     break;
                 case "kimi":
+                    Map<String, Object> kimiThinking = new HashMap<>();
+                    kimiThinking.put("type", "enabled");
+                    requestBody.put("thinking", kimiThinking);
+                    // Kimi K2系列思考模式下temperature强制为1.0，其他情况移除自定义值
+                    if (modelId != null && modelId.startsWith("kimi-k2")) {
+                        requestBody.put("temperature", 1.0);
+                    } else {
+                        requestBody.remove("temperature");
+                    }
+                    requestBody.remove("top_p");
+                    break;
                 case "doubao":
                 case "zhipu":
                     Map<String, Object> commonThinking = new HashMap<>();
                     commonThinking.put("type", "enabled");
                     requestBody.put("thinking", commonThinking);
+                    requestBody.remove("temperature");
+                    requestBody.remove("top_p");
                     break;
                 default:
                     break;
@@ -112,6 +130,15 @@ public class UnifiedChatService {
                     requestBody.put("enable_thinking", false);
                     break;
                 case "kimi":
+                    Map<String, Object> kimiThinkingOff = new HashMap<>();
+                    kimiThinkingOff.put("type", "disabled");
+                    requestBody.put("thinking", kimiThinkingOff);
+                    // Kimi K2系列非思考模式下temperature强制为0.6
+                    if (modelId != null && modelId.startsWith("kimi-k2")) {
+                        requestBody.put("temperature", 0.6);
+                    }
+                    requestBody.remove("top_p");
+                    break;
                 case "doubao":
                 case "zhipu":
                     Map<String, Object> commonThinking = new HashMap<>();
@@ -147,10 +174,18 @@ public class UnifiedChatService {
                 .bodyToFlux(String.class)
                 .doOnNext(chunk -> log.debug("收到chunk: {}", chunk.length() > 100 ? chunk.substring(0, 100) + "..." : chunk))
                 .onErrorResume(e -> {
-                    log.error("API调用错误: {}", e.getMessage());
+                    String errorMsg = e.getMessage();
+                    if (e instanceof WebClientResponseException) {
+                        WebClientResponseException wce = (WebClientResponseException) e;
+                        String responseBody = wce.getResponseBodyAsString();
+                        log.error("API调用错误: {} | 状态码: {} | 响应体: {}", errorMsg, wce.getStatusCode(), responseBody);
+                        errorMsg = wce.getStatusCode().value() + " " + errorMsg + " - " + responseBody;
+                    } else {
+                        log.error("API调用错误: {}", errorMsg);
+                    }
                     return Flux.just(String.format(
                             "{\"error\":{\"message\":\"%s\",\"type\":\"api_error\"}}",
-                            e.getMessage().replace("\"", "\\\"")
+                            errorMsg.replace("\"", "\\\"")
                     ));
                 })
                 .doOnComplete(() -> log.info("流式输出完成"));
