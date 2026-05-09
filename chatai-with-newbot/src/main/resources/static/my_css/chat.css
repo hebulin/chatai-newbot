@@ -64,13 +64,19 @@ body{display:flex}
 .msg-wrapper.user .msg-bubble{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-bottom-right-radius:4px}
 .msg-wrapper.assistant .msg-bubble{background:#fff;color:#374151;border-bottom-left-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
 
-.msg-time{font-size:11px;color:#94a3b8;margin-top:4px;padding:0 42px}
-.msg-wrapper.user .msg-time{text-align:right}
+.msg-time{font-size:11px;color:#94a3b8}
 
-/* Copy button for messages */
-.msg-copy-btn{position:absolute;top:6px;right:6px;background:rgba(0,0,0,.05);border:none;border-radius:6px;padding:4px 6px;cursor:pointer;opacity:0;transition:opacity .2s;color:#64748b;font-size:11px;display:flex;align-items:center;gap:3px}
-.msg-bubble:hover .msg-copy-btn{opacity:1}
-.msg-copy-btn:hover{background:rgba(0,0,0,.1)}
+/* Message footer - 模型名称、复制、时间 */
+.msg-footer{display:flex;align-items:center;gap:8px;margin-top:4px;padding:0 42px;font-size:12px;color:#94a3b8}
+.msg-wrapper.user .msg-footer{justify-content:flex-end}
+.msg-model-name{color:#6366f1;font-weight:500;font-size:11px;background:#eef2ff;padding:2px 8px;border-radius:4px}
+.msg-footer .footer-copy-btn{opacity:0;background:none;border:none;color:#94a3b8;cursor:pointer;font-size:12px;padding:2px 8px;border-radius:4px;transition:all .15s}
+.msg-wrapper:hover .msg-footer .footer-copy-btn{opacity:1}
+.msg-footer .footer-copy-btn:hover{color:#6366f1;background:#eef2ff}
+.msg-footer .msg-time-inline{font-size:11px}
+
+/* Copy button for messages (old - inside bubble, no longer used but kept for compat) */
+.msg-copy-btn{display:none}
 
 /* ===== Thinking Block ===== */
 .thinking-block{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;margin-bottom:10px;overflow:hidden}
@@ -96,7 +102,17 @@ body{display:flex}
 .msg-bubble tr:hover{background:#f1f5f9}
 
 /* ===== Mermaid ===== */
-.mermaid-container{margin:10px 0;background:#fff;border-radius:8px;padding:16px;overflow-x:auto;max-width:100%}
+.mermaid-container{margin:10px 0;background:#fff;border-radius:8px;overflow:hidden;max-width:100%;border:1px solid #e5e7eb}
+.mermaid-toolbar{display:flex;border-bottom:1px solid #e5e7eb;background:#f8fafc}
+.mermaid-tab{padding:6px 14px;border:none;background:none;cursor:pointer;font-size:12px;color:#94a3b8;transition:all .15s;border-bottom:2px solid transparent}
+.mermaid-tab.active{color:#6366f1;border-bottom-color:#6366f1;font-weight:500}
+.mermaid-tab:hover{color:#6366f1}
+.mermaid-view{padding:16px;overflow-x:auto}
+.mermaid-view pre.mermaid{background:transparent!important;margin:0!important;padding:0!important;border-radius:0!important}
+.mermaid-view pre.mermaid svg{max-width:100%}
+.mermaid-code{padding:0}
+.mermaid-code pre{background:#1e293b!important;border-radius:0!important;margin:0!important}
+.mermaid-code pre code{padding:14px!important}
 
 /* ===== Input Area ===== */
 .input-area{padding:12px 20px 8px;background:#fff;border-top:1px solid #e5e7eb;flex-shrink:0}

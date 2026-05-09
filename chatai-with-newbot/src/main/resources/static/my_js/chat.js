@@ -4,6 +4,7 @@ var currentChatId = null;
 var chats = {};
 var models = [];
 var currentModelId = '';
+var currentModelName = '';
 var isDeepThinking = false;
 var isStreamActive = false;
 var currentController = null;
@@ -131,6 +132,11 @@ function loadModels() {
 function onModelChange() {
     var select = document.getElementById('modelSelect');
     currentModelId = select.value;
+    // 查找当前模型名称
+    currentModelName = '';
+    for (var i = 0; i < models.length; i++) {
+        if (models[i].id === currentModelId) { currentModelName = models[i].displayName; break; }
+    }
     var opt = select.options[select.selectedIndex];
     var supportsThinking = opt && opt.dataset.supportsThinking === 'true';
     var thinkToggle = document.getElementById('thinkToggle');
@@ -279,7 +285,7 @@ function sendMessage() {
     currentAnswerContent = '';
     thinkingStartTime = null;
 
-    var assistantMsg = { role: 'assistant', content: '', time: null };
+    var assistantMsg = { role: 'assistant', content: '', time: null, modelName: currentModelName || undefined };
     var hasResponse = false;
 
     fetch('/api/chat', {
@@ -390,7 +396,8 @@ function finishStream(interrupted) {
             content: currentAnswerContent,
             reasoning_content: currentThinkingContent || undefined,
             time: nowStr(),
-            interrupted: interrupted || undefined
+            interrupted: interrupted || undefined,
+            modelName: currentModelName || undefined
         };
         if (thinkingStartTime && !msg.thinkingTime) {
             msg.thinkingTime = Math.round((Date.now() - thinkingStartTime) / 1000);
@@ -456,7 +463,8 @@ function updateStreamingMessage(msg) {
             if (needRebuild) {
                 // 结构变化，需要重建
                 var savedScrollTop = thinkingBody ? thinkingBody.scrollTop : 0;
-                bubble.innerHTML = renderMsgContent(msg) + createCopyBtn();
+                bubble.innerHTML = renderMsgContent(msg);
+                bubble.setAttribute('data-raw', msg.content || '');
                 // 恢复思考区域滚动位置
                 thinkingBody = bubble.querySelector('.thinking-body');
                 if (thinkingBody && savedScrollTop > 0) {
@@ -475,6 +483,7 @@ function updateStreamingMessage(msg) {
                 }
                 if (msg.content && answerEl) {
                     answerEl.innerHTML = renderMarkdown(msg.content);
+                    bubble.setAttribute('data-raw', msg.content || '');
                 }
             }
         }
@@ -504,24 +513,43 @@ function createMessageEl(msg) {
     // 气泡
     var bubble = document.createElement('div');
     bubble.className = 'msg-bubble';
+    bubble.setAttribute('data-raw', msg.content || '');
 
     if (msg.role === 'user') {
-        bubble.innerHTML = escapeHtml(msg.content).replace(/\n/g, '<br>') + createCopyBtn();
+        bubble.innerHTML = escapeHtml(msg.content).replace(/\n/g, '<br>');
     } else {
-        bubble.innerHTML = renderMsgContent(msg) + createCopyBtn();
+        bubble.innerHTML = renderMsgContent(msg);
     }
 
     row.appendChild(avatar);
     row.appendChild(bubble);
     wrapper.appendChild(row);
 
-    // 时间
-    if (msg.time) {
-        var time = document.createElement('div');
-        time.className = 'msg-time';
-        time.textContent = msg.time;
-        wrapper.appendChild(time);
+    // 底部信息栏：模型名称 + 复制按钮 + 时间
+    var footer = document.createElement('div');
+    footer.className = 'msg-footer';
+
+    if (msg.role === 'assistant' && msg.modelName) {
+        var modelSpan = document.createElement('span');
+        modelSpan.className = 'msg-model-name';
+        modelSpan.textContent = msg.modelName;
+        footer.appendChild(modelSpan);
     }
+
+    var copyBtn = document.createElement('button');
+    copyBtn.className = 'footer-copy-btn';
+    copyBtn.textContent = '复制';
+    copyBtn.onclick = function() { copyMsgContent(this); };
+    footer.appendChild(copyBtn);
+
+    if (msg.time) {
+        var time = document.createElement('span');
+        time.className = 'msg-time-inline';
+        time.textContent = msg.time;
+        footer.appendChild(time);
+    }
+
+    wrapper.appendChild(footer);
 
     return wrapper;
 }
@@ -554,33 +582,67 @@ function renderMarkdown(text) {
 
     var html = marked.parse(text);
 
-    // 还原mermaid
+    // 还原mermaid - 添加代码/视图切换工具栏
     mermaidBlocks.forEach(function(code, idx) {
+        var escapedCode = escapeHtml(code);
         html = html.replace('%%MERMAID_' + idx + '%%',
-            '<div class="mermaid-container"><pre class="mermaid">' + escapeHtml(code) + '</pre></div>');
+            '<div class="mermaid-container">' +
+            '<div class="mermaid-toolbar">' +
+            '<button class="mermaid-tab active" onclick="switchMermaidView(this,\'view\')">视图</button>' +
+            '<button class="mermaid-tab" onclick="switchMermaidView(this,\'code\')">代码</button>' +
+            '</div>' +
+            '<div class="mermaid-view"><pre class="mermaid">' + escapedCode + '</pre></div>' +
+            '<div class="mermaid-code" style="display:none"><pre><code class="language-mermaid">' + escapedCode + '</code></pre></div>' +
+            '</div>');
     });
 
     return html;
 }
 
-function createCopyBtn() {
-    return '<button class="msg-copy-btn" onclick="copyMsgContent(this)">复制</button>';
-}
-
 function copyMsgContent(btn) {
-    var bubble = btn.closest('.msg-bubble');
-    var text = '';
-    // 优先取answer-content的纯文本
-    var answer = bubble.querySelector('.answer-content');
-    if (answer) {
-        text = answer.innerText;
-    } else {
-        text = bubble.innerText.replace('复制', '').trim();
+    var wrapper = btn.closest('.msg-wrapper');
+    var bubble = wrapper.querySelector('.msg-bubble');
+    // 优先使用data-raw属性（原始markdown内容）
+    var rawText = bubble.getAttribute('data-raw') || '';
+    if (!rawText) {
+        rawText = bubble.innerText.trim();
     }
-    navigator.clipboard.writeText(text).then(function() {
+    navigator.clipboard.writeText(rawText).then(function() {
         btn.textContent = '已复制';
         setTimeout(function() { btn.textContent = '复制'; }, 2000);
     }).catch(function() { showToast('复制失败'); });
+}
+
+// ===== Mermaid 视图/代码切换 =====
+function switchMermaidView(btn, mode) {
+    var container = btn.closest('.mermaid-container');
+    var toolbar = container.querySelector('.mermaid-toolbar');
+    var viewDiv = container.querySelector('.mermaid-view');
+    var codeDiv = container.querySelector('.mermaid-code');
+
+    toolbar.querySelectorAll('.mermaid-tab').forEach(function(t) { t.classList.remove('active'); });
+    btn.classList.add('active');
+
+    if (mode === 'code') {
+        viewDiv.style.display = 'none';
+        codeDiv.style.display = 'block';
+        // 确保代码块已高亮
+        codeDiv.querySelectorAll('pre code:not([data-processed])').forEach(function(block) {
+            block.dataset.processed = 'true';
+            hljs.highlightElement(block);
+            var pre = block.parentElement;
+            if (!pre.querySelector('.code-header')) {
+                var lang = (block.className.match(/language-(\w+)/) || ['', 'text'])[1];
+                var header = document.createElement('div');
+                header.className = 'code-header';
+                header.innerHTML = '<span>' + lang + '</span><button class="code-copy-btn" onclick="copyCode(this)">复制代码</button>';
+                pre.insertBefore(header, pre.firstChild);
+            }
+        });
+    } else {
+        viewDiv.style.display = 'block';
+        codeDiv.style.display = 'none';
+    }
 }
 
 // ===== 特殊内容处理 =====
