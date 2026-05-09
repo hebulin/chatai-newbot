@@ -413,10 +413,44 @@ function updateStreamingMessage(msg) {
         streamEl.id = 'streaming-msg';
         container.appendChild(streamEl);
     } else {
-        // 只更新内容，不重建整个DOM
         var bubble = streamEl.querySelector('.msg-bubble');
         if (bubble) {
-            bubble.innerHTML = renderMsgContent(msg) + createCopyBtn();
+            var thinkingBody = bubble.querySelector('.thinking-body');
+            var answerEl = bubble.querySelector('.answer-content');
+
+            // 判断是否需要重建整个结构（仅在结构变化时重建）
+            var needRebuild = false;
+            // 思考内容首次出现
+            if (msg.reasoning_content && !thinkingBody) needRebuild = true;
+            // 回答内容首次出现
+            if (msg.content && !answerEl) needRebuild = true;
+            // 思考结束状态切换（正在思考→深度思考·Xs，需要折叠）
+            if (thinkingBody && msg.thinkingTime && !bubble.querySelector('.thinking-block.collapsed')) needRebuild = true;
+
+            if (needRebuild) {
+                // 结构变化，需要重建
+                var savedScrollTop = thinkingBody ? thinkingBody.scrollTop : 0;
+                bubble.innerHTML = renderMsgContent(msg) + createCopyBtn();
+                // 恢复思考区域滚动位置
+                thinkingBody = bubble.querySelector('.thinking-body');
+                if (thinkingBody && savedScrollTop > 0) {
+                    thinkingBody.scrollTop = savedScrollTop;
+                }
+            } else {
+                // 增量更新，保留滚动位置（解决思考内容输出时滚动被重置的问题）
+                if (msg.reasoning_content && thinkingBody) {
+                    // 判断用户是否在底部附近（自动滚动策略）
+                    var isNearBottom = thinkingBody.scrollHeight - thinkingBody.scrollTop - thinkingBody.clientHeight < 50;
+                    thinkingBody.innerHTML = renderMarkdown(msg.reasoning_content);
+                    // 如果用户在底部附近，自动滚动到新内容；否则保留用户滚动位置
+                    if (isNearBottom) {
+                        thinkingBody.scrollTop = thinkingBody.scrollHeight;
+                    }
+                }
+                if (msg.content && answerEl) {
+                    answerEl.innerHTML = renderMarkdown(msg.content);
+                }
+            }
         }
     }
     processSpecialContent(streamEl);
