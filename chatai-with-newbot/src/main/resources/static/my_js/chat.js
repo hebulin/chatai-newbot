@@ -50,7 +50,7 @@ var thinkingStartTime = null;
     var textarea = document.getElementById('userInput');
     textarea.addEventListener('input', autoResize);
     textarea.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(false); }
     });
 
     // 响应式
@@ -253,12 +253,16 @@ function exportChats() {
 }
 
 // ===== 发送消息 =====
-function sendMessage() {
+function sendMessage(fromButton) {
     var input = document.getElementById('userInput');
     var btn = document.getElementById('sendButton');
 
-    // 如果正在流式输出，停止
+    // 如果正在流式输出
     if (isStreamActive && currentController) {
+        if (!fromButton) {
+            showToast('当前还有内容没回答完，请点击右侧停止按钮中断');
+            return;
+        }
         currentController.abort();
         finishStream(true);
         return;
@@ -282,7 +286,10 @@ function sendMessage() {
     var requestBody = {
         modelConfigId: currentModelId,
         messages: [{ role: 'system', content: 'You are a helpful assistant.' }].concat(
-            chats[currentChatId].filter(function(m) { return m.role === 'user' || m.role === 'assistant'; })
+            chats[currentChatId].filter(function(m) {
+                // 过滤掉content为空的assistant消息，避免API报400错误
+                return m.role === 'user' || (m.role === 'assistant' && m.content && m.content.trim());
+            })
         ),
         stream: true,
         deepThinking: isDeepThinking,
@@ -404,9 +411,14 @@ function sendMessage() {
 function finishStream(interrupted) {
     isStreamActive = false;
     if (currentThinkingContent || currentAnswerContent) {
+        var content = currentAnswerContent;
+        // 避免保存content为空的assistant消息，否则后续请求API会报400错误
+        if (!content || !content.trim()) {
+            content = interrupted ? '（回答已中断）' : '（无正式回答）';
+        }
         var msg = {
             role: 'assistant',
-            content: currentAnswerContent,
+            content: content,
             reasoning_content: currentThinkingContent || undefined,
             time: nowStr(),
             interrupted: interrupted || undefined,
