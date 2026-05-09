@@ -4,6 +4,7 @@ import com.chatai.newbot.model.*;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -55,17 +56,24 @@ public class FileStorageService {
             log.info("数据存储目录: {}", dataDir.toAbsolutePath());
 
             loadProviders();
+            log.info("已加载 {} 个服务提供者", providers.size());
             loadUsers();
+            log.info("已加载 {} 个用户", users.size());
             loadModelConfigs();
+            log.info("已加载 {} 个模型配置", modelConfigs.size());
             loadUsageLogs();
+            log.info("已加载 {} 个使用日志", usageLogs.size());
             loadIpRegisterMap();
+            log.info("已加载 IP 注册计数");
 
             // 确保admin用户存在
             ensureAdminUser();
+            log.info("已确保admin用户存在");
         } catch (Exception e) {
             log.error("初始化文件存储服务失败", e);
             throw new RuntimeException("初始化文件存储服务失败", e);
         }
+        log.info("文件存储服务初始化完成");
     }
 
     // ========== 用户相关 ==========
