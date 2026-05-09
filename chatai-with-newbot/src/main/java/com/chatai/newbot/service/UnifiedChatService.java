@@ -67,39 +67,61 @@ public class UnifiedChatService {
         }
 
         // 根据不同厂商处理思考模式参数
-        if (request.isDeepThinking() && config.isSupportsThinking()) {
-            String thinkingParamType = config.getThinkingParamType();
-            if (thinkingParamType == null || thinkingParamType.isEmpty()) {
-                thinkingParamType = "default";
-            }
+        // 注意：很多模型(如DeepSeek、Qwen3等)默认思考模式为enabled，
+        // 因此当用户不勾选思考模式时，必须显式禁用
+        String thinkingParamType = config.getThinkingParamType();
+        if (thinkingParamType == null || thinkingParamType.isEmpty()) {
+            thinkingParamType = "default";
+        }
 
+        if (request.isDeepThinking() && config.isSupportsThinking()) {
+            // 开启思考模式
             switch (thinkingParamType) {
                 case "deepseek":
-                    // DeepSeek: 使用 thinking 参数 + reasoning_effort
                     Map<String, Object> thinking = new HashMap<>();
                     thinking.put("type", "enabled");
                     requestBody.put("thinking", thinking);
                     requestBody.put("reasoning_effort", "high");
                     break;
                 case "qwen":
-                    // Qwen: 使用 enable_thinking 参数
                     requestBody.put("enable_thinking", true);
                     // 思考模式下不传temperature和top_p
                     requestBody.remove("temperature");
+                    requestBody.remove("top_p");
                     break;
                 case "kimi":
                 case "doubao":
                 case "zhipu":
-                    // Kimi/豆包/智谱: 使用 thinking 参数
                     Map<String, Object> commonThinking = new HashMap<>();
                     commonThinking.put("type", "enabled");
                     requestBody.put("thinking", commonThinking);
                     break;
                 default:
-                    // 默认: 不添加额外参数，模型自身处理
                     break;
             }
-            log.debug("思考模式参数类型: {}, 已添加思考参数", thinkingParamType);
+            log.debug("思考模式参数类型: {}, 已开启思考模式", thinkingParamType);
+        } else if (config.isSupportsThinking()) {
+            // 显式禁用思考模式（很多模型默认为enabled，必须主动关闭）
+            switch (thinkingParamType) {
+                case "deepseek":
+                    Map<String, Object> thinking = new HashMap<>();
+                    thinking.put("type", "disabled");
+                    requestBody.put("thinking", thinking);
+                    break;
+                case "qwen":
+                    requestBody.put("enable_thinking", false);
+                    break;
+                case "kimi":
+                case "doubao":
+                case "zhipu":
+                    Map<String, Object> commonThinking = new HashMap<>();
+                    commonThinking.put("type", "disabled");
+                    requestBody.put("thinking", commonThinking);
+                    break;
+                default:
+                    break;
+            }
+            log.debug("思考模式参数类型: {}, 已显式禁用思考模式", thinkingParamType);
         }
 
         // 确保apiUrl以 /v1 或类似路径结尾，拼接 /chat/completions
