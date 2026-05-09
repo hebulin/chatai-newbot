@@ -52,7 +52,7 @@ public class ChatController {
         }
 
         // 权限检查：visibleToAll 或 admin 或 在用户的allowedModelIds中
-        if (!config.isVisibleToAll() && !user.isAdmin()
+        if (!Boolean.TRUE.equals(config.getVisibleToAll()) && !user.isAdmin()
                 && !user.getAllowedModelIds().contains(config.getId())) {
             return Flux.just("{\"error\":{\"message\":\"无权使用该模型\",\"type\":\"permission_error\"}}");
         }
@@ -64,6 +64,7 @@ public class ChatController {
         usageLog.setModelId(config.getId());
         usageLog.setModelName(config.getDisplayName());
         usageLog.setTimestamp(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+        usageLog.setDeepThinking(request.isDeepThinking());
         storageService.addUsageLog(usageLog);
 
         return chatService.chat(request, modelConfigId);

@@ -1,5 +1,8 @@
 // ===== 全局状态 =====
 var TOKEN = localStorage.getItem('token');
+var CURRENT_USER = localStorage.getItem('username') || '';
+var CHATS_KEY = 'chats_' + CURRENT_USER;
+var LAST_CHAT_KEY = 'lastChatId_' + CURRENT_USER;
 var currentChatId = null;
 var chats = {};
 var models = [];
@@ -34,9 +37,9 @@ var thinkingStartTime = null;
         document.getElementById('adminBtn').style.display = 'flex';
     }
 
-    // 加载会话
-    try { chats = JSON.parse(localStorage.getItem('chats')) || {}; } catch(e) { chats = {}; }
-    var lastId = localStorage.getItem('lastChatId');
+    // 加载会话（按用户隔离）
+    try { chats = JSON.parse(localStorage.getItem(CHATS_KEY)) || {}; } catch(e) { chats = {}; }
+    var lastId = localStorage.getItem(LAST_CHAT_KEY);
     if (lastId && chats[lastId]) { currentChatId = lastId; } else { newChat(); }
 
     loadModels();
@@ -61,10 +64,21 @@ var thinkingStartTime = null;
 function authHeaders() { return { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' }; }
 
 function logout() {
+    document.getElementById('confirmOverlay').classList.add('active');
+}
+
+function hideConfirm() {
+    document.getElementById('confirmOverlay').classList.remove('active');
+}
+
+function doLogout() {
+    hideConfirm();
     fetch('/api/auth/logout', { method: 'POST', headers: authHeaders() }).catch(function(){});
     localStorage.removeItem('token');
     localStorage.removeItem('username');
     localStorage.removeItem('role');
+    localStorage.removeItem(CHATS_KEY);
+    localStorage.removeItem(LAST_CHAT_KEY);
     window.location.href = '/login.html';
 }
 
@@ -170,7 +184,7 @@ function newChat() {
     }
     currentChatId = Date.now().toString();
     chats[currentChatId] = [];
-    localStorage.setItem('lastChatId', currentChatId);
+    localStorage.setItem(LAST_CHAT_KEY, currentChatId);
     saveChats();
     updateChatList();
     displayMessages();
@@ -180,7 +194,7 @@ function newChat() {
 function switchChat(id) {
     if (isStreamActive) { showToast('请等待回答完成'); return; }
     currentChatId = id;
-    localStorage.setItem('lastChatId', id);
+    localStorage.setItem(LAST_CHAT_KEY, id);
     resetState();
     updateChatList();
     displayMessages();
@@ -223,7 +237,7 @@ function updateChatList() {
         firstUser.content.substring(0, 30) + (firstUser.content.length > 30 ? '...' : '') : '新会话';
 }
 
-function saveChats() { localStorage.setItem('chats', JSON.stringify(chats)); }
+function saveChats() { localStorage.setItem(CHATS_KEY, JSON.stringify(chats)); }
 
 function exportChats() {
     var text = '';

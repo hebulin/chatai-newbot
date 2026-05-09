@@ -40,7 +40,8 @@ public class AuthController {
         }
 
         String ip = getClientIp(request);
-        storageService.updateLoginInfo(user.getId(), ip);
+        String browser = getClientBrowser(request);
+        storageService.updateLoginInfo(user.getId(), ip, browser);
         String token = storageService.createToken(user.getId());
 
         result.put("success", true);
@@ -141,5 +142,17 @@ public class AuthController {
             ip = ip.split(",")[0].trim();
         }
         return ip;
+    }
+
+    private String getClientBrowser(HttpServletRequest request) {
+        String ua = request.getHeader("User-Agent");
+        if (ua == null || ua.isEmpty()) return "未知";
+        // 解析常见浏览器
+        if (ua.contains("Edg/")) return "Edge";
+        if (ua.contains("Chrome/") && !ua.contains("Edg/")) return "Chrome";
+        if (ua.contains("Firefox/")) return "Firefox";
+        if (ua.contains("Safari/") && !ua.contains("Chrome/")) return "Safari";
+        if (ua.contains("OPR/") || ua.contains("Opera")) return "Opera";
+        return "其他";
     }
 }

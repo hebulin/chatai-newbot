@@ -131,13 +131,14 @@ public class FileStorageService {
         return user;
     }
 
-    public void updateLoginInfo(String userId, String ip) {
+    public void updateLoginInfo(String userId, String ip, String browser) {
         users.stream()
                 .filter(u -> u.getId().equals(userId))
                 .findFirst()
                 .ifPresent(u -> {
                     u.setLastLoginAt(nowString());
                     u.setLastLoginIp(ip);
+                    u.setLastLoginBrowser(browser);
                     saveUsers();
                 });
     }
@@ -194,7 +195,7 @@ public class FileStorageService {
     public List<ModelConfig> getVisibleModels(User user) {
         return modelConfigs.stream()
                 .filter(ModelConfig::isEnabled)
-                .filter(m -> m.isVisibleToAll()
+                .filter(m -> Boolean.TRUE.equals(m.getVisibleToAll())
                         || user.isAdmin()
                         || user.getAllowedModelIds().contains(m.getId()))
                 .collect(Collectors.toList());
@@ -210,6 +211,10 @@ public class FileStorageService {
         }
         if (config.getCreatedAt() == null) {
             config.setCreatedAt(nowString());
+        }
+        // 默认全员可见
+        if (config.getVisibleToAll() == null) {
+            config.setVisibleToAll(true);
         }
         // 自动填充厂商信息
         if (config.getProviderId() != null && !"custom".equals(config.getProviderId())) {
@@ -236,6 +241,19 @@ public class FileStorageService {
     public void updateModelConfig(ModelConfig config) {
         for (int i = 0; i < modelConfigs.size(); i++) {
             if (modelConfigs.get(i).getId().equals(config.getId())) {
+                // 自动填充厂商信息（与addModelConfig保持一致）
+                if (config.getProviderId() != null && !"custom".equals(config.getProviderId())) {
+                    providers.stream()
+                            .filter(p -> p.getId().equals(config.getProviderId()))
+                            .findFirst()
+                            .ifPresent(p -> {
+                                config.setProviderName(p.getName());
+                                config.setProviderIcon(p.getIcon());
+                                if (config.getThinkingParamType() == null || config.getThinkingParamType().isEmpty()) {
+                                    config.setThinkingParamType(p.getThinkingParamType());
+                                }
+                            });
+                }
                 modelConfigs.set(i, config);
                 saveModelConfigs();
                 return;
