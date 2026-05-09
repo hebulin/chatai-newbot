@@ -66,12 +66,12 @@ body{display:flex}
 
 .msg-time{font-size:11px;color:#94a3b8}
 
-/* Message footer - 模型名称、复制、时间 */
+/* Message footer - 时间、模型、复制icon */
 .msg-footer{display:flex;align-items:center;gap:8px;margin-top:4px;padding:0 42px;font-size:12px;color:#94a3b8}
 .msg-wrapper.user .msg-footer{justify-content:flex-end}
+.msg-wrapper.assistant .msg-footer{justify-content:flex-start}
 .msg-model-name{color:#6366f1;font-weight:500;font-size:11px;background:#eef2ff;padding:2px 8px;border-radius:4px}
-.msg-footer .footer-copy-btn{opacity:0;background:none;border:none;color:#94a3b8;cursor:pointer;font-size:12px;padding:2px 8px;border-radius:4px;transition:all .15s}
-.msg-wrapper:hover .msg-footer .footer-copy-btn{opacity:1}
+.msg-footer .footer-copy-btn{opacity:1;background:none;border:none;color:#94a3b8;cursor:pointer;padding:2px 6px;border-radius:4px;transition:all .15s;display:flex;align-items:center;justify-content:center}
 .msg-footer .footer-copy-btn:hover{color:#6366f1;background:#eef2ff}
 .msg-footer .msg-time-inline{font-size:11px}
 
@@ -108,11 +108,11 @@ body{display:flex}
 .mermaid-tab.active{color:#6366f1;border-bottom-color:#6366f1;font-weight:500}
 .mermaid-tab:hover{color:#6366f1}
 .mermaid-view{padding:16px;overflow-x:auto}
-.mermaid-view pre.mermaid{background:transparent!important;margin:0!important;padding:0!important;border-radius:0!important}
-.mermaid-view pre.mermaid svg{max-width:100%}
+.mermaid-view pre{background:#fff!important;margin:0!important;padding:0!important;border-radius:0!important}
+.mermaid-view pre svg{max-width:100%}
 .mermaid-code{padding:0}
 .mermaid-code pre{background:#1e293b!important;border-radius:0!important;margin:0!important}
-.mermaid-code pre code{padding:14px!important}
+.mermaid-code pre code{color:#e2e8f0!important;padding:14px!important}
 
 /* ===== Input Area ===== */
 .input-area{padding:12px 20px 8px;background:#fff;border-top:1px solid #e5e7eb;flex-shrink:0}

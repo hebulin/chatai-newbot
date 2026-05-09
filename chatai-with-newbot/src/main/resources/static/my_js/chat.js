@@ -525,28 +525,47 @@ function createMessageEl(msg) {
     row.appendChild(bubble);
     wrapper.appendChild(row);
 
-    // 底部信息栏：模型名称 + 复制按钮 + 时间
+    // 底部信息栏
+    // 输出气泡(assistant)：时间、模型、复制icon；输入气泡(user)：复制icon、时间
     var footer = document.createElement('div');
     footer.className = 'msg-footer';
 
-    if (msg.role === 'assistant' && msg.modelName) {
-        var modelSpan = document.createElement('span');
-        modelSpan.className = 'msg-model-name';
-        modelSpan.textContent = msg.modelName;
-        footer.appendChild(modelSpan);
-    }
+    var copyIconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
 
-    var copyBtn = document.createElement('button');
-    copyBtn.className = 'footer-copy-btn';
-    copyBtn.textContent = '复制';
-    copyBtn.onclick = function() { copyMsgContent(this); };
-    footer.appendChild(copyBtn);
-
-    if (msg.time) {
-        var time = document.createElement('span');
-        time.className = 'msg-time-inline';
-        time.textContent = msg.time;
-        footer.appendChild(time);
+    if (msg.role === 'assistant') {
+        // 输出气泡顺序：时间、模型、复制icon
+        if (msg.time) {
+            var time = document.createElement('span');
+            time.className = 'msg-time-inline';
+            time.textContent = msg.time;
+            footer.appendChild(time);
+        }
+        if (msg.modelName) {
+            var modelSpan = document.createElement('span');
+            modelSpan.className = 'msg-model-name';
+            modelSpan.textContent = msg.modelName;
+            footer.appendChild(modelSpan);
+        }
+        var copyBtn = document.createElement('button');
+        copyBtn.className = 'footer-copy-btn';
+        copyBtn.innerHTML = copyIconSvg;
+        copyBtn.title = '复制';
+        copyBtn.onclick = function() { copyMsgContent(this); };
+        footer.appendChild(copyBtn);
+    } else {
+        // 输入气泡顺序：复制icon、时间
+        var copyBtn = document.createElement('button');
+        copyBtn.className = 'footer-copy-btn';
+        copyBtn.innerHTML = copyIconSvg;
+        copyBtn.title = '复制';
+        copyBtn.onclick = function() { copyMsgContent(this); };
+        footer.appendChild(copyBtn);
+        if (msg.time) {
+            var time = document.createElement('span');
+            time.className = 'msg-time-inline';
+            time.textContent = msg.time;
+            footer.appendChild(time);
+        }
     }
 
     wrapper.appendChild(footer);
@@ -608,8 +627,10 @@ function copyMsgContent(btn) {
         rawText = bubble.innerText.trim();
     }
     navigator.clipboard.writeText(rawText).then(function() {
-        btn.textContent = '已复制';
-        setTimeout(function() { btn.textContent = '复制'; }, 2000);
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>';
+        setTimeout(function() {
+            btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+        }, 2000);
     }).catch(function() { showToast('复制失败'); });
 }
 
