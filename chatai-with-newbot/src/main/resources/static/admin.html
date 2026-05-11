@@ -202,7 +202,11 @@
             </div>
             <div class="form-row">
                 <label>显示名称</label>
-                <input type="text" id="mDisplayName" required placeholder="前端显示的名称">
+                <input type="text" id="mDisplayName" required placeholder="选择模型后自动填充，或选择自定义后输入" readonly>
+            </div>
+            <div class="form-row" id="modelIdRow">
+                <label>模型标识</label>
+                <input type="text" id="mModelId" required placeholder="如: deepseek-chat" readonly>
             </div>
             <div class="form-row">
                 <label>API地址</label>
@@ -211,10 +215,6 @@
             <div class="form-row">
                 <label>API Key</label>
                 <input type="text" id="mApiKey" placeholder="sk-xxx">
-            </div>
-            <div class="form-row">
-                <label>模型标识</label>
-                <input type="text" id="mModelId" required placeholder="如: deepseek-chat">
             </div>
             <div class="form-row">
                 <label>协议</label>

@@ -298,6 +298,11 @@ function onProviderChange() {
         document.getElementById('mApiUrl').value = '';
         document.getElementById('mModelId').value = '';
         document.getElementById('mDisplayName').value = '';
+        // 自定义接入方式：显示名称和模型标识可编辑
+        document.getElementById('mDisplayName').readOnly = false;
+        document.getElementById('mModelId').readOnly = false;
+        document.getElementById('mDisplayName').placeholder = '输入前端显示的名称';
+        document.getElementById('mModelId').placeholder = '如: deepseek-chat';
         updateThinkingBadge(false);
         return;
     }
@@ -314,6 +319,12 @@ function onProviderChange() {
         opt.dataset.supportsThinking = m.supportsThinking;
         modelSelect.appendChild(opt);
     });
+    // 在末尾添加"自定义模型"选项
+    var customOpt = document.createElement('option');
+    customOpt.value = '__custom__';
+    customOpt.textContent = '✏️ 自定义模型';
+    customOpt.dataset.supportsThinking = 'false';
+    modelSelect.appendChild(customOpt);
 
     document.getElementById('mApiUrl').value = provider.defaultApiUrl;
     onProviderModelChange();
@@ -323,9 +334,29 @@ function onProviderModelChange() {
     var modelSelect = document.getElementById('providerModelSelect');
     var opt = modelSelect.options[modelSelect.selectedIndex];
     if (!opt) return;
-    document.getElementById('mModelId').value = opt.value;
-    document.getElementById('mDisplayName').value = opt.textContent;
-    updateThinkingBadge(opt.dataset.supportsThinking === 'true');
+
+    var displayNameInput = document.getElementById('mDisplayName');
+    var modelIdInput = document.getElementById('mModelId');
+
+    if (opt.value === '__custom__') {
+        // 选择"自定义模型"：显示名称和模型标识可编辑，清空让用户输入
+        displayNameInput.readOnly = false;
+        modelIdInput.readOnly = false;
+        displayNameInput.value = '';
+        modelIdInput.value = '';
+        displayNameInput.placeholder = '输入自定义模型显示名称';
+        modelIdInput.placeholder = '输入自定义模型标识，如: my-model-v1';
+        updateThinkingBadge(false);
+    } else {
+        // 选择内置模型：显示名称和模型标识不可编辑，自动填充
+        displayNameInput.readOnly = true;
+        modelIdInput.readOnly = true;
+        modelIdInput.value = opt.value;
+        displayNameInput.value = opt.textContent;
+        displayNameInput.placeholder = '选择模型后自动填充';
+        modelIdInput.placeholder = '选择模型后自动填充';
+        updateThinkingBadge(opt.dataset.supportsThinking === 'true');
+    }
 }
 
 // ===== Models =====
@@ -366,6 +397,11 @@ function showAddModel() {
     document.getElementById('mEnabled').checked = true;
     document.getElementById('mVisible').checked = true;
     document.getElementById('providerModelRow').style.display = 'none';
+    // 自定义接入方式：显示名称和模型标识可编辑
+    document.getElementById('mDisplayName').readOnly = false;
+    document.getElementById('mModelId').readOnly = false;
+    document.getElementById('mDisplayName').placeholder = '输入前端显示的名称';
+    document.getElementById('mModelId').placeholder = '如: deepseek-chat';
     updateThinkingBadge(false);
     var apiKeyInput = document.getElementById('mApiKey');
     apiKeyInput.placeholder = 'sk-xxx';
@@ -388,16 +424,48 @@ function editModel(id) {
     apiKeyInput.required = false;
     document.getElementById('mModelId').value = m.modelId;
     updateThinkingBadge(m.supportsThinking);
+
+    var displayNameInput = document.getElementById('mDisplayName');
+    var modelIdInput = document.getElementById('mModelId');
+
     // 如果是内置模型，尝试选中对应的厂商模型
     if (m.providerId && m.providerId !== 'custom') {
         var modelSelect = document.getElementById('providerModelSelect');
+        var foundInList = false;
         for (var i = 0; i < modelSelect.options.length; i++) {
             if (modelSelect.options[i].value === m.modelId) {
                 modelSelect.selectedIndex = i;
+                foundInList = true;
                 break;
             }
         }
+        if (foundInList) {
+            // 内置模型：显示名称和模型标识不可编辑
+            displayNameInput.readOnly = true;
+            modelIdInput.readOnly = true;
+            displayNameInput.placeholder = '选择模型后自动填充';
+            modelIdInput.placeholder = '选择模型后自动填充';
+        } else {
+            // 该厂商下的自定义模型（不在内置列表中）：选中"自定义模型"选项，字段可编辑
+            for (var j = 0; j < modelSelect.options.length; j++) {
+                if (modelSelect.options[j].value === '__custom__') {
+                    modelSelect.selectedIndex = j;
+                    break;
+                }
+            }
+            displayNameInput.readOnly = false;
+            modelIdInput.readOnly = false;
+            displayNameInput.placeholder = '输入自定义模型显示名称';
+            modelIdInput.placeholder = '输入自定义模型标识';
+        }
+    } else {
+        // 完全自定义接入：字段可编辑
+        displayNameInput.readOnly = false;
+        modelIdInput.readOnly = false;
+        displayNameInput.placeholder = '输入前端显示的名称';
+        modelIdInput.placeholder = '如: deepseek-chat';
     }
+
     document.getElementById('mEnabled').checked = m.enabled;
     document.getElementById('mVisible').checked = m.visibleToAll;
     document.getElementById('modelModal').classList.add('active');
