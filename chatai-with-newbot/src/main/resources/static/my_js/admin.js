@@ -5,7 +5,87 @@ var allUsers = [];
 var editUserId = null;
 var quickAddProviderId = null;
 
+// ===== Custom UI: Toast / Alert / Confirm =====
+function showToast(msg, type) {
+    type = type || 'info';
+    var container = document.getElementById('toastContainer');
+    var el = document.createElement('div');
+    el.className = 'toast-item ' + type;
+    var icons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
+    el.innerHTML = '<span style="font-size:16px">' + (icons[type] || '') + '</span><span>' + esc(msg) + '</span>';
+    container.appendChild(el);
+    setTimeout(function() {
+        el.style.animation = 'toastOut .3s ease forwards';
+        setTimeout(function() { if (el.parentNode) el.parentNode.removeChild(el); }, 300);
+    }, 3000);
+}
+
+function showAlert(msg, title, onOk) {
+    title = title || '提示';
+    var overlay = document.getElementById('customOverlay');
+    document.getElementById('customDialogIcon').innerHTML = '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
+    document.getElementById('customDialogTitle').textContent = title;
+    document.getElementById('customDialogMsg').textContent = msg;
+    var actions = document.getElementById('customDialogActions');
+    actions.innerHTML = '';
+    var btn = document.createElement('button');
+    btn.className = 'dialog-confirm';
+    btn.textContent = '确定';
+    btn.onclick = function() { hideCustomDialog(); if (onOk) onOk(); };
+    actions.appendChild(btn);
+    overlay.classList.add('active');
+}
+
+function showConfirm(msg, title, onOk) {
+    title = title || '确认';
+    var overlay = document.getElementById('customOverlay');
+    document.getElementById('customDialogIcon').innerHTML = '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+    document.getElementById('customDialogTitle').textContent = title;
+    document.getElementById('customDialogMsg').textContent = msg;
+    var actions = document.getElementById('customDialogActions');
+    actions.innerHTML = '';
+    var cancelBtn = document.createElement('button');
+    cancelBtn.className = 'dialog-cancel';
+    cancelBtn.textContent = '取消';
+    cancelBtn.onclick = hideCustomDialog;
+    var okBtn = document.createElement('button');
+    okBtn.className = 'dialog-confirm';
+    okBtn.textContent = '确定';
+    okBtn.onclick = function() { hideCustomDialog(); if (onOk) onOk(); };
+    actions.appendChild(cancelBtn);
+    actions.appendChild(okBtn);
+    overlay.classList.add('active');
+}
+
+function showDangerConfirm(msg, title, onOk) {
+    title = title || '确认删除';
+    var overlay = document.getElementById('customOverlay');
+    document.getElementById('customDialogIcon').innerHTML = '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
+    document.getElementById('customDialogTitle').textContent = title;
+    document.getElementById('customDialogMsg').textContent = msg;
+    var actions = document.getElementById('customDialogActions');
+    actions.innerHTML = '';
+    var cancelBtn = document.createElement('button');
+    cancelBtn.className = 'dialog-cancel';
+    cancelBtn.textContent = '取消';
+    cancelBtn.onclick = hideCustomDialog;
+    var okBtn = document.createElement('button');
+    okBtn.className = 'dialog-danger';
+    okBtn.textContent = '删除';
+    okBtn.onclick = function() { hideCustomDialog(); if (onOk) onOk(); };
+    actions.appendChild(cancelBtn);
+    actions.appendChild(okBtn);
+    overlay.classList.add('active');
+}
+
+function hideCustomDialog() {
+    document.getElementById('customOverlay').classList.remove('active');
+}
+
 if (!TOKEN || localStorage.getItem('role') !== 'admin') {
+    localStorage.removeItem('token');
+    localStorage.removeItem('username');
+    localStorage.removeItem('role');
     window.location.href = '/login.html';
 }
 
@@ -15,8 +95,14 @@ function api(url, opts) {
     opts = opts || {};
     opts.headers = headers();
     return fetch(url, opts).then(function(r) {
-        if (r.status === 401) { window.location.href = '/login.html'; return; }
-        if (r.status === 403) { alert('无权限'); return; }
+        if (r.status === 401) {
+            localStorage.removeItem('token');
+            localStorage.removeItem('username');
+            localStorage.removeItem('role');
+            showAlert('登录已过期，请重新登录', '会话过期', function() { window.location.href = '/login.html'; });
+            return;
+        }
+        if (r.status === 403) { showToast('无权限', 'error'); return; }
         return r.json();
     });
 }
@@ -26,15 +112,32 @@ function api(url, opts) {
     loadProviders();
     loadModels();
     loadUsers();
-    loadUsage();
-    loadUsageStats();
+    loadFilterOptions();
 })();
 
 function switchSection(name) {
     document.querySelectorAll('.section').forEach(function(s) { s.classList.remove('active'); });
     document.querySelectorAll('.nav-tab').forEach(function(t) { t.classList.remove('active'); });
-    document.getElementById('sec-' + name).classList.add('active');
-    event.target.classList.add('active');
+    var sec = document.getElementById('sec-' + name);
+    if (sec) sec.classList.add('active');
+    // 找到对应的 nav-tab 按钮并设为 active
+    document.querySelectorAll('.nav-tab').forEach(function(t) {
+        if (t.getAttribute('onclick') && t.getAttribute('onclick').indexOf("'" + name + "'") !== -1) {
+            t.classList.add('active');
+        }
+    });
+    // 切换到数据统计时，自动加载当前子标签的数据
+    if (name === 'data') {
+        loadFilterOptions();
+        var activeSub = document.querySelector('.sub-menu-item.active');
+        if (activeSub) {
+            var subName = activeSub.getAttribute('onclick').match(/'(\w+)'/);
+            if (subName) {
+                if (subName[1] === 'usage') loadUsage(1);
+                else if (subName[1] === 'stats') loadUsageStats(1);
+            }
+        }
+    }
 }
 
 // ===== Quick Add (快速接入) =====
@@ -127,13 +230,13 @@ function toggleSelectAllModels() {
 
 function submitQuickAdd() {
     var apiKey = document.getElementById('qaApiKey').value.trim();
-    if (!apiKey) { alert('请输入 API Key'); return; }
+    if (!apiKey) { showToast('请输入 API Key', 'warning'); return; }
 
     var selectedIds = [];
     document.querySelectorAll('#qaModelList input[type="checkbox"]:checked:not(:disabled)').forEach(function(cb) {
         selectedIds.push(cb.value);
     });
-    if (selectedIds.length === 0) { alert('请至少选择一个模型'); return; }
+    if (selectedIds.length === 0) { showToast('请至少选择一个模型', 'warning'); return; }
 
     var visibleToAll = document.getElementById('qaVisible').checked;
 
@@ -147,11 +250,11 @@ function submitQuickAdd() {
         })
     }).then(function(data) {
         if (data && data.success) {
-            alert(data.message || '接入成功');
+            showToast(data.message || '接入成功', 'success');
             closeQuickAddModal();
             loadModels();
         } else {
-            alert((data && data.message) || '接入失败');
+            showToast((data && data.message) || '接入失败', 'error');
         }
     });
 }
@@ -308,7 +411,7 @@ function saveModel(e) {
     var apiKey = document.getElementById('mApiKey').value.trim();
     // 添加模型时必须填写 API Key
     if (!id && !apiKey) {
-        alert('请填写 API Key');
+        showToast('请填写 API Key', 'warning');
         return false;
     }
     // 编辑时，如果 apiKey 包含星号（脱敏值）则清空，让后端保留原值
@@ -335,17 +438,18 @@ function saveModel(e) {
             closeModal();
             loadModels();
         } else {
-            alert((data && data.message) || '操作失败');
+            showToast((data && data.message) || '操作失败', 'error');
         }
     });
     return false;
 }
 
 function deleteModel(id) {
-    if (!confirm('确定删除该模型？')) return;
-    api('/api/admin/models/' + id, { method: 'DELETE' }).then(function(data) {
-        if (data && data.success) loadModels();
-        else alert('删除失败');
+    showDangerConfirm('确定删除该模型？此操作不可撤销。', '删除模型', function() {
+        api('/api/admin/models/' + id, { method: 'DELETE' }).then(function(data) {
+            if (data && data.success) { loadModels(); showToast('模型已删除', 'success'); }
+            else showToast('删除失败', 'error');
+        });
     });
 }
 
@@ -379,10 +483,11 @@ function renderUsers() {
 }
 
 function deleteUser(id) {
-    if (!confirm('确定删除该用户？')) return;
-    api('/api/admin/users/' + id, { method: 'DELETE' }).then(function(data) {
-        if (data && data.success) loadUsers();
-        else alert('删除失败');
+    showDangerConfirm('确定删除该用户？此操作不可撤销。', '删除用户', function() {
+        api('/api/admin/users/' + id, { method: 'DELETE' }).then(function(data) {
+            if (data && data.success) { loadUsers(); showToast('用户已删除', 'success'); }
+            else showToast('删除失败', 'error');
+        });
     });
 }
 
@@ -423,19 +528,85 @@ function savePermissions() {
 }
 
 // ===== Usage =====
-function loadUsage() {
-    api('/api/admin/usage').then(function(data) {
+
+// 子菜单切换
+function switchDataSubTab(tabName) {
+    document.querySelectorAll('.sub-menu-item').forEach(function(item) {
+        item.classList.remove('active');
+    });
+    event.target.classList.add('active');
+    document.querySelectorAll('.data-sub-content').forEach(function(c) { c.classList.remove('active'); });
+    document.getElementById('data-sub-' + tabName).classList.add('active');
+    if (tabName === 'usage') {
+        loadUsage(1);
+    } else if (tabName === 'stats') {
+        loadUsageStats(1);
+    }
+}
+
+// 下拉框填充逻辑
+function loadFilterOptions() {
+    api('/api/admin/usage/filters').then(function(data) {
+        if (!data || !data.success) return;
+        fillSelect('usageSearchUser', data.usernames, '全部用户');
+        fillSelect('usageSearchModel', data.modelNames, '全部模型');
+        fillSelect('statsSearchUser', data.usernames, '全部用户');
+        fillSelect('statsSearchModel', data.modelNames, '全部模型');
+    });
+}
+
+function fillSelect(selectId, options, defaultText) {
+    var select = document.getElementById(selectId);
+    if (!select) return;
+    var currentVal = select.value;
+    select.innerHTML = '<option value="">' + defaultText + '</option>';
+    (options || []).forEach(function(name) {
+        var opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        if (name === currentVal) opt.selected = true;
+        select.appendChild(opt);
+    });
+}
+
+// 使用记录加载（带分页）
+function loadUsage(page) {
+    page = page || 1;
+    var username = document.getElementById('usageSearchUser') ? document.getElementById('usageSearchUser').value : '';
+    var modelName = document.getElementById('usageSearchModel') ? document.getElementById('usageSearchModel').value : '';
+    var date = document.getElementById('usageSearchDate') ? document.getElementById('usageSearchDate').value : '';
+    var qs = ['page=' + page, 'size=20'];
+    if (username) qs.push('username=' + encodeURIComponent(username));
+    if (modelName) qs.push('modelName=' + encodeURIComponent(modelName));
+    if (date) qs.push('date=' + encodeURIComponent(date));
+    api('/api/admin/usage?' + qs.join('&')).then(function(data) {
         if (!data || !data.success) return;
         var tbody = document.querySelector('#usageTable tbody');
         tbody.innerHTML = '';
         var logs = data.data || [];
-        // 最新的在前面
-        logs.reverse().forEach(function(l) {
-            var tr = document.createElement('tr');
-            tr.innerHTML = '<td>' + esc(l.timestamp || '-') + '</td><td>' + esc(l.username || '-') + '</td><td>' + esc(l.modelName || '-') + '</td><td>' + (l.deepThinking ? '<span class="badge badge-think">🧠 思考</span>' : '-') + '</td>';
-            tbody.appendChild(tr);
-        });
+        if (logs.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="stats-empty-row">暂无使用记录</td></tr>';
+        } else {
+            logs.forEach(function(l) {
+                var tr = document.createElement('tr');
+                tr.innerHTML =
+                    '<td>' + esc(l.timestamp || '-') + '</td>' +
+                    '<td>' + esc(l.username || '-') + '</td>' +
+                    '<td>' + esc(l.modelName || '-') + '</td>' +
+                    '<td>' + fmtToken(l.promptTokens) + '</td>' +
+                    '<td>' + fmtToken(l.completionTokens) + '</td>' +
+                    '<td>' + fmtToken(l.cachedTokens) + '</td>' +
+                    '<td>' + (l.deepThinking ? '<span class="badge badge-think">🧠 思考</span>' : '-') + '</td>';
+                tbody.appendChild(tr);
+            });
+        }
+        renderPagination('usagePagination', data.page, data.totalPages, loadUsage);
     });
+}
+
+function fmtToken(val) {
+    if (!val || val === 0) return '<span class="token-zero">-</span>';
+    return '' + val;
 }
 
 function esc(str) {
@@ -445,59 +616,119 @@ function esc(str) {
     return d.innerHTML;
 }
 
-// ===== Usage Stats (用户统计) =====
-function loadUsageStats() {
-    api('/api/admin/usage/stats').then(function(data) {
+// 用户统计加载（带分页）
+function loadUsageStats(page) {
+    page = page || 1;
+    var username = document.getElementById('statsSearchUser') ? document.getElementById('statsSearchUser').value : '';
+    var modelName = document.getElementById('statsSearchModel') ? document.getElementById('statsSearchModel').value : '';
+    var date = document.getElementById('statsSearchDate') ? document.getElementById('statsSearchDate').value : '';
+    var qs = ['page=' + page, 'size=20'];
+    if (username) qs.push('username=' + encodeURIComponent(username));
+    if (modelName) qs.push('modelName=' + encodeURIComponent(modelName));
+    if (date) qs.push('date=' + encodeURIComponent(date));
+    api('/api/admin/usage/stats?' + qs.join('&')).then(function(data) {
         if (!data || !data.success) return;
-        var grid = document.getElementById('statsGrid');
-        if (!grid) return;
-        grid.innerHTML = '';
+        var tbody = document.querySelector('#statsTable tbody');
+        tbody.innerHTML = '';
         var stats = data.data || [];
         if (stats.length === 0) {
-            grid.innerHTML = '<div class="stats-empty">暂无使用统计数据</div>';
-            return;
+            tbody.innerHTML = '<tr><td colspan="8" class="stats-empty-row">暂无统计数据</td></tr>';
+        } else {
+            stats.forEach(function(s) {
+                var tr = document.createElement('tr');
+                tr.innerHTML =
+                    '<td>' + esc(s.username) + '</td>' +
+                    '<td>' + esc(s.date) + '</td>' +
+                    '<td>' + esc(s.modelName) + '</td>' +
+                    '<td><strong>' + s.count + '</strong></td>' +
+                    '<td>' + fmtToken(s.promptTokens) + '</td>' +
+                    '<td>' + fmtToken(s.completionTokens) + '</td>' +
+                    '<td>' + fmtToken(s.cachedTokens) + '</td>' +
+                    '<td>' + (s.thinkingCount > 0 ? '<span class="badge badge-think">🧠 ' + s.thinkingCount + '</span>' : '-') + '</td>';
+                tbody.appendChild(tr);
+            });
         }
-        stats.forEach(function(s) {
-            var card = document.createElement('div');
-            card.className = 'stats-card';
-
-            // 构建模型统计 HTML
-            var modelStatsHtml = '';
-            var modelStats = s.modelStats || [];
-            if (modelStats.length > 0) {
-                modelStatsHtml = '<div class="stats-models">';
-                modelStats.forEach(function(ms) {
-                    modelStatsHtml += '<span class="stats-model-tag">' + esc(ms.modelName) + ' <strong>' + ms.count + '</strong></span>';
-                });
-                modelStatsHtml += '</div>';
-            } else {
-                modelStatsHtml = '<div class="stats-models"><span class="stats-empty-text">暂无使用记录</span></div>';
-            }
-
-            card.innerHTML =
-                '<div class="stats-card-header">' +
-                    '<div class="stats-user-info">' +
-                        '<span class="stats-avatar">' + esc((s.username || '?')[0].toUpperCase()) + '</span>' +
-                        '<div>' +
-                            '<h3>' + esc(s.username) + '</h3>' +
-                            '<span class="stats-role">' + esc(s.role) + '</span>' +
-                        '</div>' +
-                    '</div>' +
-                    '<span class="stats-total">共 ' + (s.totalCount || 0) + ' 次</span>' +
-                '</div>' +
-                '<div class="stats-card-body">' +
-                    '<div class="stats-info-grid">' +
-                        '<div class="stats-info-item"><label>最后使用</label><span>' + (s.lastUseTime || '-') + '</span></div>' +
-                        '<div class="stats-info-item"><label>最后登录</label><span>' + (s.lastLoginAt || '-') + '</span></div>' +
-                        '<div class="stats-info-item"><label>登录IP</label><span>' + (s.lastLoginIp || '-') + '</span></div>' +
-                        '<div class="stats-info-item"><label>浏览器</label><span>' + (s.lastLoginBrowser || '-') + '</span></div>' +
-                    '</div>' +
-                    '<div class="stats-divider"></div>' +
-                    '<div class="stats-section-title">模型使用明细</div>' +
-                    modelStatsHtml +
-                    (s.thinkingCount > 0 ? '<div class="stats-thinking"><span class="badge badge-think">🧠 思考模式</span> ' + s.thinkingCount + ' 次</div>' : '') +
-                '</div>';
-            grid.appendChild(card);
-        });
+        renderPagination('statsPagination', data.page, data.totalPages, loadUsageStats);
     });
+}
+
+// 分页渲染
+function renderPagination(containerId, currentPage, totalPages, callback) {
+    var container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = '';
+    if (totalPages <= 1) return;
+
+    var firstBtn = document.createElement('button');
+    firstBtn.textContent = '首页';
+    firstBtn.disabled = currentPage <= 1;
+    firstBtn.onclick = function() { callback(1); };
+    container.appendChild(firstBtn);
+
+    var prevBtn = document.createElement('button');
+    prevBtn.textContent = '上一页';
+    prevBtn.disabled = currentPage <= 1;
+    prevBtn.onclick = function() { callback(currentPage - 1); };
+    container.appendChild(prevBtn);
+
+    var startPage = Math.max(1, currentPage - 3);
+    var endPage = Math.min(totalPages, startPage + 6);
+    if (endPage - startPage < 6) startPage = Math.max(1, endPage - 6);
+
+    for (var i = startPage; i <= endPage; i++) {
+        var pageBtn = document.createElement('button');
+        pageBtn.textContent = i;
+        if (i === currentPage) pageBtn.className = 'active';
+        (function(p) { pageBtn.onclick = function() { callback(p); }; })(i);
+        container.appendChild(pageBtn);
+    }
+
+    var nextBtn = document.createElement('button');
+    nextBtn.textContent = '下一页';
+    nextBtn.disabled = currentPage >= totalPages;
+    nextBtn.onclick = function() { callback(currentPage + 1); };
+    container.appendChild(nextBtn);
+
+    var lastBtn = document.createElement('button');
+    lastBtn.textContent = '末页';
+    lastBtn.disabled = currentPage >= totalPages;
+    lastBtn.onclick = function() { callback(totalPages); };
+    container.appendChild(lastBtn);
+
+    var pageInfo = document.createElement('span');
+    pageInfo.className = 'page-info';
+    pageInfo.textContent = currentPage + ' / ' + totalPages;
+    container.appendChild(pageInfo);
+}
+
+// 搜索使用记录
+function searchUsage() {
+    loadUsage(1);
+}
+
+// 重置使用记录筛选
+function resetUsage() {
+    var userSelect = document.getElementById('usageSearchUser');
+    var modelSelect = document.getElementById('usageSearchModel');
+    var dateInput = document.getElementById('usageSearchDate');
+    if (userSelect) userSelect.value = '';
+    if (modelSelect) modelSelect.value = '';
+    if (dateInput) dateInput.value = '';
+    loadUsage(1);
+}
+
+// 搜索用户统计
+function searchUsageStats() {
+    loadUsageStats(1);
+}
+
+// 重置用户统计筛选
+function resetUsageStats() {
+    var userSelect = document.getElementById('statsSearchUser');
+    var modelSelect = document.getElementById('statsSearchModel');
+    var dateInput = document.getElementById('statsSearchDate');
+    if (userSelect) userSelect.value = '';
+    if (modelSelect) modelSelect.value = '';
+    if (dateInput) dateInput.value = '';
+    loadUsageStats(1);
 }

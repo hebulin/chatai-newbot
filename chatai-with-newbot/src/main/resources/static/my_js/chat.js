@@ -71,6 +71,19 @@ function hideConfirm() {
     document.getElementById('confirmOverlay').classList.remove('active');
 }
 
+function showConfirmDialog(msg, title, onOk) {
+    var overlay = document.getElementById('confirmOverlay');
+    var dialog = overlay.querySelector('.confirm-dialog');
+    dialog.querySelector('.confirm-title').textContent = title || '确认';
+    dialog.querySelector('.confirm-msg').textContent = msg;
+    var okBtn = dialog.querySelector('.confirm-ok');
+    var newOkBtn = okBtn.cloneNode(true);
+    okBtn.parentNode.replaceChild(newOkBtn, okBtn);
+    newOkBtn.textContent = '确定';
+    newOkBtn.onclick = function() { hideConfirm(); if (onOk) onOk(); };
+    overlay.classList.add('active');
+}
+
 function doLogout() {
     hideConfirm();
     fetch('/api/auth/logout', { method: 'POST', headers: authHeaders() }).catch(function(){});
@@ -87,7 +100,14 @@ function goAdmin() { window.location.href = '/admin.html'; }
 function loadModels() {
     fetch('/api/models', { headers: authHeaders() })
     .then(function(r) {
-        if (r.status === 401) { logout(); return; }
+        if (r.status === 401) {
+            localStorage.removeItem('token');
+            localStorage.removeItem('username');
+            localStorage.removeItem('role');
+            showToast('登录已过期，请重新登录');
+            setTimeout(function() { window.location.href = '/login.html'; }, 1500);
+            return;
+        }
         return r.json();
     })
     .then(function(data) {
@@ -201,11 +221,12 @@ function switchChat(id) {
 
 function deleteChat(id, e) {
     e.stopPropagation();
-    if (!confirm('确定删除该会话？')) return;
-    delete chats[id];
-    saveChats();
-    if (id === currentChatId) newChat();
-    else updateChatList();
+    showConfirmDialog('确定删除该会话？', '删除会话', function() {
+        delete chats[id];
+        saveChats();
+        if (id === currentChatId) newChat();
+        else updateChatList();
+    });
 }
 
 function updateChatList() {
@@ -323,8 +344,11 @@ function sendMessage(fromButton) {
             chats[currentChatId].pop();
             saveChats();
             displayMessages();
+            localStorage.removeItem('token');
+            localStorage.removeItem('username');
+            localStorage.removeItem('role');
             showToast('登录已过期，请重新登录');
-            setTimeout(function() { logout(); }, 1500);
+            setTimeout(function() { window.location.href = '/login.html'; }, 1500);
             return;
         }
         if (!resp.ok) {

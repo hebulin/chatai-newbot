@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Chat - 管理后台</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="my_css/admin.css">
 </head>
 <body>
@@ -17,8 +20,7 @@
             <button class="nav-tab active" onclick="switchSection('quickadd')">快速接入</button>
             <button class="nav-tab" onclick="switchSection('models')">模型管理</button>
             <button class="nav-tab" onclick="switchSection('users')">用户管理</button>
-            <button class="nav-tab" onclick="switchSection('usage')">使用记录</button>
-            <button class="nav-tab" onclick="switchSection('stats')">用户统计</button>
+            <button class="nav-tab" onclick="switchSection('data')">数据统计</button>
         </div>
         <div class="nav-actions">
             <button class="nav-btn" onclick="window.location.href='/index.html'">返回聊天</button>
@@ -64,26 +66,88 @@
             </div>
         </section>
 
-        <!-- 使用记录 -->
-        <section id="sec-usage" class="section">
+        <!-- 数据统计（合并使用记录 + 用户统计） -->
+        <section id="sec-data" class="section">
             <div class="section-header">
-                <h2>使用记录</h2>
+                <h2>数据统计</h2>
             </div>
-            <div class="card">
-                <table class="data-table" id="usageTable">
-                    <thead><tr><th>时间</th><th>用户</th><th>模型</th><th>思考模式</th></tr></thead>
-                    <tbody></tbody>
-                </table>
+            <!-- 子菜单导航 -->
+            <div class="sub-menu">
+                <div class="sub-menu-item active" onclick="switchDataSubTab('usage')">使用记录</div>
+                <div class="sub-menu-item" onclick="switchDataSubTab('stats')">用户统计</div>
             </div>
-        </section>
 
-        <!-- 用户统计 -->
-        <section id="sec-stats" class="section">
-            <div class="section-header">
-                <h2>用户使用统计</h2>
-                <span class="section-tip">按用户维度统计模型使用情况</span>
+            <!-- 使用记录子页面 -->
+            <div id="data-sub-usage" class="data-sub-content active">
+                <div class="card">
+                    <div class="stats-search-bar">
+                        <div class="search-field">
+                            <label class="search-label">用户</label>
+                            <select id="usageSearchUser" class="stats-search-select">
+                                <option value="">全部用户</option>
+                            </select>
+                        </div>
+                        <div class="search-field">
+                            <label class="search-label">模型</label>
+                            <select id="usageSearchModel" class="stats-search-select">
+                                <option value="">全部模型</option>
+                            </select>
+                        </div>
+                        <div class="search-field">
+                            <label class="search-label">日期</label>
+                            <input type="date" id="usageSearchDate" class="stats-search-input">
+                        </div>
+                        <div class="search-actions">
+                            <button class="primary-btn" onclick="searchUsage()">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                搜索
+                            </button>
+                            <button class="cancel-btn" onclick="resetUsage()">重置</button>
+                        </div>
+                    </div>
+                    <table class="data-table" id="usageTable">
+                        <thead><tr><th>时间</th><th>用户</th><th>模型</th><th>输入Token</th><th>输出Token</th><th>缓存Token</th><th>思考模式</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                    <div class="pagination" id="usagePagination"></div>
+                </div>
             </div>
-            <div class="stats-grid" id="statsGrid"></div>
+
+            <!-- 用户统计子页面 -->
+            <div id="data-sub-stats" class="data-sub-content">
+                <div class="card">
+                    <div class="stats-search-bar">
+                        <div class="search-field">
+                            <label class="search-label">用户</label>
+                            <select id="statsSearchUser" class="stats-search-select">
+                                <option value="">全部用户</option>
+                            </select>
+                        </div>
+                        <div class="search-field">
+                            <label class="search-label">模型</label>
+                            <select id="statsSearchModel" class="stats-search-select">
+                                <option value="">全部模型</option>
+                            </select>
+                        </div>
+                        <div class="search-field">
+                            <label class="search-label">日期</label>
+                            <input type="date" id="statsSearchDate" class="stats-search-input">
+                        </div>
+                        <div class="search-actions">
+                            <button class="primary-btn" onclick="searchUsageStats()">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                搜索
+                            </button>
+                            <button class="cancel-btn" onclick="resetUsageStats()">重置</button>
+                        </div>
+                    </div>
+                    <table class="data-table" id="statsTable">
+                        <thead><tr><th>用户</th><th>日期</th><th>模型</th><th>调用次数</th><th>输入Token</th><th>输出Token</th><th>缓存Token</th><th>思考模式</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                    <div class="pagination" id="statsPagination"></div>
+                </div>
+            </div>
         </section>
     </main>
 </div>
@@ -182,6 +246,17 @@
             <button class="cancel-btn" onclick="closePermModal()">取消</button>
             <button class="primary-btn" onclick="savePermissions()">保存</button>
         </div>
+    </div>
+</div>
+
+<!-- 自定义弹窗组件（Toast / Alert / Confirm） -->
+<div class="toast-container" id="toastContainer"></div>
+<div class="custom-overlay" id="customOverlay">
+    <div class="custom-dialog" id="customDialog">
+        <div class="custom-dialog-icon" id="customDialogIcon"></div>
+        <div class="custom-dialog-title" id="customDialogTitle"></div>
+        <div class="custom-dialog-msg" id="customDialogMsg"></div>
+        <div class="custom-dialog-actions" id="customDialogActions"></div>
     </div>
 </div>
 

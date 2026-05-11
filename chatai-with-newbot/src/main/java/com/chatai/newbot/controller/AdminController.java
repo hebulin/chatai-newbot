@@ -276,25 +276,92 @@ public class AdminController {
 
     // ========== 使用记录 ==========
 
+    /**
+     * 使用记录查询 - 支持分页+筛选
+     * 参数: page(从1开始), size, username, modelName, date
+     */
     @GetMapping("/usage")
-    public Map<String, Object> getUsageLogs(HttpServletRequest request, HttpServletResponse response) {
+    public Map<String, Object> getUsageLogs(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String username,
+            @RequestParam(required = false) String modelName,
+            @RequestParam(required = false) String date,
+            HttpServletRequest request, HttpServletResponse response) {
         Map<String, Object> result = new HashMap<>();
         if (!checkAdmin(request, response)) {
             result.put("success", false);
             result.put("message", "无权限");
             return result;
         }
+        List<UsageLog> logs = storageService.getAllUsageLogs();
+
+        // 过滤
+        if (username != null && !username.isEmpty()) {
+            logs = logs.stream().filter(l -> username.equals(l.getUsername())).collect(Collectors.toList());
+        }
+        if (modelName != null && !modelName.isEmpty()) {
+            logs = logs.stream().filter(l -> modelName.equals(l.getModelName())).collect(Collectors.toList());
+        }
+        if (date != null && !date.isEmpty()) {
+            logs = logs.stream().filter(l -> l.getTimestamp() != null && l.getTimestamp().startsWith(date)).collect(Collectors.toList());
+        }
+
+        // 按时间降序
+        logs.sort((a, b) -> {
+            if (a.getTimestamp() == null && b.getTimestamp() == null) return 0;
+            if (a.getTimestamp() == null) return 1;
+            if (b.getTimestamp() == null) return -1;
+            return b.getTimestamp().compareTo(a.getTimestamp());
+        });
+
+        int total = logs.size();
+        int totalPages = Math.max(1, (int) Math.ceil((double) total / size));
+        int fromIndex = Math.min((page - 1) * size, total);
+        int toIndex = Math.min(fromIndex + size, total);
+        List<UsageLog> pageData = logs.subList(fromIndex, toIndex);
+
         result.put("success", true);
-        result.put("data", storageService.getUsageLogs());
+        result.put("data", pageData);
+        result.put("total", total);
+        result.put("page", page);
+        result.put("size", size);
+        result.put("totalPages", totalPages);
         return result;
     }
 
     /**
-     * 用户维度使用统计
-     * 返回: [{ username, lastUseTime, lastLoginIp, lastLoginBrowser, modelStats: [{modelName, count}], thinkingCount }]
+     * 筛选选项 - 返回可用的用户名和模型名列表（用于下拉框）
+     */
+    @GetMapping("/usage/filters")
+    public Map<String, Object> getUsageFilters(HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        List<UsageLog> logs = storageService.getAllUsageLogs();
+        List<String> usernames = logs.stream().map(UsageLog::getUsername).filter(Objects::nonNull).distinct().sorted().collect(Collectors.toList());
+        List<String> modelNames = logs.stream().map(UsageLog::getModelName).filter(Objects::nonNull).distinct().sorted().collect(Collectors.toList());
+
+        result.put("success", true);
+        result.put("usernames", usernames);
+        result.put("modelNames", modelNames);
+        return result;
+    }
+
+    /**
+     * 使用统计 - 按用户+日期+模型维度聚合，支持搜索+分页
      */
     @GetMapping("/usage/stats")
-    public Map<String, Object> getUsageStats(HttpServletRequest request, HttpServletResponse response) {
+    public Map<String, Object> getUsageStats(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String username,
+            @RequestParam(required = false) String modelName,
+            @RequestParam(required = false) String date,
+            HttpServletRequest request, HttpServletResponse response) {
         Map<String, Object> result = new HashMap<>();
         if (!checkAdmin(request, response)) {
             result.put("success", false);
@@ -302,73 +369,65 @@ public class AdminController {
             return result;
         }
 
-        List<User> users = storageService.getAllUsers();
-        List<UsageLog> logs = storageService.getUsageLogs();
+        List<UsageLog> logs = storageService.getAllUsageLogs();
 
-        // 按 userId 分组使用记录
-        Map<String, List<UsageLog>> logsByUser = logs.stream()
-                .collect(Collectors.groupingBy(UsageLog::getUserId));
-
-        List<Map<String, Object>> statsList = new ArrayList<>();
-        for (User u : users) {
-            Map<String, Object> stat = new HashMap<>();
-            stat.put("userId", u.getId());
-            stat.put("username", u.getUsername());
-            stat.put("role", u.getRole());
-            stat.put("lastLoginAt", u.getLastLoginAt());
-            stat.put("lastLoginIp", u.getLastLoginIp());
-            stat.put("lastLoginBrowser", u.getLastLoginBrowser());
-
-            List<UsageLog> userLogs = logsByUser.getOrDefault(u.getId(), Collections.emptyList());
-
-            // 最后使用时间
-            String lastUseTime = userLogs.stream()
-                    .map(UsageLog::getTimestamp)
-                    .filter(Objects::nonNull)
-                    .max(String::compareTo)
-                    .orElse(null);
-            stat.put("lastUseTime", lastUseTime);
-
-            // 按模型分组统计次数
-            Map<String, Long> modelCountMap = userLogs.stream()
-                    .collect(Collectors.groupingBy(
-                            l -> l.getModelName() != null ? l.getModelName() : "未知",
-                            Collectors.counting()));
-
-            // 思考模式使用次数
-            long thinkingCount = userLogs.stream()
-                    .filter(UsageLog::isDeepThinking)
-                    .count();
-            stat.put("thinkingCount", thinkingCount);
-
-            // 构建模型统计列表，按次数降序
-            List<Map<String, Object>> modelStats = new ArrayList<>();
-            modelCountMap.entrySet().stream()
-                    .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
-                    .forEach(e -> {
-                        Map<String, Object> ms = new HashMap<>();
-                        ms.put("modelName", e.getKey());
-                        ms.put("count", e.getValue());
-                        modelStats.add(ms);
-                    });
-            stat.put("modelStats", modelStats);
-            stat.put("totalCount", userLogs.size());
-
-            statsList.add(stat);
+        // 过滤
+        if (username != null && !username.isEmpty()) {
+            logs = logs.stream().filter(l -> username.equals(l.getUsername())).collect(Collectors.toList());
+        }
+        if (modelName != null && !modelName.isEmpty()) {
+            logs = logs.stream().filter(l -> modelName.equals(l.getModelName())).collect(Collectors.toList());
+        }
+        if (date != null && !date.isEmpty()) {
+            logs = logs.stream().filter(l -> l.getTimestamp() != null && l.getTimestamp().startsWith(date)).collect(Collectors.toList());
         }
 
-        // 按最后使用时间降序
+        // 按 (username, date, modelName) 聚合
+        Map<String, List<UsageLog>> grouped = logs.stream()
+                .collect(Collectors.groupingBy(l ->
+                        (l.getUsername() != null ? l.getUsername() : "未知") + "|" +
+                        (l.getTimestamp() != null ? l.getTimestamp().substring(0, Math.min(10, l.getTimestamp().length())) : "未知") + "|" +
+                        (l.getModelName() != null ? l.getModelName() : "未知")
+                ));
+
+        List<Map<String, Object>> statsList = new ArrayList<>();
+        for (Map.Entry<String, List<UsageLog>> entry : grouped.entrySet()) {
+            String[] keys = entry.getKey().split("\\|", 3);
+            List<UsageLog> group = entry.getValue();
+            Map<String, Object> row = new HashMap<>();
+            row.put("username", keys[0]);
+            row.put("date", keys[1]);
+            row.put("modelName", keys[2]);
+            row.put("count", group.size());
+            row.put("promptTokens", group.stream().mapToInt(UsageLog::getPromptTokens).sum());
+            row.put("completionTokens", group.stream().mapToInt(UsageLog::getCompletionTokens).sum());
+            row.put("cachedTokens", group.stream().mapToInt(UsageLog::getCachedTokens).sum());
+            row.put("thinkingCount", group.stream().filter(UsageLog::isDeepThinking).count());
+            statsList.add(row);
+        }
+
+        // 排序
         statsList.sort((a, b) -> {
-            String ta = (String) a.get("lastUseTime");
-            String tb = (String) b.get("lastUseTime");
-            if (ta == null && tb == null) return 0;
-            if (ta == null) return 1;
-            if (tb == null) return -1;
-            return tb.compareTo(ta);
+            int dateCompare = ((String) b.get("date")).compareTo((String) a.get("date"));
+            if (dateCompare != 0) return dateCompare;
+            int userCompare = ((String) a.get("username")).compareTo((String) b.get("username"));
+            if (userCompare != 0) return userCompare;
+            return ((String) a.get("modelName")).compareTo((String) b.get("modelName"));
         });
 
+        // 分页
+        int total = statsList.size();
+        int totalPages = Math.max(1, (int) Math.ceil((double) total / size));
+        int fromIndex = Math.min((page - 1) * size, total);
+        int toIndex = Math.min(fromIndex + size, total);
+        List<Map<String, Object>> pageData = statsList.subList(fromIndex, toIndex);
+
         result.put("success", true);
-        result.put("data", statsList);
+        result.put("data", pageData);
+        result.put("total", total);
+        result.put("page", page);
+        result.put("size", size);
+        result.put("totalPages", totalPages);
         return result;
     }
 
