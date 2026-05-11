@@ -40,8 +40,13 @@ public class AdminController {
             result.put("message", "无权限");
             return result;
         }
+        List<ModelConfig> models = storageService.getAllModelConfigs();
+        // 脱敏 API Key，防止泄露（创建安全副本，不污染原始数据）
+        List<ModelConfig> safeModels = models.stream()
+                .map(this::toSafeModel)
+                .collect(Collectors.toList());
         result.put("success", true);
-        result.put("data", storageService.getAllModelConfigs());
+        result.put("data", safeModels);
         return result;
     }
 
@@ -56,7 +61,7 @@ public class AdminController {
         }
         ModelConfig saved = storageService.addModelConfig(config);
         result.put("success", true);
-        result.put("data", saved);
+        result.put("data", toSafeModel(saved));
         return result;
     }
 
@@ -68,6 +73,12 @@ public class AdminController {
             result.put("success", false);
             result.put("message", "无权限");
             return result;
+        }
+        // 如果 API Key 为空或是脱敏值（含*），保留原来的 Key
+        ModelConfig existing = storageService.getModelConfigById(id);
+        if (existing != null && (config.getApiKey() == null || config.getApiKey().isEmpty()
+                || config.getApiKey().contains("*"))) {
+            config.setApiKey(existing.getApiKey());
         }
         config.setId(id);
         storageService.updateModelConfig(config);
@@ -359,5 +370,44 @@ public class AdminController {
         result.put("success", true);
         result.put("data", statsList);
         return result;
+    }
+
+    // ========== 工具方法 ==========
+
+    /**
+     * API Key 脱敏：保留前4位和后4位，中间用星号替代
+     * 例如: sk-abcdefghijklmnop → sk-a********mnop
+     */
+    private String maskApiKey(String apiKey) {
+        if (apiKey == null || apiKey.isEmpty()) return "";
+        if (apiKey.length() <= 8) {
+            // 太短则只保留首尾各2位
+            if (apiKey.length() <= 4) return apiKey.charAt(0) + "**" + apiKey.charAt(apiKey.length() - 1);
+            return apiKey.substring(0, 2) + "****" + apiKey.substring(apiKey.length() - 2);
+        }
+        return apiKey.substring(0, 4) + "********" + apiKey.substring(apiKey.length() - 4);
+    }
+
+    /**
+     * 创建 ModelConfig 的安全副本，apiKey 脱敏处理，不污染原始内存数据
+     */
+    private ModelConfig toSafeModel(ModelConfig m) {
+        ModelConfig copy = new ModelConfig();
+        copy.setId(m.getId());
+        copy.setProviderId(m.getProviderId());
+        copy.setProviderName(m.getProviderName());
+        copy.setProviderIcon(m.getProviderIcon());
+        copy.setModelId(m.getModelId());
+        copy.setDisplayName(m.getDisplayName());
+        copy.setApiKey(maskApiKey(m.getApiKey()));
+        copy.setApiUrl(m.getApiUrl());
+        copy.setProtocol(m.getProtocol());
+        copy.setThinkingParamType(m.getThinkingParamType());
+        copy.setSupportsThinking(m.isSupportsThinking());
+        copy.setEnabled(m.isEnabled());
+        copy.setVisibleToAll(m.getVisibleToAll());
+        copy.setBuiltIn(m.isBuiltIn());
+        copy.setCreatedAt(m.getCreatedAt());
+        return copy;
     }
 }

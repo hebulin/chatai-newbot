@@ -264,6 +264,9 @@ function showAddModel() {
     document.getElementById('mVisible').checked = true;
     document.getElementById('providerModelRow').style.display = 'none';
     updateThinkingBadge(false);
+    var apiKeyInput = document.getElementById('mApiKey');
+    apiKeyInput.placeholder = 'sk-xxx';
+    apiKeyInput.required = true;
     document.getElementById('modelModal').classList.add('active');
 }
 
@@ -276,7 +279,10 @@ function editModel(id) {
     onProviderChange();
     document.getElementById('mDisplayName').value = m.displayName;
     document.getElementById('mApiUrl').value = m.apiUrl;
-    document.getElementById('mApiKey').value = m.apiKey;
+    var apiKeyInput = document.getElementById('mApiKey');
+    apiKeyInput.value = m.apiKey || '';
+    apiKeyInput.placeholder = '修改请输入完整的新 API Key，留空则保留原值';
+    apiKeyInput.required = false;
     document.getElementById('mModelId').value = m.modelId;
     updateThinkingBadge(m.supportsThinking);
     // 如果是内置模型，尝试选中对应的厂商模型
@@ -299,11 +305,21 @@ function closeModal() { document.getElementById('modelModal').classList.remove('
 function saveModel(e) {
     e.preventDefault();
     var id = document.getElementById('editModelId').value;
+    var apiKey = document.getElementById('mApiKey').value.trim();
+    // 添加模型时必须填写 API Key
+    if (!id && !apiKey) {
+        alert('请填写 API Key');
+        return false;
+    }
+    // 编辑时，如果 apiKey 包含星号（脱敏值）则清空，让后端保留原值
+    if (id && apiKey.indexOf('*') !== -1) {
+        apiKey = '';
+    }
     var body = {
         providerId: document.getElementById('providerSelect').value,
         displayName: document.getElementById('mDisplayName').value,
         apiUrl: document.getElementById('mApiUrl').value,
-        apiKey: document.getElementById('mApiKey').value,
+        apiKey: apiKey,
         modelId: document.getElementById('mModelId').value,
         protocol: document.getElementById('mProtocol').value,
         supportsThinking: document.getElementById('mThinking').value === 'true',
