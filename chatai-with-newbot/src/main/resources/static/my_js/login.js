@@ -25,7 +25,7 @@ function switchTab(tab) {
 function showError(msg) {
     var el = document.getElementById('errorMsg');
     el.textContent = msg;
-    el.style.display = 'block';
+    el.style.display = 'flex';
     setTimeout(function() { el.style.display = 'none'; }, 5000);
 }
 
