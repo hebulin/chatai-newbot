@@ -7,259 +7,188 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/layui/css/layui.css">
     <link rel="stylesheet" href="my_css/admin.css">
 </head>
 <body>
 <div class="admin-layout">
+    <!-- 顶部导航 -->
     <nav class="admin-nav">
         <div class="nav-brand">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M8 12h8M12 8v8"/></svg>
             <span>管理后台</span>
         </div>
-        <div class="nav-tabs">
-            <button class="nav-tab active" onclick="switchSection('quickadd')">快速接入</button>
-            <button class="nav-tab" onclick="switchSection('models')">模型管理</button>
-            <button class="nav-tab" onclick="switchSection('users')">用户管理</button>
-            <button class="nav-tab" onclick="switchSection('data')">数据统计</button>
-        </div>
         <div class="nav-actions">
-            <button class="nav-btn" onclick="window.location.href='/index.html'">返回聊天</button>
+            <button class="theme-toggle-btn" id="themeToggleBtn" onclick="toggleTheme()" title="切换主题">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            </button>
+            <button class="nav-btn" onclick="window.location.href='/index.html'">
+                <i class="layui-icon layui-icon-return"></i> 返回聊天
+            </button>
         </div>
     </nav>
 
     <main class="admin-main">
-        <!-- 快速接入 -->
-        <section id="sec-quickadd" class="section active">
-            <div class="section-header">
-                <h2>快速接入模型</h2>
-                <span class="section-tip">选择厂商，填入 API Key 即可一键接入所有模型</span>
-            </div>
-            <div class="provider-grid" id="providerGrid">
-                <!-- 动态生成厂商卡片 -->
-            </div>
-        </section>
-
-        <!-- 模型管理 -->
-        <section id="sec-models" class="section">
-            <div class="section-header">
-                <h2>模型管理</h2>
-                <button class="primary-btn" onclick="showAddModel()">+ 添加模型</button>
-            </div>
-            <div class="card">
-                <table class="data-table" id="modelTable">
-                    <thead><tr><th>名称</th><th>厂商</th><th>模型</th><th>思考</th><th>状态</th><th>可见性</th><th>操作</th></tr></thead>
-                    <tbody></tbody>
-                </table>
-            </div>
-        </section>
-
-        <!-- 用户管理 -->
-        <section id="sec-users" class="section">
-            <div class="section-header">
-                <h2>用户管理</h2>
-            </div>
-            <div class="card">
-                <table class="data-table" id="userTable">
-                    <thead><tr><th>用户名</th><th>角色</th><th>注册时间</th><th>最近登录</th><th>登录IP</th><th>浏览器</th><th>操作</th></tr></thead>
-                    <tbody></tbody>
-                </table>
-            </div>
-        </section>
-
-        <!-- 数据统计（合并使用记录 + 用户统计） -->
-        <section id="sec-data" class="section">
-            <div class="section-header">
-                <h2>数据统计</h2>
-            </div>
-            <!-- 子菜单导航 -->
-            <div class="sub-menu">
-                <div class="sub-menu-item active" onclick="switchDataSubTab('usage')">使用记录</div>
-                <div class="sub-menu-item" onclick="switchDataSubTab('stats')">用户统计</div>
-            </div>
-
-            <!-- 使用记录子页面 -->
-            <div id="data-sub-usage" class="data-sub-content active">
-                <div class="card">
-                    <div class="stats-search-bar">
-                        <div class="search-field">
-                            <label class="search-label">用户</label>
-                            <select id="usageSearchUser" class="stats-search-select">
-                                <option value="">全部用户</option>
-                            </select>
-                        </div>
-                        <div class="search-field">
-                            <label class="search-label">模型</label>
-                            <select id="usageSearchModel" class="stats-search-select">
-                                <option value="">全部模型</option>
-                            </select>
-                        </div>
-                        <div class="search-field">
-                            <label class="search-label">日期</label>
-                            <input type="date" id="usageSearchDate" class="stats-search-input">
-                        </div>
-                        <div class="search-actions">
-                            <button class="primary-btn" onclick="searchUsage()">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                                搜索
-                            </button>
-                            <button class="cancel-btn" onclick="resetUsage()">重置</button>
-                        </div>
-                    </div>
-                    <table class="data-table" id="usageTable">
-                        <thead><tr><th>时间</th><th>用户</th><th>模型</th><th>输入Token</th><th>输出Token</th><th>缓存Token</th><th>思考模式</th></tr></thead>
-                        <tbody></tbody>
-                    </table>
-                    <div class="pagination" id="usagePagination"></div>
+        <div class="layui-tab layui-tab-brief admin-tab" lay-filter="adminTab">
+            <ul class="layui-tab-title">
+                <li class="layui-this">快速接入</li>
+                <li>模型管理</li>
+                <li>用户管理</li>
+                <li>数据统计</li>
+            </ul>
+            <div class="layui-tab-content">
+                <!-- 快速接入 -->
+                <div class="layui-tab-item layui-show">
+                <div class="section-header">
+                    <h2>快速接入模型</h2>
+                    <span class="section-tip">选择厂商，填入 API Key 即可一键接入所有模型</span>
+                </div>
+                <div class="provider-grid" id="providerGrid">
+                    <!-- 动态生成厂商卡片 -->
                 </div>
             </div>
 
-            <!-- 用户统计子页面 -->
-            <div id="data-sub-stats" class="data-sub-content">
+            <!-- 模型管理 -->
+            <div class="layui-tab-item">
+                <div class="section-header">
+                    <h2>模型管理</h2>
+                    <button class="primary-btn" onclick="showAddModel()">
+                        <i class="layui-icon layui-icon-addition"></i> 添加模型
+                    </button>
+                </div>
                 <div class="card">
-                    <div class="stats-search-bar">
-                        <div class="search-field">
-                            <label class="search-label">用户</label>
-                            <select id="statsSearchUser" class="stats-search-select">
-                                <option value="">全部用户</option>
-                            </select>
-                        </div>
-                        <div class="search-field">
-                            <label class="search-label">模型</label>
-                            <select id="statsSearchModel" class="stats-search-select">
-                                <option value="">全部模型</option>
-                            </select>
-                        </div>
-                        <div class="search-field">
-                            <label class="search-label">日期</label>
-                            <input type="date" id="statsSearchDate" class="stats-search-input">
-                        </div>
-                        <div class="search-actions">
-                            <button class="primary-btn" onclick="searchUsageStats()">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                                搜索
-                            </button>
-                            <button class="cancel-btn" onclick="resetUsageStats()">重置</button>
-                        </div>
-                    </div>
-                    <table class="data-table" id="statsTable">
-                        <thead><tr><th>用户</th><th>日期</th><th>模型</th><th>调用次数</th><th>输入Token</th><th>输出Token</th><th>缓存Token</th><th>思考模式次数</th></tr></thead>
-                        <tbody></tbody>
+                    <table class="layui-table data-table" id="modelTable" lay-skin="nob">
+                        <thead><tr><th>名称</th><th>厂商</th><th>模型</th><th>思考</th><th>状态</th><th>可见性</th><th>操作</th></tr></thead>
+                        <tbody id="modelTableBody"></tbody>
                     </table>
-                    <div class="pagination" id="statsPagination"></div>
                 </div>
             </div>
-        </section>
+
+            <!-- 用户管理 -->
+            <div class="layui-tab-item">
+                <div class="section-header">
+                    <h2>用户管理</h2>
+                </div>
+                <div class="card">
+                    <table class="layui-table data-table" id="userTable" lay-skin="nob">
+                        <thead><tr><th>用户名</th><th>角色</th><th>注册时间</th><th>最近登录</th><th>登录IP</th><th>浏览器</th><th>操作</th></tr></thead>
+                        <tbody id="userTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 数据统计 -->
+            <div class="layui-tab-item">
+                <div class="section-header">
+                    <h2>数据统计</h2>
+                </div>
+                <!-- 子菜单导航 -->
+                <div class="sub-menu">
+                    <div class="sub-menu-item active" onclick="switchDataSubTab('usage', this)">使用记录</div>
+                    <div class="sub-menu-item" onclick="switchDataSubTab('stats', this)">用户统计</div>
+                </div>
+
+                <!-- 使用记录子页面 -->
+                <div id="data-sub-usage" class="data-sub-content active">
+                    <div class="card">
+                        <div class="stats-search-bar">
+                            <div class="search-field">
+                                <label class="search-label">用户</label>
+                                <select id="usageSearchUser" class="stats-search-select">
+                                    <option value="">全部用户</option>
+                                </select>
+                            </div>
+                            <div class="search-field">
+                                <label class="search-label">模型</label>
+                                <div class="custom-select-area" id="usageModelSelectArea">
+                                    <div class="custom-select-trigger" id="usageModelSelectTrigger" onclick="toggleCustomDropdown('usageModel')">
+                                        <span class="custom-select-value" id="usageModelSelectValue">全部模型</span>
+                                        <i class="layui-icon layui-icon-down custom-select-arrow"></i>
+                                    </div>
+                                    <div class="custom-select-dropdown" id="usageModelSelectDropdown"></div>
+                                </div>
+                                <input type="hidden" id="usageSearchModel" value="">
+                            </div>
+                            <div class="search-field">
+                                <label class="search-label">日期</label>
+                                <input type="date" id="usageSearchDate" class="stats-search-input">
+                            </div>
+                            <div class="search-actions">
+                                <button class="primary-btn" onclick="searchUsage()">
+                                    <i class="layui-icon layui-icon-search"></i> 搜索
+                                </button>
+                                <button class="cancel-btn" onclick="resetUsage()">重置</button>
+                            </div>
+                        </div>
+                        <table class="layui-table data-table" id="usageTable" lay-skin="nob">
+                            <thead><tr><th>时间</th><th>用户</th><th>模型</th><th>输入Token</th><th>输出Token</th><th>缓存Token</th><th>思考模式</th></tr></thead>
+                            <tbody id="usageTableBody"></tbody>
+                        </table>
+                        <div id="usagePagination"></div>
+                    </div>
+                </div>
+
+                <!-- 用户统计子页面 -->
+                <div id="data-sub-stats" class="data-sub-content">
+                    <div class="card">
+                        <div class="stats-search-bar">
+                            <div class="search-field">
+                                <label class="search-label">用户</label>
+                                <select id="statsSearchUser" class="stats-search-select">
+                                    <option value="">全部用户</option>
+                                </select>
+                            </div>
+                            <div class="search-field">
+                                <label class="search-label">模型</label>
+                                <div class="custom-select-area" id="statsModelSelectArea">
+                                    <div class="custom-select-trigger" id="statsModelSelectTrigger" onclick="toggleCustomDropdown('statsModel')">
+                                        <span class="custom-select-value" id="statsModelSelectValue">全部模型</span>
+                                        <i class="layui-icon layui-icon-down custom-select-arrow"></i>
+                                    </div>
+                                    <div class="custom-select-dropdown" id="statsModelSelectDropdown"></div>
+                                </div>
+                                <input type="hidden" id="statsSearchModel" value="">
+                            </div>
+                            <div class="search-field">
+                                <label class="search-label">日期</label>
+                                <input type="date" id="statsSearchDate" class="stats-search-input">
+                            </div>
+                            <div class="search-actions">
+                                <button class="primary-btn" onclick="searchUsageStats()">
+                                    <i class="layui-icon layui-icon-search"></i> 搜索
+                                </button>
+                                <button class="cancel-btn" onclick="resetUsageStats()">重置</button>
+                            </div>
+                        </div>
+                        <table class="layui-table data-table" id="statsTable" lay-skin="nob">
+                            <thead><tr><th>用户</th><th>日期</th><th>模型</th><th>调用次数</th><th>输入Token</th><th>输出Token</th><th>缓存Token</th><th>思考模式次数</th></tr></thead>
+                            <tbody id="statsTableBody"></tbody>
+                        </table>
+                        <div id="statsPagination"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        </div>
     </main>
 </div>
 
-<!-- 快速接入弹窗 -->
-<div class="modal" id="quickAddModal">
-    <div class="modal-content quick-add-modal">
-        <div class="modal-header">
-            <h3 id="quickAddTitle">快速接入</h3>
-            <button class="icon-btn" onclick="closeQuickAddModal()">&times;</button>
-        </div>
-        <div class="quick-add-body">
-            <div class="quick-add-provider-info" id="quickAddProviderInfo"></div>
-            <div class="form-row">
-                <label>API Key</label>
-                <input type="text" id="qaApiKey" required placeholder="输入该厂商的 API Key">
-            </div>
-            <div class="form-row">
-                <label>选择要接入的模型</label>
-                <div class="model-checkbox-list" id="qaModelList"></div>
-            </div>
-            <div class="form-row inline">
-                <label><input type="checkbox" id="qaSelectAll" onchange="toggleSelectAllModels()"> 全选</label>
-                <label><input type="checkbox" id="qaVisible" checked> 全员可见</label>
-            </div>
-        </div>
-        <div class="form-actions">
-            <button class="cancel-btn" onclick="closeQuickAddModal()">取消</button>
-            <button class="primary-btn" onclick="submitQuickAdd()">一键接入</button>
-        </div>
-    </div>
-</div>
-
-<!-- 添加/编辑模型弹窗 -->
-<div class="modal" id="modelModal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h3 id="modalTitle">添加模型</h3>
-            <button class="icon-btn" onclick="closeModal()">&times;</button>
-        </div>
-        <form id="modelForm" onsubmit="return saveModel(event)">
-            <input type="hidden" id="editModelId">
-            <div class="form-row">
-                <label>接入方式</label>
-                <select id="providerSelect" onchange="onProviderChange()">
-                    <option value="custom">自定义</option>
-                </select>
-            </div>
-            <div class="form-row" id="providerModelRow">
-                <label>模型</label>
-                <select id="providerModelSelect" onchange="onProviderModelChange()"></select>
-            </div>
-            <div class="form-row">
-                <label>显示名称</label>
-                <input type="text" id="mDisplayName" required placeholder="选择模型后自动填充，或选择自定义后输入" readonly>
-            </div>
-            <div class="form-row" id="modelIdRow">
-                <label>模型标识</label>
-                <input type="text" id="mModelId" required placeholder="如: deepseek-chat" readonly>
-            </div>
-            <div class="form-row">
-                <label>API地址</label>
-                <input type="text" id="mApiUrl" required placeholder="https://api.xxx.com/v1">
-            </div>
-            <div class="form-row">
-                <label>API Key</label>
-                <input type="text" id="mApiKey" placeholder="sk-xxx">
-            </div>
-            <div class="form-row">
-                <label>协议</label>
-                <select id="mProtocol"><option value="openai">OpenAI兼容</option></select>
-            </div>
-            <div class="form-row inline">
-                <span class="thinking-badge" id="mThinkingBadge" style="display:none">支持思考模式</span>
-                <input type="hidden" id="mThinking" value="false">
-                <label><input type="checkbox" id="mEnabled" checked> 启用</label>
-                <label><input type="checkbox" id="mVisible" checked> 全员可见</label>
-            </div>
-            <div class="form-actions">
-                <button type="button" class="cancel-btn" onclick="closeModal()">取消</button>
-                <button type="submit" class="primary-btn">保存</button>
-            </div>
-        </form>
-    </div>
-</div>
-
-<!-- 权限弹窗 -->
-<div class="modal" id="permModal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h3>模型权限 - <span id="permUsername"></span></h3>
-            <button class="icon-btn" onclick="closePermModal()">&times;</button>
-        </div>
-        <div id="permList" class="perm-list"></div>
-        <div class="form-actions">
-            <button class="cancel-btn" onclick="closePermModal()">取消</button>
-            <button class="primary-btn" onclick="savePermissions()">保存</button>
-        </div>
-    </div>
-</div>
-
-<!-- 自定义弹窗组件（Toast / Alert / Confirm） -->
-<div class="toast-container" id="toastContainer"></div>
-<div class="custom-overlay" id="customOverlay">
-    <div class="custom-dialog" id="customDialog">
-        <div class="custom-dialog-icon" id="customDialogIcon"></div>
-        <div class="custom-dialog-title" id="customDialogTitle"></div>
-        <div class="custom-dialog-msg" id="customDialogMsg"></div>
-        <div class="custom-dialog-actions" id="customDialogActions"></div>
-    </div>
-</div>
-
+<!-- 自定义下拉框点击外部关闭 -->
+<script>
+document.addEventListener('click', function(e) {
+    var areas = document.querySelectorAll('.custom-select-area');
+    areas.forEach(function(area) {
+        if (!area.contains(e.target)) {
+            var trigger = area.querySelector('.custom-select-trigger');
+            var dropdown = area.querySelector('.custom-select-dropdown');
+            if (trigger) trigger.classList.remove('active');
+            if (dropdown) dropdown.classList.remove('active');
+        }
+    });
+});
+</script>
+<script src="/layui/layui.js"></script>
+<script src="my_js/theme.js"></script>
 <script src="my_js/admin.js"></script>
 </body>
 </html>
