@@ -15,10 +15,37 @@ var buffer = '';
 var currentThinkingContent = '';
 var currentAnswerContent = '';
 var thinkingStartTime = null;
+var modelDropdownOpen = false; // 自定义下拉框状态
 
-// ===== 初始化 =====
-(function init() {
+// 厂商图标映射：provider id -> SVG图标路径
+var providerIconMap = {
+    'deepseek': '/icons/deepseek-icon.svg',
+    'qwen': '/icons/qwen-icon.svg',
+    'kimi': '/icons/kimi-icon.svg',
+    'zhipu': '/icons/zhipu-icon.svg',
+    'minimax': '/icons/minimax-icon.svg',
+    'doubao': '/icons/doubao-icon.svg'
+};
+
+// Layui 模块加载
+layui.use(['layer', 'form', 'element', 'jquery'], function() {
+    var layer = layui.layer;
+    var form = layui.form;
+    var $ = layui.$;
+
+    // 将 layer 和 $ 暴露到全局，方便其他函数使用
+    window._layer = layer;
+    window._$ = $;
+    window._form = form;
+
+    // 监听深度思考开关
+    form.on('switch(deepThink)', function(data) {
+        isDeepThinking = data.elem.checked;
+    });
+
+    // ===== 初始化 =====
     if (!TOKEN) { window.location.href = '/login.html'; return; }
+
     // 初始化marked
     marked.setOptions({
         gfm: true, breaks: true, headerIds: false, mangle: false,
@@ -58,39 +85,54 @@ var thinkingStartTime = null;
     if (window.innerWidth <= 768) {
         document.getElementById('sidebar').classList.add('collapsed');
     }
-})();
+
+    // 点击外部关闭模型下拉框
+    document.addEventListener('click', function(e) {
+        var area = document.getElementById('modelSelectArea');
+        if (area && !area.contains(e.target)) {
+            closeModelDropdown();
+        }
+    });
+});
 
 // ===== 认证相关 =====
 function authHeaders() { return { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' }; }
 
 function logout() {
-    document.getElementById('confirmOverlay').classList.add('active');
-}
-
-function hideConfirm() {
-    document.getElementById('confirmOverlay').classList.remove('active');
+    if (window._layer) {
+        window._layer.confirm('确定要退出当前账号吗？', {
+            title: '退出登录',
+            btn: ['退出', '取消'],
+            btn1: function(index) {
+                window._layer.close(index);
+                doLogout();
+            }
+        });
+    } else {
+        doLogout();
+    }
 }
 
 function showConfirmDialog(msg, title, onOk) {
-    var overlay = document.getElementById('confirmOverlay');
-    var dialog = overlay.querySelector('.confirm-dialog');
-    dialog.querySelector('.confirm-title').textContent = title || '确认';
-    dialog.querySelector('.confirm-msg').textContent = msg;
-    var okBtn = dialog.querySelector('.confirm-ok');
-    var newOkBtn = okBtn.cloneNode(true);
-    okBtn.parentNode.replaceChild(newOkBtn, okBtn);
-    newOkBtn.textContent = '确定';
-    newOkBtn.onclick = function() { hideConfirm(); if (onOk) onOk(); };
-    overlay.classList.add('active');
+    if (window._layer) {
+        window._layer.confirm(msg, {
+            title: title || '确认',
+            btn: ['确定', '取消'],
+            btn1: function(index) {
+                window._layer.close(index);
+                if (onOk) onOk();
+            }
+        });
+    } else {
+        if (confirm(msg)) { if (onOk) onOk(); }
+    }
 }
 
 function doLogout() {
-    hideConfirm();
     fetch('/api/auth/logout', { method: 'POST', headers: authHeaders() }).catch(function(){});
     localStorage.removeItem('token');
     localStorage.removeItem('username');
     localStorage.removeItem('role');
-    // 不删除 CHATS_KEY 和 LAST_CHAT_KEY，保留会话历史，下次登录同一用户时恢复
     window.location.href = '/login.html';
 }
 
@@ -113,70 +155,164 @@ function loadModels() {
     .then(function(data) {
         if (!data || !data.success) return;
         models = data.data;
-        var select = document.getElementById('modelSelect');
-        select.innerHTML = '';
-
-        // 按厂商分组
-        var groups = {};
-        var groupOrder = [];
-        models.forEach(function(m) {
-            var key = m.providerName || m.providerId || 'custom';
-            if (!groups[key]) {
-                groups[key] = { name: key, icon: m.providerIcon || '', models: [] };
-                groupOrder.push(key);
-            }
-            groups[key].models.push(m);
-        });
-
-        // 如果只有一个厂商，直接平铺
-        if (groupOrder.length <= 1) {
-            models.forEach(function(m) {
-                var opt = document.createElement('option');
-                opt.value = m.id;
-                opt.textContent = m.displayName;
-                opt.dataset.supportsThinking = m.supportsThinking;
-                select.appendChild(opt);
-            });
-        } else {
-            // 多个厂商，使用 optgroup 分组
-            groupOrder.forEach(function(key) {
-                var group = groups[key];
-                var optgroup = document.createElement('optgroup');
-                optgroup.label = group.icon + ' ' + group.name;
-                group.models.forEach(function(m) {
-                    var opt = document.createElement('option');
-                    opt.value = m.id;
-                    opt.textContent = m.displayName;
-                    opt.dataset.supportsThinking = m.supportsThinking;
-                    optgroup.appendChild(opt);
-                });
-                select.appendChild(optgroup);
-            });
-        }
-
+        renderModelSelector(models);
         if (models.length > 0) {
             currentModelId = models[0].id;
-            select.value = currentModelId;
-            onModelChange();
+            currentModelName = models[0].displayName;
+            updateModelSelectDisplay(models[0]);
+            updateThinkToggle(models[0]);
         }
     }).catch(function(e) { console.error('加载模型失败:', e); });
 }
 
-function onModelChange() {
-    var select = document.getElementById('modelSelect');
-    currentModelId = select.value;
-    // 查找当前模型名称
-    currentModelName = '';
-    for (var i = 0; i < models.length; i++) {
-        if (models[i].id === currentModelId) { currentModelName = models[i].displayName; break; }
+// 根据模型displayName推断providerId
+function inferProviderId(model) {
+    if (model.providerId) return model.providerId;
+    var name = (model.displayName || '').toLowerCase();
+    var id = (model.modelId || '').toLowerCase();
+    if (name.indexOf('deepseek') >= 0 || id.indexOf('deepseek') >= 0) return 'deepseek';
+    if (name.indexOf('qwen') >= 0 || name.indexOf('通义') >= 0 || id.indexOf('qwen') >= 0 || id.indexOf('qwq') >= 0) return 'qwen';
+    if (name.indexOf('kimi') >= 0 || name.indexOf('moonshot') >= 0 || id.indexOf('kimi') >= 0 || id.indexOf('moonshot') >= 0) return 'kimi';
+    if (name.indexOf('glm') >= 0 || name.indexOf('智谱') >= 0 || id.indexOf('glm') >= 0) return 'zhipu';
+    if (name.indexOf('minimax') >= 0 || id.indexOf('minimax') >= 0) return 'minimax';
+    if (name.indexOf('豆包') >= 0 || name.indexOf('doubao') >= 0 || id.indexOf('doubao') >= 0) return 'doubao';
+    return '';
+}
+
+// ===== 自定义模型选择下拉框 =====
+function renderModelSelector(modelsData) {
+    var dropdown = document.getElementById('modelSelectDropdown');
+    if (!dropdown) return;
+    dropdown.innerHTML = '';
+
+    // 按厂商分组
+    var groups = {};
+    var groupOrder = [];
+    modelsData.forEach(function(m) {
+        var key = m.providerName || m.providerId || 'custom';
+        if (!groups[key]) {
+            groups[key] = { name: key, providerId: m.providerId || inferProviderId(m), models: [] };
+            groupOrder.push(key);
+        }
+        groups[key].models.push(m);
+    });
+
+    groupOrder.forEach(function(key) {
+        var group = groups[key];
+        // 厂商分组标题
+        var groupHeader = document.createElement('div');
+        groupHeader.className = 'model-group-header';
+        var iconPath = providerIconMap[group.providerId];
+        var iconHtml = '';
+        if (iconPath) {
+            iconHtml = '<img src="' + iconPath + '" class="model-group-icon" />';
+        }
+        groupHeader.innerHTML = iconHtml + '<span>' + escapeHtml(group.name) + '</span>';
+        dropdown.appendChild(groupHeader);
+
+        // 模型列表
+        group.models.forEach(function(m) {
+            var item = document.createElement('div');
+            item.className = 'model-item';
+            item.setAttribute('data-model-id', m.id);
+            item.setAttribute('data-provider-id', m.providerId || inferProviderId(m));
+            item.setAttribute('data-supports-thinking', m.supportsThinking ? 'true' : 'false');
+            var pid = m.providerId || inferProviderId(m);
+            var itemIconPath = providerIconMap[pid];
+            var itemIconHtml = '';
+            if (itemIconPath) {
+                itemIconHtml = '<img src="' + itemIconPath + '" class="model-item-icon" />';
+            }
+            item.innerHTML = itemIconHtml + '<span class="model-item-name">' + escapeHtml(m.displayName) + '</span>';
+            item.onclick = function() {
+                selectModel(m);
+            };
+            dropdown.appendChild(item);
+        });
+    });
+}
+
+function selectModel(model) {
+    currentModelId = model.id;
+    currentModelName = model.displayName;
+    updateModelSelectDisplay(model);
+    updateThinkToggle(model);
+    closeModelDropdown();
+    // 更新选中态
+    var items = document.querySelectorAll('.model-item');
+    items.forEach(function(item) {
+        if (item.getAttribute('data-model-id') === model.id) {
+            item.classList.add('selected');
+        } else {
+            item.classList.remove('selected');
+        }
+    });
+}
+
+function updateModelSelectDisplay(model) {
+    var valueEl = document.getElementById('modelSelectValue');
+    if (!valueEl) return;
+    var pid = model.providerId || inferProviderId(model);
+    var iconPath = providerIconMap[pid];
+    var iconHtml = '';
+    if (iconPath) {
+        iconHtml = '<img src="' + iconPath + '" class="model-select-icon" />';
     }
-    var opt = select.options[select.selectedIndex];
-    var supportsThinking = opt && opt.dataset.supportsThinking === 'true';
+    valueEl.innerHTML = iconHtml + '<span>' + escapeHtml(model.displayName) + '</span>';
+}
+
+function toggleModelDropdown() {
+    if (modelDropdownOpen) {
+        closeModelDropdown();
+    } else {
+        openModelDropdown();
+    }
+}
+
+function openModelDropdown() {
+    var dropdown = document.getElementById('modelSelectDropdown');
+    var trigger = document.getElementById('modelSelectTrigger');
+    if (dropdown) {
+        dropdown.classList.add('active');
+        modelDropdownOpen = true;
+        // 自适应：判断下拉框是否有足够空间向下展开，不够则向上展开
+        setTimeout(function() {
+            var rect = trigger.getBoundingClientRect();
+            var dropdownHeight = dropdown.scrollHeight;
+            var spaceBelow = window.innerHeight - rect.bottom;
+            var spaceAbove = rect.top;
+            // 如果下方空间不足且上方空间更大，则向上展开
+            if (spaceBelow < dropdownHeight + 10 && spaceAbove > spaceBelow) {
+                dropdown.classList.add('dropup');
+            } else {
+                dropdown.classList.remove('dropup');
+            }
+        }, 0);
+    }
+    if (trigger) {
+        trigger.classList.add('active');
+    }
+}
+
+function closeModelDropdown() {
+    var dropdown = document.getElementById('modelSelectDropdown');
+    var trigger = document.getElementById('modelSelectTrigger');
+    if (dropdown) {
+        dropdown.classList.remove('active');
+        dropdown.classList.remove('dropup');
+        modelDropdownOpen = false;
+    }
+    if (trigger) {
+        trigger.classList.remove('active');
+    }
+}
+
+// 更新深度思考开关
+function updateThinkToggle(model) {
     var thinkToggle = document.getElementById('thinkToggle');
     var deepThinkCheck = document.getElementById('deepThinkCheck');
-    if (supportsThinking) {
+    if (model.supportsThinking) {
         thinkToggle.style.display = 'flex';
-        // 模型支持思考时默认勾选
         isDeepThinking = true;
         deepThinkCheck.checked = true;
     } else {
@@ -184,11 +320,13 @@ function onModelChange() {
         isDeepThinking = false;
         deepThinkCheck.checked = false;
     }
+    // 重新渲染 Layui switch
+    if (window._form) {
+        window._form.render('checkbox');
+    }
 }
 
-function toggleDeepThinking() {
-    isDeepThinking = document.getElementById('deepThinkCheck').checked;
-}
+// toggleDeepThinking 已由 Layui form.on('switch(deepThink)') 处理
 
 // ===== 会话管理 =====
 function newChat() {
@@ -769,10 +907,16 @@ function hideLoading() {
 }
 
 function showToast(msg) {
-    var t = document.getElementById('toast');
-    t.textContent = msg;
-    t.classList.add('show');
-    setTimeout(function() { t.classList.remove('show'); }, 2500);
+    if (window._layer) {
+        window._layer.msg(msg, { time: 2500, shade: 0 });
+    } else {
+        var t = document.getElementById('toast');
+        if (t) {
+            t.textContent = msg;
+            t.classList.add('show');
+            setTimeout(function() { t.classList.remove('show'); }, 2500);
+        }
+    }
 }
 
 function toggleSidebar() {
