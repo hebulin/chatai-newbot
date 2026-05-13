@@ -482,14 +482,14 @@ function savePermissions(userId) {
 function switchDataSubTab(tab, el) {
     dataSubTab = tab;
     var $ = window._$;
-    $('.sub-menu-item').removeClass('active');
+    $('.sub-tab-card').removeClass('active');
     $('.data-sub-content').removeClass('active').hide();
     if (tab === 'usage') {
-        $(el || '.sub-menu-item:first').addClass('active');
+        $(el || '.sub-tab-card:first').addClass('active');
         $('#data-sub-usage').addClass('active').show();
         loadUsage();
     } else {
-        $(el || '.sub-menu-item:last').addClass('active');
+        $(el || '.sub-tab-card:last').addClass('active');
         $('#data-sub-stats').addClass('active').show();
         loadUsageStats();
     }
@@ -523,9 +523,11 @@ function loadUsage() {
     var $ = window._$;
     var username = $('#usageSearchUser').val() || '';
     var modelName = $('#usageSearchModel').val() || '';
+    var date = $('#usageSearchDate').val() || '';
     var url = '/api/admin/usage?page=' + usagePage + '&size=' + usageSize;
     if (username) url += '&username=' + encodeURIComponent(username);
     if (modelName) url += '&modelName=' + encodeURIComponent(modelName);
+    if (date) url += '&date=' + encodeURIComponent(date);
     api(url).then(function(data) {
         if (data && data.success) {
             // API返回 {success, data: [...], total, page, size}
@@ -541,9 +543,11 @@ function loadUsageStats() {
     var $ = window._$;
     var username = $('#statsSearchUser').val() || '';
     var modelName = $('#statsSearchModel').val() || '';
+    var date = $('#statsSearchDate').val() || '';
     var url = '/api/admin/usage/stats?page=' + statsPage + '&size=' + statsSize;
     if (username) url += '&username=' + encodeURIComponent(username);
     if (modelName) url += '&modelName=' + encodeURIComponent(modelName);
+    if (date) url += '&date=' + encodeURIComponent(date);
     api(url).then(function(data) {
         if (data && data.success) {
             // API返回 {success, data: [...], total, page, size}
@@ -612,6 +616,11 @@ function resetUsage() {
     var $ = window._$;
     $('#usageSearchUser').val('');
     $('#usageSearchModel').val('');
+    $('#usageSearchDate').val('');
+    // 重置自定义下拉框显示文本
+    $('#usageModelSelectValue').text('全部模型');
+    // 重置layui渲染的select
+    if (window._form) window._form.render('select');
     usagePage = 1;
     loadUsage();
 }
@@ -619,6 +628,11 @@ function resetUsageStats() {
     var $ = window._$;
     $('#statsSearchUser').val('');
     $('#statsSearchModel').val('');
+    $('#statsSearchDate').val('');
+    // 重置自定义下拉框显示文本
+    $('#statsModelSelectValue').text('全部模型');
+    // 重置layui渲染的select
+    if (window._form) window._form.render('select');
     statsPage = 1;
     loadUsageStats();
 }
