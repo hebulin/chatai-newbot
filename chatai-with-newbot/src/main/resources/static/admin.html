@@ -82,10 +82,22 @@
                 <div class="section-header">
                     <h2>数据统计</h2>
                 </div>
-                <!-- 子菜单导航 -->
-                <div class="sub-menu">
-                    <div class="sub-menu-item active" onclick="switchDataSubTab('usage', this)">使用记录</div>
-                    <div class="sub-menu-item" onclick="switchDataSubTab('stats', this)">用户统计</div>
+                <!-- 子菜单导航 - 卡片式Tab -->
+                <div class="sub-tab-card-group">
+                    <div class="sub-tab-card active" onclick="switchDataSubTab('usage', this)">
+                        <svg class="sub-tab-card-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                        <div class="sub-tab-card-text">
+                            <span class="sub-tab-card-title">使用记录</span>
+                            <span class="sub-tab-card-desc">查看API调用详情</span>
+                        </div>
+                    </div>
+                    <div class="sub-tab-card" onclick="switchDataSubTab('stats', this)">
+                        <svg class="sub-tab-card-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                        <div class="sub-tab-card-text">
+                            <span class="sub-tab-card-title">用户统计</span>
+                            <span class="sub-tab-card-desc">按用户汇总使用量</span>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- 使用记录子页面 -->
@@ -101,7 +113,7 @@
                             <div class="search-field">
                                 <label class="search-label">模型</label>
                                 <div class="custom-select-area" id="usageModelSelectArea">
-                                    <div class="custom-select-trigger" id="usageModelSelectTrigger" onclick="toggleCustomDropdown('usageModel')">
+                                    <div class="custom-select-trigger" id="usageModelSelectTrigger" onclick="toggleCustomDropdown('usageModelSelectArea')">
                                         <span class="custom-select-value" id="usageModelSelectValue">全部模型</span>
                                         <i class="layui-icon layui-icon-down custom-select-arrow"></i>
                                     </div>
@@ -141,7 +153,7 @@
                             <div class="search-field">
                                 <label class="search-label">模型</label>
                                 <div class="custom-select-area" id="statsModelSelectArea">
-                                    <div class="custom-select-trigger" id="statsModelSelectTrigger" onclick="toggleCustomDropdown('statsModel')">
+                                    <div class="custom-select-trigger" id="statsModelSelectTrigger" onclick="toggleCustomDropdown('statsModelSelectArea')">
                                         <span class="custom-select-value" id="statsModelSelectValue">全部模型</span>
                                         <i class="layui-icon layui-icon-down custom-select-arrow"></i>
                                     </div>
