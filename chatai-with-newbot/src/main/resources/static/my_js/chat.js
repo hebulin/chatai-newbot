@@ -40,7 +40,10 @@ layui.use(['layer', 'form', 'element', 'jquery'], function() {
 
     // 监听深度思考开关
     form.on('switch(deepThink)', function(data) {
-        isDeepThinking = data.elem.checked;
+        // data.elem 是原生checkbox，data.value 是值，data.othis 是Layui渲染的switch DOM
+        // 使用 data.othis 是否有 layui-form-onswitch 类来判断实际开关状态
+        isDeepThinking = data.othis.hasClass('layui-form-onswitch');
+        console.log('深度思考开关切换:', isDeepThinking);
     });
 
     // ===== 初始化 =====
@@ -155,12 +158,20 @@ function loadModels() {
     .then(function(data) {
         if (!data || !data.success) return;
         models = data.data;
-        renderModelSelector(models);
         if (models.length > 0) {
             currentModelId = models[0].id;
             currentModelName = models[0].displayName;
             updateModelSelectDisplay(models[0]);
-            updateThinkToggle(models[0]);
+        }
+        renderModelSelector(models);
+        // 初始化深度思考状态（在renderModelSelector之后，确保DOM已就绪）
+        if (models.length > 0) {
+            isDeepThinking = models[0].supportsThinking;
+            var deepThinkCheck = document.getElementById('deepThinkCheck');
+            if (deepThinkCheck) deepThinkCheck.checked = models[0].supportsThinking;
+            var thinkToggle = document.getElementById('thinkToggle');
+            if (thinkToggle) thinkToggle.style.display = models[0].supportsThinking ? 'flex' : 'none';
+            if (window._form) window._form.render('checkbox');
         }
     }).catch(function(e) { console.error('加载模型失败:', e); });
 }
@@ -213,7 +224,7 @@ function renderModelSelector(modelsData) {
         // 模型列表
         group.models.forEach(function(m) {
             var item = document.createElement('div');
-            item.className = 'model-item';
+            item.className = 'model-item' + (m.id === currentModelId ? ' selected' : '');
             item.setAttribute('data-model-id', m.id);
             item.setAttribute('data-provider-id', m.providerId || inferProviderId(m));
             item.setAttribute('data-supports-thinking', m.supportsThinking ? 'true' : 'false');
@@ -233,10 +244,11 @@ function renderModelSelector(modelsData) {
 }
 
 function selectModel(model) {
+    var prevModelId = currentModelId;
     currentModelId = model.id;
     currentModelName = model.displayName;
     updateModelSelectDisplay(model);
-    updateThinkToggle(model);
+    updateThinkToggle(model, prevModelId !== model.id);
     closeModelDropdown();
     // 更新选中态
     var items = document.querySelectorAll('.model-item');
@@ -287,6 +299,11 @@ function openModelDropdown() {
             } else {
                 dropdown.classList.remove('dropup');
             }
+            // 自动滚动到当前选中项
+            var selectedItem = dropdown.querySelector('.model-item.selected');
+            if (selectedItem) {
+                selectedItem.scrollIntoView({ block: 'nearest' });
+            }
         }, 0);
     }
     if (trigger) {
@@ -308,13 +325,18 @@ function closeModelDropdown() {
 }
 
 // 更新深度思考开关
-function updateThinkToggle(model) {
+// isModelChanged: 是否是切换了模型（true=模型变了，默认开启思考；false=同模型，保持当前状态）
+function updateThinkToggle(model, isModelChanged) {
     var thinkToggle = document.getElementById('thinkToggle');
     var deepThinkCheck = document.getElementById('deepThinkCheck');
     if (model.supportsThinking) {
         thinkToggle.style.display = 'flex';
-        isDeepThinking = true;
-        deepThinkCheck.checked = true;
+        if (isModelChanged) {
+            // 切换到新模型时，默认开启深度思考
+            isDeepThinking = true;
+            deepThinkCheck.checked = true;
+        }
+        // 如果不是模型切换（如初始化），保持当前 isDeepThinking 状态
     } else {
         thinkToggle.style.display = 'none';
         isDeepThinking = false;
@@ -367,25 +389,92 @@ function deleteChat(id, e) {
     });
 }
 
+// 会话搜索关键词
+var chatSearchKeyword = '';
+
 function updateChatList() {
     var list = document.getElementById('chatList');
     list.innerHTML = '';
+
+    // 构建会话信息列表
+    var chatInfos = [];
     var ids = Object.keys(chats);
     ids.forEach(function(id) {
         var msgs = chats[id];
         var first = null;
-        for (var i = 0; i < msgs.length; i++) { if (msgs[i].role === 'user') { first = msgs[i]; break; } }
+        var lastTime = null;
+        for (var i = 0; i < msgs.length; i++) {
+            if (msgs[i].role === 'user' && !first) { first = msgs[i]; }
+            if (msgs[i].time) {
+                // time 格式为 "2026/5/13 15:30:45" 这样的中文本地化格式
+                lastTime = msgs[i].time;
+            }
+        }
         var title = first ? first.content.substring(0, 20) : '新会话';
-
-        var item = document.createElement('div');
-        item.className = 'chat-item' + (id === currentChatId ? ' active' : '');
-        item.onclick = function() { switchChat(id); };
-        item.innerHTML = '<span class="title">' + escapeHtml(title) + '</span>' +
-            '<button class="delete-btn" onclick="deleteChat(\'' + id + '\', event)" title="删除">' +
-            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>' +
-            '</button>';
-        list.appendChild(item);
+        chatInfos.push({
+            id: id,
+            title: title,
+            fullContent: first ? first.content : '',
+            lastTime: lastTime,
+            lastTimeDate: parseDateFromStr(lastTime)
+        });
     });
+
+    // 模糊搜索过滤
+    var keyword = chatSearchKeyword.trim().toLowerCase();
+    if (keyword) {
+        chatInfos = chatInfos.filter(function(info) {
+            return info.title.toLowerCase().indexOf(keyword) >= 0 ||
+                   info.fullContent.toLowerCase().indexOf(keyword) >= 0;
+        });
+    }
+
+    // 按最后对话时间排序（最新的在上面）
+    chatInfos.sort(function(a, b) {
+        if (!a.lastTimeDate && !b.lastTimeDate) return 0;
+        if (!a.lastTimeDate) return 1;
+        if (!b.lastTimeDate) return -1;
+        return b.lastTimeDate - a.lastTimeDate;
+    });
+
+    // 按日期分组
+    var groups = {};
+    var groupOrder = [];
+    chatInfos.forEach(function(info) {
+        var dateLabel = getDateLabel(info.lastTimeDate);
+        if (!groups[dateLabel]) {
+            groups[dateLabel] = [];
+            groupOrder.push(dateLabel);
+        }
+        groups[dateLabel].push(info);
+    });
+
+    // 渲染分组和会话项
+    groupOrder.forEach(function(dateLabel) {
+        var groupHeader = document.createElement('div');
+        groupHeader.className = 'chat-date-header';
+        groupHeader.textContent = dateLabel;
+        list.appendChild(groupHeader);
+
+        groups[dateLabel].forEach(function(info) {
+            var item = document.createElement('div');
+            item.className = 'chat-item' + (info.id === currentChatId ? ' active' : '');
+            item.onclick = function() { switchChat(info.id); };
+            item.innerHTML = '<span class="title">' + escapeHtml(info.title) + '</span>' +
+                '<button class="delete-btn" onclick="deleteChat(\'' + info.id + '\', event)" title="删除">' +
+                '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>' +
+                '</button>';
+            list.appendChild(item);
+        });
+    });
+
+    // 无搜索结果提示
+    if (keyword && chatInfos.length === 0) {
+        var emptyTip = document.createElement('div');
+        emptyTip.className = 'chat-search-empty';
+        emptyTip.textContent = '未找到匹配的会话';
+        list.appendChild(emptyTip);
+    }
 
     // 更新标题
     var msgs = chats[currentChatId] || [];
@@ -393,6 +482,60 @@ function updateChatList() {
     for (var i = 0; i < msgs.length; i++) { if (msgs[i].role === 'user') { firstUser = msgs[i]; break; } }
     document.getElementById('chatTitle').textContent = firstUser ?
         firstUser.content.substring(0, 30) + (firstUser.content.length > 30 ? '...' : '') : '新会话';
+}
+
+// 从时间字符串解析Date对象
+function parseDateFromStr(timeStr) {
+    if (!timeStr) return null;
+    try {
+        // 处理 "2026/5/13 15:30:45" 格式
+        var date = new Date(timeStr.replace(/\//g, '-'));
+        if (!isNaN(date.getTime())) return date;
+        // 尝试直接解析
+        date = new Date(timeStr);
+        if (!isNaN(date.getTime())) return date;
+    } catch(e) {}
+    return null;
+}
+
+// 获取日期分组标签
+function getDateLabel(date) {
+    if (!date) return '更早';
+    var now = new Date();
+    var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var yesterday = new Date(today.getTime() - 86400000);
+    var chatDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+    if (chatDate.getTime() === today.getTime()) return '今天';
+    if (chatDate.getTime() === yesterday.getTime()) return '昨天';
+
+    var year = date.getFullYear();
+    var month = date.getMonth() + 1;
+    var day = date.getDate();
+    if (year === now.getFullYear()) {
+        return month + '月' + day + '日';
+    }
+    return year + '年' + month + '月' + day + '日';
+}
+
+// 搜索会话
+function filterChatList(keyword) {
+    chatSearchKeyword = keyword;
+    var clearBtn = document.getElementById('chatSearchClear');
+    if (clearBtn) {
+        clearBtn.style.display = keyword ? 'flex' : 'none';
+    }
+    updateChatList();
+}
+
+// 清空搜索
+function clearChatSearch() {
+    var input = document.getElementById('chatSearchInput');
+    if (input) input.value = '';
+    chatSearchKeyword = '';
+    var clearBtn = document.getElementById('chatSearchClear');
+    if (clearBtn) clearBtn.style.display = 'none';
+    updateChatList();
 }
 
 function saveChats() { localStorage.setItem(CHATS_KEY, JSON.stringify(chats)); }
@@ -441,7 +584,22 @@ function sendMessage(fromButton) {
     updateChatList();
     showLoading();
 
-    // 准备请求
+    // 准备请求 - 直接从DOM读取深度思考开关的实际状态，而非依赖全局变量
+    var thinkToggle = document.getElementById('thinkToggle');
+    var actualDeepThinking = false;
+    if (thinkToggle && thinkToggle.style.display !== 'none') {
+        // 方式1：从Layui渲染的switch DOM读取状态
+        var layuiSwitch = thinkToggle.querySelector('.layui-form-switch');
+        if (layuiSwitch && layuiSwitch.classList.contains('layui-form-onswitch')) {
+            actualDeepThinking = true;
+        }
+        // 方式2：从原生checkbox读取（Layui切换时会同步更新checked属性）
+        var deepThinkCheck = document.getElementById('deepThinkCheck');
+        if (deepThinkCheck) {
+            actualDeepThinking = deepThinkCheck.checked;
+        }
+    }
+    console.log('发送消息，深度思考:', actualDeepThinking, '全局变量:', isDeepThinking);
     var requestBody = {
         modelConfigId: currentModelId,
         messages: [{ role: 'system', content: 'You are a helpful assistant.' }].concat(
@@ -451,7 +609,7 @@ function sendMessage(fromButton) {
             })
         ),
         stream: true,
-        deepThinking: isDeepThinking,
+        deepThinking: actualDeepThinking,
         temperature: 0.7
     };
 
