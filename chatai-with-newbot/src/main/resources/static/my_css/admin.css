@@ -392,8 +392,9 @@ body {
 .layui-table thead tr { background: rgba(30, 41, 59, 0.9) !important; }
 .layui-table th { background: rgba(30, 41, 59, 0.9) !important; color: #94a3b8 !important; border-color: rgba(99, 102, 241, 0.15) !important; }
 .layui-table td { border-color: rgba(99, 102, 241, 0.1) !important; color: #cbd5e1; }
-.layui-table tr { background: transparent !important; }
-.layui-table:hover tr { background: transparent !important; }
+.layui-table tbody tr { background: transparent !important; }
+.layui-table:hover tbody tr { background: transparent !important; }
+.layui-table tbody tr:hover { background: rgba(99, 102, 241, 0.08) !important; }
 .layui-table[lay-skin="nob"] td, .layui-table[lay-skin="nob"] th { border-color: rgba(99, 102, 241, 0.1) !important; }
 
 /* ===== Model Name Cell ===== */
@@ -993,10 +994,18 @@ body {
 [data-theme="light"] .action-btn:hover{background:rgba(99,102,241,.08);color:#6366f1}
 [data-theme="light"] .action-btn.primary{background:linear-gradient(135deg,#6366f1,#818cf8);color:#fff;border:none}
 [data-theme="light"] .action-btn.danger{background:rgba(239,68,68,.08);color:#ef4444;border:1px solid rgba(239,68,68,.2)}
-[data-theme="light"] table{background:#fff!important}
-[data-theme="light"] table th{background:rgba(99,102,241,.05)!important;color:#1e293b!important;border-color:rgba(99,102,241,.1)!important}
-[data-theme="light"] table td{color:#475569!important;border-color:rgba(99,102,241,.08)!important}
-[data-theme="light"] table tr:hover td{background:rgba(99,102,241,.03)!important}
+[data-theme="light"] .layui-table{background:#fff!important;color:#1e293b}
+[data-theme="light"] .layui-table thead tr{background:rgba(241,245,249,.9)!important}
+[data-theme="light"] .layui-table th{background:rgba(241,245,249,.9)!important;color:#475569!important;border-color:rgba(99,102,241,.1)!important}
+[data-theme="light"] .layui-table td{color:#475569!important;border-color:rgba(99,102,241,.08)!important}
+[data-theme="light"] .layui-table tbody tr{background:#fff!important}
+[data-theme="light"] .layui-table:hover tbody tr{background:#fff!important}
+[data-theme="light"] .layui-table tbody tr:hover{background:rgba(99,102,241,.05)!important}
+[data-theme="light"] .data-table tbody tr{background:#fff!important}
+[data-theme="light"] .data-table tbody tr:nth-child(even){background:rgba(241,245,249,.5)!important}
+[data-theme="light"] .data-table tbody tr:hover{background:rgba(99,102,241,.05)!important}
+[data-theme="light"] .data-table th{background:rgba(241,245,249,.9)!important;color:#475569!important}
+[data-theme="light"] .data-table td{color:#475569!important}
 [data-theme="light"] .data-sub-tab{color:#64748b;background:#fff;border:1px solid rgba(99,102,241,.12)}
 [data-theme="light"] .data-sub-tab:hover{color:#1e293b;border-color:rgba(99,102,241,.3)}
 [data-theme="light"] .data-sub-tab-active{background:rgba(99,102,241,.08);color:#6366f1;border-color:#6366f1}
