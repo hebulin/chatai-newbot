@@ -1013,6 +1013,24 @@ function switchMermaidView(btn, mode) {
 
 // ===== 特殊内容处理 =====
 function processSpecialContent(container) {
+    // 表格包装处理 - 将table包裹在可水平滚动的.table-wrapper中
+    container.querySelectorAll('.msg-bubble table').forEach(function(table) {
+        if (table.parentElement.classList.contains('table-wrapper')) return;
+        var wrapper = document.createElement('div');
+        wrapper.className = 'table-wrapper';
+        table.parentNode.insertBefore(wrapper, table);
+        wrapper.appendChild(table);
+        // 检测是否有溢出，添加提示阴影
+        if (table.offsetWidth > wrapper.offsetWidth) {
+            wrapper.classList.add('has-overflow');
+        }
+        // 监听滚动，滚动到底部时隐藏右侧阴影
+        wrapper.addEventListener('scroll', function() {
+            var isScrolledToEnd = this.scrollLeft + this.clientWidth >= this.scrollWidth - 2;
+            this.classList.toggle('has-overflow', !isScrolledToEnd);
+        });
+    });
+
     // 代码块处理
     container.querySelectorAll('pre code').forEach(function(block) {
         if (block.dataset.processed) return;
