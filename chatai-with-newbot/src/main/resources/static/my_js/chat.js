@@ -437,9 +437,10 @@ function updateChatList() {
 
     // 按最后对话时间排序（最新的在上面）
     chatInfos.sort(function(a, b) {
+        // 无时间的会话（新建空会话）视为最新，排在最前
         if (!a.lastTimeDate && !b.lastTimeDate) return 0;
-        if (!a.lastTimeDate) return 1;
-        if (!b.lastTimeDate) return -1;
+        if (!a.lastTimeDate) return -1;
+        if (!b.lastTimeDate) return 1;
         return b.lastTimeDate - a.lastTimeDate;
     });
 
@@ -506,22 +507,22 @@ function parseDateFromStr(timeStr) {
 
 // 获取日期分组标签
 function getDateLabel(date) {
-    if (!date) return '更早';
+    if (!date) return '今天'; // 新会话无消息时归入"今天"
     var now = new Date();
     var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    var yesterday = new Date(today.getTime() - 86400000);
     var chatDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    var diffDays = Math.floor((today.getTime() - chatDate.getTime()) / 86400000);
 
-    if (chatDate.getTime() === today.getTime()) return '今天';
-    if (chatDate.getTime() === yesterday.getTime()) return '昨天';
+    if (diffDays === 0) return '今天';
+    if (diffDays <= 30) return '30天内';
 
+    // 超过30天，按月份分组
     var year = date.getFullYear();
     var month = date.getMonth() + 1;
-    var day = date.getDate();
     if (year === now.getFullYear()) {
-        return month + '月' + day + '日';
+        return month + '月';
     }
-    return year + '年' + month + '月' + day + '日';
+    return year + '年' + month + '月';
 }
 
 // 搜索会话
