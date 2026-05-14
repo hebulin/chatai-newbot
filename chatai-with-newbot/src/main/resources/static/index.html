@@ -78,6 +78,16 @@
 
     <div class="chat-container" id="chatContainer"></div>
 
+    <!-- 滚动导航按钮 -->
+    <div class="scroll-nav" id="scrollNav">
+        <button class="scroll-nav-btn" id="scrollToTopBtn" onclick="scrollToTop()" title="回到顶部" style="display:none">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg>
+        </button>
+        <button class="scroll-nav-btn" id="scrollToBottomBtn" onclick="scrollToBottom()" title="回到底部" style="display:none">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+    </div>
+
     <div class="input-area">
         <div class="input-toolbar">
             <!-- 自定义模型选择下拉框 -->
