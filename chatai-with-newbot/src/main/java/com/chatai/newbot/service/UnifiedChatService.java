@@ -3,6 +3,7 @@ package com.chatai.newbot.service;
 import com.chatai.newbot.model.ChatRequest;
 import com.chatai.newbot.model.ModelConfig;
 import com.chatai.newbot.model.NewBotMessage;
+import com.chatai.newbot.model.UsageLog;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,6 +13,7 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 import reactor.core.publisher.Flux;
 
 import java.util.*;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 统一聊天服务 - 使用OpenAI兼容协议调用所有厂商的API
@@ -27,7 +29,7 @@ public class UnifiedChatService {
         this.storageService = storageService;
     }
 
-    public Flux<String> chat(ChatRequest request, String modelConfigId) {
+    public Flux<String> chat(ChatRequest request, String modelConfigId, UsageLog usageLog) {
         ModelConfig config = storageService.getModelConfigById(modelConfigId);
         if (config == null) {
             return Flux.just("{\"error\":{\"message\":\"模型配置不存在\",\"type\":\"config_error\"}}");
@@ -166,13 +168,27 @@ public class UnifiedChatService {
                         .maxInMemorySize(16 * 1024 * 1024))
                 .build();
 
+        // 用于从流式响应中提取 usage token 数据
+        AtomicReference<Map<String, Object>> usageRef = new AtomicReference<>();
+
         return webClient
                 .post()
                 .uri(fullUrl)
                 .bodyValue(requestBody)
                 .retrieve()
                 .bodyToFlux(String.class)
-                .doOnNext(chunk -> log.debug("收到chunk: {}", chunk.length() > 100 ? chunk.substring(0, 100) + "..." : chunk))
+                .doOnNext(chunk -> {
+                    log.debug("收到chunk: {}", chunk.length() > 100 ? chunk.substring(0, 100) + "..." : chunk);
+                    // 尝试从 chunk 中提取 usage 数据
+                    extractUsage(chunk, usageRef);
+                })
+                .doOnComplete(() -> {
+                    log.info("流式输出完成");
+                    // 流结束后，将 token 数据写入 UsageLog
+                    if (usageLog != null && usageRef.get() != null) {
+                        updateUsageLog(usageLog, usageRef.get());
+                    }
+                })
                 .onErrorResume(e -> {
                     String errorMsg = e.getMessage();
                     if (e instanceof WebClientResponseException) {
@@ -187,7 +203,57 @@ public class UnifiedChatService {
                             "{\"error\":{\"message\":\"%s\",\"type\":\"api_error\"}}",
                             errorMsg.replace("\"", "\\\"")
                     ));
-                })
-                .doOnComplete(() -> log.info("流式输出完成"));
+                });
+    }
+
+    /**
+     * 从流式响应 chunk 中提取 usage 数据
+     * OpenAI 兼容格式: {"usage":{"prompt_tokens":10,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":3}}}
+     */
+    @SuppressWarnings("unchecked")
+    private void extractUsage(String chunk, AtomicReference<Map<String, Object>> usageRef) {
+        try {
+            // 处理 SSE data: 前缀
+            String json = chunk.trim();
+            if (json.startsWith("data: ")) {
+                json = json.substring(6).trim();
+            }
+            if (json.isEmpty() || json.equals("[DONE]")) return;
+
+            Map<String, Object> parsed = objectMapper.readValue(json, Map.class);
+            Map<String, Object> usage = (Map<String, Object>) parsed.get("usage");
+            if (usage != null) {
+                usageRef.set(usage);
+                log.debug("提取到 usage 数据: {}", usage);
+            }
+        } catch (Exception e) {
+            // 不是 JSON 或不含 usage，忽略
+        }
+    }
+
+    /**
+     * 将提取的 usage 数据写入 UsageLog 并持久化
+     */
+    @SuppressWarnings("unchecked")
+    private void updateUsageLog(UsageLog usageLog, Map<String, Object> usage) {
+        try {
+            Object pt = usage.get("prompt_tokens");
+            Object ct = usage.get("completion_tokens");
+            if (pt != null) usageLog.setPromptTokens(((Number) pt).intValue());
+            if (ct != null) usageLog.setCompletionTokens(((Number) ct).intValue());
+
+            // 提取缓存 token: prompt_tokens_details.cached_tokens (DeepSeek等)
+            Object details = usage.get("prompt_tokens_details");
+            if (details instanceof Map) {
+                Object cached = ((Map<String, Object>) details).get("cached_tokens");
+                if (cached != null) usageLog.setCachedTokens(((Number) cached).intValue());
+            }
+
+            storageService.updateUsageLog(usageLog);
+            log.info("已更新使用记录 token: prompt={}, completion={}, cached={}",
+                    usageLog.getPromptTokens(), usageLog.getCompletionTokens(), usageLog.getCachedTokens());
+        } catch (Exception e) {
+            log.error("更新 usage log token 数据失败", e);
+        }
     }
 }

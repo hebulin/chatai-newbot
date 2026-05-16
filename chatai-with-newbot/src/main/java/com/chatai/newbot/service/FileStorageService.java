@@ -33,7 +33,8 @@ public class FileStorageService {
     private List<User> users = Collections.synchronizedList(new ArrayList<>());
     private List<ModelConfig> modelConfigs = Collections.synchronizedList(new ArrayList<>());
     private List<Provider> providers = Collections.synchronizedList(new ArrayList<>());
-    private List<UsageLog> usageLogs = Collections.synchronizedList(new ArrayList<>());
+    // 按天存储的使用记录: dateKey(yyyy-MM-dd) -> 日志列表
+    private Map<String, List<UsageLog>> usageLogsByDay = new ConcurrentHashMap<>();
     private Map<String, Map<String, Integer>> ipRegisterMap = new ConcurrentHashMap<>(); // date -> {ip -> count}
     private Map<String, String> activeTokens = new ConcurrentHashMap<>(); // token -> userId
 
@@ -62,7 +63,7 @@ public class FileStorageService {
             loadModelConfigs();
             log.info("已加载 {} 个模型配置", modelConfigs.size());
             loadUsageLogs();
-            log.info("已加载 {} 个使用日志", usageLogs.size());
+            log.info("已加载 {} 天的使用日志，共 {} 条", usageLogsByDay.size(), getAllUsageLogs().size());
             loadIpRegisterMap();
             log.info("已加载 IP 注册计数");
 
@@ -281,26 +282,55 @@ public class FileStorageService {
         return new ArrayList<>(providers);
     }
 
-    // ========== 使用记录相关 ==========
+    // ========== 使用记录相关（按天存储） ==========
 
-    public void addUsageLog(UsageLog log) {
-        usageLogs.add(log);
-        // 只保留最近10000条
-        if (usageLogs.size() > 10000) {
-            usageLogs = Collections.synchronizedList(
-                    new ArrayList<>(usageLogs.subList(usageLogs.size() - 10000, usageLogs.size())));
-        }
-        saveUsageLogs();
+    public void addUsageLog(UsageLog logEntry) {
+        String dayKey = logEntry.getTimestamp() != null ? logEntry.getTimestamp().substring(0, 10) : LocalDate.now().toString();
+        List<UsageLog> dayList = usageLogsByDay.computeIfAbsent(dayKey, k -> Collections.synchronizedList(new ArrayList<>()));
+        dayList.add(logEntry);
+        saveUsageLogsByDay(dayKey);
     }
 
-    public List<UsageLog> getUsageLogs() {
-        return new ArrayList<>(usageLogs);
+    public List<UsageLog> getAllUsageLogs() {
+        List<UsageLog> all = new ArrayList<>();
+        for (List<UsageLog> dayList : usageLogsByDay.values()) {
+            all.addAll(dayList);
+        }
+        return all;
     }
 
     public List<UsageLog> getUsageLogsByUser(String userId) {
-        return usageLogs.stream()
+        return getAllUsageLogs().stream()
                 .filter(l -> l.getUserId().equals(userId))
                 .collect(Collectors.toList());
+    }
+
+    public void updateUsageLog(UsageLog updatedLog) {
+        String dayKey = updatedLog.getTimestamp() != null ? updatedLog.getTimestamp().substring(0, 10) : null;
+        if (dayKey == null) return;
+        List<UsageLog> dayList = usageLogsByDay.get(dayKey);
+        if (dayList == null) return;
+        for (int i = 0; i < dayList.size(); i++) {
+            if (dayList.get(i) == updatedLog) {
+                saveUsageLogsByDay(dayKey);
+                return;
+            }
+        }
+        for (int i = 0; i < dayList.size(); i++) {
+            UsageLog existing = dayList.get(i);
+            if (existing.getUserId().equals(updatedLog.getUserId())
+                    && existing.getTimestamp().equals(updatedLog.getTimestamp())
+                    && existing.getModelId().equals(updatedLog.getModelId())) {
+                dayList.set(i, updatedLog);
+                saveUsageLogsByDay(dayKey);
+                return;
+            }
+        }
+    }
+
+    /** 获取所有已记录的日期列表（用于查询） */
+    public List<String> getUsageLogDates() {
+        return usageLogsByDay.keySet().stream().sorted().collect(Collectors.toList());
     }
 
     // ========== 文件读写 ==========
@@ -367,11 +397,45 @@ public class FileStorageService {
     }
 
     private void loadUsageLogs() {
-        usageLogs = loadList("usage_logs.json", new TypeReference<List<UsageLog>>() {});
+        // 兼容旧的单文件 usage_logs.json
+        File oldFile = dataDir.resolve("usage_logs.json").toFile();
+        if (oldFile.exists()) {
+            try {
+                List<UsageLog> oldLogs = objectMapper.readValue(oldFile, new TypeReference<List<UsageLog>>() {});
+                // 迁移到按天存储
+                Map<String, List<UsageLog>> migrated = oldLogs.stream()
+                        .collect(Collectors.groupingBy(l ->
+                                l.getTimestamp() != null ? l.getTimestamp().substring(0, 10) : "unknown"));
+                usageLogsByDay.putAll(migrated);
+                // 保存拆分后的文件
+                migrated.keySet().forEach(this::saveUsageLogsByDay);
+                // 重命名旧文件为备份
+                oldFile.renameTo(dataDir.resolve("usage_logs.json.bak").toFile());
+                log.info("已迁移旧 usage_logs.json 到按天存储格式");
+            } catch (Exception e) {
+                log.error("迁移旧 usage_logs.json 失败", e);
+            }
+        }
+        // 加载所有 usage_logs_YYYY-MM-DD.json 文件
+        File dataDirFile = dataDir.toFile();
+        File[] dayFiles = dataDirFile.listFiles((dir, name) -> name.startsWith("usage_logs_") && name.endsWith(".json"));
+        if (dayFiles != null) {
+            for (File dayFile : dayFiles) {
+                try {
+                    String dayKey = dayFile.getName().replace("usage_logs_", "").replace(".json", "");
+                    List<UsageLog> dayLogs = objectMapper.readValue(dayFile, new TypeReference<List<UsageLog>>() {});
+                    usageLogsByDay.put(dayKey, Collections.synchronizedList(dayLogs));
+                } catch (Exception e) {
+                    log.error("加载使用日志文件 {} 失败", dayFile.getName(), e);
+                }
+            }
+        }
     }
 
-    private void saveUsageLogs() {
-        saveToFile("usage_logs.json", usageLogs);
+    private void saveUsageLogsByDay(String dayKey) {
+        List<UsageLog> dayList = usageLogsByDay.get(dayKey);
+        if (dayList == null) return;
+        saveToFile("usage_logs_" + dayKey + ".json", dayList);
     }
 
     private void loadIpRegisterMap() {

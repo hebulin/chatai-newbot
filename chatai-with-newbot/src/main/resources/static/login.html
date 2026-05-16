@@ -4,58 +4,84 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Chat - 登录</title>
-    <link rel="stylesheet" href="my_css/login.css">
+    <link rel="stylesheet" href="/layui/css/layui.css">
+    <link rel="stylesheet" href="/my_css/login.css">
 </head>
 <body>
 <div class="login-container">
     <div class="login-card">
         <div class="login-header">
             <div class="logo">
-                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2">
-                    <circle cx="12" cy="12" r="10"/>
-                    <path d="M8 12h8M12 8v8"/>
-                </svg>
+                <i class="layui-icon layui-icon-dialogue" style="font-size:32px;color:#818cf8;"></i>
             </div>
             <h1>AI Chat Platform</h1>
             <p class="subtitle">智能对话，无限可能</p>
         </div>
 
-        <div class="tab-switch">
-            <button class="tab-btn active" onclick="switchTab('login')">登录</button>
-            <button class="tab-btn" onclick="switchTab('register')">注册</button>
+        <!-- 登录表单 -->
+        <div id="loginFormArea">
+            <form class="layui-form" lay-filter="loginForm">
+                <div class="layui-form-item">
+                    <label class="layui-form-label"><i class="layui-icon layui-icon-username"></i></label>
+                    <div class="layui-input-block">
+                        <input type="text" name="username" lay-verify="required" lay-reqtext="请输入用户名" placeholder="请输入用户名" autocomplete="username" class="layui-input">
+                    </div>
+                </div>
+                <div class="layui-form-item">
+                    <label class="layui-form-label"><i class="layui-icon layui-icon-password"></i></label>
+                    <div class="layui-input-block">
+                        <input type="password" name="password" lay-verify="required" lay-reqtext="请输入密码" placeholder="请输入密码" autocomplete="current-password" class="layui-input">
+                    </div>
+                </div>
+                <div class="layui-form-item">
+                    <div class="layui-input-block">
+                        <button class="layui-btn submit-btn" lay-submit lay-filter="loginSubmit" id="loginBtn">登录</button>
+                    </div>
+                </div>
+            </form>
+            <div class="form-switch-link">
+                还没有账号？<a href="javascript:;" onclick="showRegisterForm()">注册</a>
+            </div>
         </div>
 
-        <form id="loginForm" class="auth-form" onsubmit="return handleLogin(event)">
-            <div class="form-group">
-                <label for="loginUsername">用户名</label>
-                <input type="text" id="loginUsername" placeholder="请输入用户名" required autocomplete="username">
+        <!-- 注册表单 -->
+        <div id="registerFormArea" style="display:none;">
+            <form class="layui-form" lay-filter="registerForm">
+                <div class="layui-form-item">
+                    <label class="layui-form-label"><i class="layui-icon layui-icon-username"></i></label>
+                    <div class="layui-input-block">
+                        <input type="text" name="username" lay-verify="required" lay-reqtext="请输入用户名" placeholder="2-20个字符" autocomplete="username" class="layui-input">
+                    </div>
+                </div>
+                <div class="layui-form-item">
+                    <label class="layui-form-label"><i class="layui-icon layui-icon-password"></i></label>
+                    <div class="layui-input-block">
+                        <input type="password" name="password" lay-verify="required|password" lay-reqtext="请输入密码" placeholder="至少4个字符" class="layui-input">
+                    </div>
+                </div>
+                <div class="layui-form-item">
+                    <label class="layui-form-label"><i class="layui-icon layui-icon-password"></i></label>
+                    <div class="layui-input-block">
+                        <input type="password" name="password2" lay-verify="required|confirmPassword" lay-reqtext="请确认密码" placeholder="再次输入密码" class="layui-input">
+                    </div>
+                </div>
+                <div class="layui-form-item">
+                    <div class="layui-input-block">
+                        <button class="layui-btn submit-btn" lay-submit lay-filter="registerSubmit" id="regBtn">注册</button>
+                    </div>
+                </div>
+            </form>
+            <div class="form-switch-link">
+                已有账号？<a href="javascript:;" onclick="showLoginForm()">登录</a>
             </div>
-            <div class="form-group">
-                <label for="loginPassword">密码</label>
-                <input type="password" id="loginPassword" placeholder="请输入密码" required autocomplete="current-password">
-            </div>
-            <button type="submit" class="submit-btn" id="loginBtn">登录</button>
-        </form>
-
-        <form id="registerForm" class="auth-form" style="display:none" onsubmit="return handleRegister(event)">
-            <div class="form-group">
-                <label for="regUsername">用户名</label>
-                <input type="text" id="regUsername" placeholder="2-20个字符" required minlength="2" maxlength="20">
-            </div>
-            <div class="form-group">
-                <label for="regPassword">密码</label>
-                <input type="password" id="regPassword" placeholder="至少4个字符" required minlength="4">
-            </div>
-            <div class="form-group">
-                <label for="regPassword2">确认密码</label>
-                <input type="password" id="regPassword2" placeholder="再次输入密码" required minlength="4">
-            </div>
-            <button type="submit" class="submit-btn" id="regBtn">注册</button>
-        </form>
-
-        <div id="errorMsg" class="error-msg" style="display:none"></div>
+        </div>
     </div>
+
+    <!-- 主题切换按钮 -->
+    <button class="theme-toggle-btn" id="themeToggleBtn" onclick="toggleTheme()" title="切换浅色主题"></button>
 </div>
-<script src="my_js/login.js"></script>
+<script src="/layui/layui.js"></script>
+<script src="/my_js/theme.js"></script>
+<script src="/my_js/login.js"></script>
 </body>
 </html>
