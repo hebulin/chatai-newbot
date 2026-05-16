@@ -191,17 +191,31 @@ public class UnifiedChatService {
                 })
                 .onErrorResume(e -> {
                     String errorMsg = e.getMessage();
+                    String displayMsg = errorMsg;
                     if (e instanceof WebClientResponseException) {
                         WebClientResponseException wce = (WebClientResponseException) e;
                         String responseBody = wce.getResponseBodyAsString();
                         log.error("API调用错误: {} | 状态码: {} | 响应体: {}", errorMsg, wce.getStatusCode(), responseBody);
-                        errorMsg = wce.getStatusCode().value() + " " + errorMsg + " - " + responseBody;
+                        // 尝试从响应体中提取更友好的错误消息
+                        try {
+                            @SuppressWarnings("unchecked")
+                            Map<String, Object> parsed = objectMapper.readValue(responseBody, Map.class);
+                            @SuppressWarnings("unchecked")
+                            Map<String, Object> errorObj = (Map<String, Object>) parsed.get("error");
+                            if (errorObj != null && errorObj.get("message") != null) {
+                                displayMsg = wce.getStatusCode().value() + " - " + errorObj.get("message");
+                            } else {
+                                displayMsg = wce.getStatusCode().value() + " " + wce.getStatusText();
+                            }
+                        } catch (Exception parseEx) {
+                            displayMsg = wce.getStatusCode().value() + " " + wce.getStatusText();
+                        }
                     } else {
                         log.error("API调用错误: {}", errorMsg);
                     }
                     return Flux.just(String.format(
                             "{\"error\":{\"message\":\"%s\",\"type\":\"api_error\"}}",
-                            errorMsg.replace("\"", "\\\"")
+                            displayMsg.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
                     ));
                 });
     }
