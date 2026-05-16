@@ -216,7 +216,7 @@ function renderModelTable(models) {
             + '<td>' + thinkBadge + '</td>'
             + '<td>' + statusBtn + '</td>'
             + '<td>' + visBtn + '</td>'
-            + '<td>' + actions + '</td>'
+            + '<td class="col-sticky-right">' + actions + '</td>'
             + '</tr>';
         tbody.append(tr);
     });
@@ -238,6 +238,9 @@ function editModel(id) {
     var layer = window._layer, form = window._form;
     var model = allModels.find(function(m) { return m.id === id; });
     if (!model) return;
+    // 判断是否为预设模型（厂商模型列表中存在的模型）
+    var provider = providers.find(function(p) { return p.id === model.providerId; });
+    var isPresetModel = provider && provider.models && provider.models.some(function(pm) { return pm.id === model.modelId; });
     var html = '<div class="layui-form" lay-filter="editModelForm" style="padding:20px 20px 0;">';
     html += '<div class="form-group"><label class="form-label">厂商</label><div class="form-value">' + getProviderSmallIconHtml(model.providerId) + esc(model.providerName || model.providerId) + '</div></div>';
     html += '<div class="form-group"><label class="form-label">显示名</label><div class="form-value"><input type="text" id="emDisplayName" class="layui-input" value="' + esc(model.displayName||'') + '"/></div></div>';
@@ -246,7 +249,15 @@ function editModel(id) {
     html += '<div class="form-group"><label class="form-label">API Key</label><div class="form-value"><input type="text" id="emApiKey" class="layui-input" value="' + esc(model.apiKey||'') + '" placeholder="不修改则留空"/></div></div>';
     html += '<div class="form-group"><label class="form-label">状态</label><div class="form-value"><input type="checkbox" id="emEnabled" lay-skin="switch" lay-text="启用|禁用"' + (model.enabled?' checked':'') + '></div></div>';
     html += '<div class="form-group"><label class="form-label">可见性</label><div class="form-value"><input type="checkbox" id="emVisibleToAll" lay-skin="switch" lay-text="所有人|仅管理员"' + (model.visibleToAll?' checked':'') + '></div></div>';
-    html += '<div class="form-group"><label class="form-label">思考模式</label><div class="form-value"><input type="checkbox" id="emSupportsThinking" lay-skin="switch" lay-text="支持|不支持"' + (model.supportsThinking?' checked':'') + '></div></div>';
+    if (isPresetModel) {
+        // 预设模型：只读显示思考模式信息
+        html += '<div class="form-group"><label class="form-label">思考模式</label><div class="form-value">';
+        html += model.supportsThinking ? '<span class="think-badge" style="font-size:13px;line-height:20px;">支持深度思考</span>' : '<span style="color:#94a3b8;font-size:14px;">不支持</span>';
+        html += '</div></div>';
+    } else {
+        // 自定义模型：允许用户配置
+        html += '<div class="form-group"><label class="form-label">思考模式</label><div class="form-value"><input type="checkbox" id="emSupportsThinking" lay-skin="switch" lay-text="支持|不支持"' + (model.supportsThinking?' checked':'') + '></div></div>';
+    }
     html += '<div style="text-align:right;padding:10px 0;">';
     html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
     html += '<button type="button" class="layui-btn" onclick="saveModel(\'' + esc(id) + '\')">保存</button>';
@@ -286,45 +297,207 @@ function deleteModel(id) {
     });
 }
 
+// 添加模型时的当前厂商ID（用于模型下拉选回调）
+var addModelCurrentProviderId = '';
+
 function showAddModel() {
     var layer = window._layer, form = window._form;
-    var providerOptions = '';
+    addModelCurrentProviderId = '';
+    var providerOptions = '<option value="">请选择厂商</option>';
     providers.forEach(function(p) {
         providerOptions += '<option value="' + esc(p.id) + '">' + esc(p.name) + '</option>';
     });
+    providerOptions += '<option value="__custom__">自定义</option>';
     var html = '<div class="layui-form" lay-filter="addModelForm" style="padding:20px 20px 0;">';
-    html += '<div class="form-group"><label class="form-label">厂商</label><div class="form-value"><select id="amProviderId">' + providerOptions + '</select></div></div>';
-    html += '<div class="form-group"><label class="form-label">显示名</label><div class="form-value"><input type="text" id="amDisplayName" class="layui-input" placeholder="可选，默认使用模型ID"/></div></div>';
-    html += '<div class="form-group"><label class="form-label">模型ID</label><div class="form-value"><input type="text" id="amModelId" class="layui-input" placeholder="如 deepseek-chat"/></div></div>';
-    html += '<div class="form-group"><label class="form-label">API 地址</label><div class="form-value"><input type="text" id="amApiUrl" class="layui-input" placeholder="可选，默认使用厂商地址"/></div></div>';
+    html += '<div class="form-group"><label class="form-label">厂商</label><div class="form-value"><select id="amProviderId" lay-filter="amProviderId">' + providerOptions + '</select></div></div>';
+    html += '<div class="form-group" id="amModelIdGroup"><label class="form-label">模型ID</label><div class="form-value" id="amModelIdValue"><input type="text" id="amModelId" class="layui-input" placeholder="请先选择厂商"/></div></div>';
+    html += '<div class="form-group" id="amApiUrlGroup" style="display:none;"><label class="form-label">API 地址</label><div class="form-value"><input type="text" id="amApiUrl" class="layui-input" placeholder="如 https://api.example.com/v1"/></div></div>';
     html += '<div class="form-group"><label class="form-label">API Key</label><div class="form-value"><input type="text" id="amApiKey" class="layui-input" placeholder="sk-..."/></div></div>';
     html += '<div class="form-group"><label class="form-label">可见性</label><div class="form-value"><input type="checkbox" id="amVisibleToAll" lay-skin="switch" lay-text="所有人|仅管理员" checked></div></div>';
-    html += '<div class="form-group"><label class="form-label">思考模式</label><div class="form-value"><input type="checkbox" id="amSupportsThinking" lay-skin="switch" lay-text="支持|不支持"></div></div>';
+    html += '<div class="form-group" id="amThinkingGroup" style="display:none;"><label class="form-label">思考模式</label><div class="form-value" id="amThinkingValue"></div></div>';
     html += '<div style="text-align:right;padding:10px 0;">';
     html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
     html += '<button type="button" class="layui-btn" onclick="submitAddModel()">添加</button>';
     html += '</div></div>';
     layer.open({ type:1, title:'添加模型', area:[getDialogWidth(500) + 'px','auto'], content:html,
-        success: function(layero) { form.render(null,'addModelForm'); }
+        success: function(layero) {
+            form.render(null,'addModelForm');
+            form.on('select(amProviderId)', function(data) {
+                onAddModelProviderChange(data.value);
+            });
+            form.on('select(amModelId)', function(data) {
+                onAddModelModelChange(addModelCurrentProviderId, data.value);
+            });
+        }
     });
+}
+
+function onAddModelProviderChange(providerId) {
+    var form = window._form, $ = window._$;
+    var $modelIdValue = $('#amModelIdValue');
+    var $apiUrlGroup = $('#amApiUrlGroup');
+    var $thinkingGroup = $('#amThinkingGroup');
+    var $thinkingValue = $('#amThinkingValue');
+
+    // 更新当前厂商ID
+    addModelCurrentProviderId = providerId;
+
+    if (!providerId) {
+        // 未选择厂商
+        $modelIdValue.html('<input type="text" id="amModelId" class="layui-input" placeholder="请先选择厂商"/>');
+        $apiUrlGroup.hide();
+        $thinkingGroup.hide();
+        return;
+    }
+
+    if (providerId === '__custom__') {
+        // 自定义厂商：所有字段需要手动配置
+        $modelIdValue.html('<input type="text" id="amModelId" class="layui-input" placeholder="如 deepseek-chat"/>');
+        $apiUrlGroup.show();
+        $thinkingGroup.show();
+        $thinkingValue.html('<input type="checkbox" id="amSupportsThinking" lay-skin="switch" lay-text="支持|不支持">');
+        form.render(null, 'addModelForm');
+        return;
+    }
+
+    // 预设厂商：模型ID变为下拉选
+    var provider = providers.find(function(p) { return p.id === providerId; });
+    if (!provider) return;
+
+    var modelOptions = '<option value="">请选择模型</option>';
+    (provider.models || []).forEach(function(pm) {
+        var exists = allModels.some(function(m) { return m.providerId === providerId && m.modelId === pm.id; });
+        if (!exists) {
+            modelOptions += '<option value="' + esc(pm.id) + '">' + esc(pm.name) + (pm.supportsThinking ? ' (支持思考)' : '') + '</option>';
+        }
+    });
+    modelOptions += '<option value="__custom__">自定义</option>';
+
+    $modelIdValue.html('<select id="amModelId" lay-filter="amModelId">' + modelOptions + '</select>');
+    $apiUrlGroup.hide();
+    $thinkingGroup.hide();
+    form.render('select', 'addModelForm');
+}
+
+function onAddModelModelChange(providerId, modelId) {
+    var form = window._form, $ = window._$;
+    var $modelIdValue = $('#amModelIdValue');
+    var $apiUrlGroup = $('#amApiUrlGroup');
+    var $thinkingGroup = $('#amThinkingGroup');
+    var $thinkingValue = $('#amThinkingValue');
+
+    if (!modelId) {
+        $apiUrlGroup.hide();
+        $thinkingGroup.hide();
+        return;
+    }
+
+    if (modelId === '__custom__') {
+        // 自定义模型：切换为input输入框，需要用户配置
+        $modelIdValue.html('<input type="text" id="amModelId" class="layui-input" placeholder="请输入自定义模型ID"/>');
+        var provider = providers.find(function(p) { return p.id === providerId; });
+        if (provider) {
+            $apiUrlGroup.hide();
+        } else {
+            $apiUrlGroup.show();
+        }
+        $thinkingGroup.show();
+        $thinkingValue.html('<input type="checkbox" id="amSupportsThinking" lay-skin="switch" lay-text="支持|不支持">');
+        form.render(null, 'addModelForm');
+        return;
+    }
+
+    // 预设模型：只读显示思考模式信息
+    var provider = providers.find(function(p) { return p.id === providerId; });
+    var pm = provider && provider.models && provider.models.find(function(m) { return m.id === modelId; });
+
+    $apiUrlGroup.hide();
+    $thinkingGroup.show();
+    if (pm && pm.supportsThinking) {
+        $thinkingValue.html('<span class="think-badge" style="font-size:13px;line-height:20px;">支持深度思考</span>');
+    } else {
+        $thinkingValue.html('<span style="color:#94a3b8;font-size:14px;">不支持</span>');
+    }
 }
 
 function submitAddModel() {
     var $ = window._$, layer = window._layer;
     var providerId = $('#amProviderId').val();
-    var modelId = $('#amModelId').val().trim();
+    var modelIdEl = $('#amModelId');
+    var modelId = modelIdEl.val();
+    if (modelIdEl.is('input')) modelId = modelId.trim();
     var apiKey = $('#amApiKey').val().trim();
-    if (!modelId) { layer.msg('请输入模型ID', {icon:0}); return; }
+
+    if (!providerId) { layer.msg('请选择厂商', {icon:0}); return; }
+    if (!modelId) { layer.msg('请选择或输入模型ID', {icon:0}); return; }
     if (!apiKey) { layer.msg('请输入 API Key', {icon:0}); return; }
+
+    var isCustomProvider = providerId === '__custom__';
+    // 通过元素类型判断：input=自定义模型，select=预设模型
+    var isModelInput = modelIdEl.is('input');
+
+    if (isCustomProvider) {
+        // 自定义厂商：需要用户输入所有信息
+        var customApiUrl = $('#amApiUrl').val().trim();
+        if (!customApiUrl) { layer.msg('自定义厂商需要填写API地址', {icon:0}); return; }
+        var payload = {
+            providerId: '__custom__',
+            providerName: '自定义',
+            modelId: modelId,
+            displayName: modelId,
+            apiUrl: customApiUrl,
+            apiKey: apiKey,
+            visibleToAll: $('#amVisibleToAll').is(':checked'),
+            supportsThinking: $('#amSupportsThinking').is(':checked'),
+            enabled: true
+        };
+        api('/api/admin/models', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        }).then(function(data) {
+            if (data && data.success) { layer.closeAll(); layer.msg('添加成功',{icon:1}); loadModels(); }
+            else layer.msg(data.message||'添加失败',{icon:2});
+        });
+        return;
+    }
+
+    // 预设厂商
     var provider = providers.find(function(p) { return p.id === providerId; });
+
+    if (isModelInput) {
+        // 预设厂商 + 自定义模型：需要用户配置
+        var payload = {
+            providerId: providerId,
+            providerName: provider ? provider.name : providerId,
+            modelId: modelId,
+            displayName: modelId,
+            apiUrl: provider ? provider.apiUrl : '',
+            apiKey: apiKey,
+            visibleToAll: $('#amVisibleToAll').is(':checked'),
+            supportsThinking: $('#amSupportsThinking').is(':checked'),
+            enabled: true
+        };
+        api('/api/admin/models', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        }).then(function(data) {
+            if (data && data.success) { layer.closeAll(); layer.msg('添加成功',{icon:1}); loadModels(); }
+            else layer.msg(data.message||'添加失败',{icon:2});
+        });
+        return;
+    }
+
+    // 预设厂商 + 预设模型：自动获取配置
+    var pm = provider && provider.models && provider.models.find(function(m) { return m.id === modelId; });
     var payload = {
         providerId: providerId,
+        providerName: provider ? provider.name : providerId,
         modelId: modelId,
-        displayName: $('#amDisplayName').val().trim() || modelId,
-        apiUrl: $('#amApiUrl').val().trim() || (provider ? provider.apiUrl : ''),
+        displayName: pm ? pm.name : modelId,
+        apiUrl: provider ? provider.apiUrl : '',
         apiKey: apiKey,
         visibleToAll: $('#amVisibleToAll').is(':checked'),
-        supportsThinking: $('#amSupportsThinking').is(':checked'),
+        supportsThinking: pm ? !!pm.supportsThinking : false,
         enabled: true
     };
     api('/api/admin/models', {
@@ -361,7 +534,7 @@ function renderUsers() {
             + '<td>' + esc(u.lastLoginAt || '-') + '</td>'
             + '<td>' + esc(u.lastLoginIp || '-') + '</td>'
             + '<td>' + esc(u.lastLoginBrowser || '-') + '</td>'
-            + '<td>' + actions + '</td>'
+            + '<td class="col-sticky-right">' + actions + '</td>'
             + '</tr>';
         tbody.append(tr);
     });
