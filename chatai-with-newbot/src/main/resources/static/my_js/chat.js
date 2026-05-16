@@ -666,13 +666,32 @@ function sendMessage(fromButton) {
                 throw new Error(errMsg);
             });
         }
-        hideLoading();
         var reader = resp.body.getReader();
         var decoder = new TextDecoder();
 
         function read() {
             return reader.read().then(function(result) {
-                if (result.done) { finishStream(false); return; }
+                if (result.done) {
+                    // 隐藏loading（如果还没有内容到达的话）
+                    hideLoading();
+                    // 处理buffer中残留的最后一条数据（如API错误消息）
+                    if (buffer.trim()) {
+                        var remainingLine = buffer.trim();
+                        if (remainingLine.startsWith('{')) {
+                            try {
+                                var json = JSON.parse(remainingLine);
+                                if (json.error) {
+                                    currentAnswerContent += '\n\n**错误:** ' + (json.error.message || '未知错误');
+                                    assistantMsg.content = currentAnswerContent;
+                                    if (!assistantMsg.time) assistantMsg.time = nowStr();
+                                    updateStreamingMessage(assistantMsg);
+                                }
+                            } catch(e) { /* skip parse error */ }
+                        }
+                    }
+                    finishStream(false);
+                    return;
+                }
                 var chunk = decoder.decode(result.value, {stream: true});
                 buffer += chunk;
                 var lines = buffer.split('data:');
@@ -737,6 +756,7 @@ function sendMessage(fromButton) {
 
 function finishStream(interrupted) {
     isStreamActive = false;
+    hideLoading();
     if (currentThinkingContent || currentAnswerContent) {
         var content = currentAnswerContent;
         // 避免保存content为空的assistant消息，否则后续请求API会报400错误
@@ -756,9 +776,64 @@ function finishStream(interrupted) {
         }
         chats[currentChatId].push(msg);
         saveChats();
+
+        // 就地完成流式消息元素，避免全量DOM重建导致闪烁
+        var streamEl = document.getElementById('streaming-msg');
+        if (streamEl) {
+            // 移除streaming标记，使其成为普通消息元素
+            streamEl.removeAttribute('id');
+            // 更新气泡内容为最终状态
+            var bubble = streamEl.querySelector('.msg-bubble');
+            if (bubble) {
+                bubble.innerHTML = renderMsgContent(msg);
+                bubble.setAttribute('data-raw', msg.content || '');
+            }
+            // 添加footer信息（时间、模型、复制按钮）
+            var existingFooter = streamEl.querySelector('.msg-footer');
+            if (existingFooter) {
+                existingFooter.remove();
+            }
+            var footer = document.createElement('div');
+            footer.className = 'msg-footer';
+            var copyIconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+            if (msg.time) {
+                var time = document.createElement('span');
+                time.className = 'msg-time-inline';
+                time.textContent = msg.time;
+                footer.appendChild(time);
+            }
+            if (msg.modelName) {
+                var modelSpan = document.createElement('span');
+                modelSpan.className = 'msg-model-name';
+                modelSpan.textContent = msg.modelName;
+                footer.appendChild(modelSpan);
+            }
+            var copyBtn = document.createElement('button');
+            copyBtn.className = 'footer-copy-btn';
+            copyBtn.innerHTML = copyIconSvg;
+            copyBtn.title = '复制';
+            copyBtn.onclick = function() { copyMsgContent(this); };
+            footer.appendChild(copyBtn);
+            streamEl.appendChild(footer);
+            // 处理特殊内容（代码高亮等）
+            processSpecialContent(streamEl);
+        }
+    } else {
+        // 没有任何内容，移除可能残留的streaming元素
+        var streamEl = document.getElementById('streaming-msg');
+        if (streamEl) streamEl.remove();
     }
     resetState();
-    displayMessages();
+    // 不再全量重建DOM，仅在必要时刷新（如切换会话后回来）
+    // displayMessages() 会导致闪烁，改为仅更新滚动位置
+    var container = document.getElementById('chatContainer');
+    if (container) {
+        var isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+        if (isNearBottom) {
+            container.scrollTop = container.scrollHeight;
+        }
+        updateScrollNav();
+    }
     resetSendBtn();
 }
 
@@ -795,6 +870,8 @@ function updateStreamingMessage(msg) {
     // 查找或创建流式消息元素
     var streamEl = document.getElementById('streaming-msg');
     if (!streamEl) {
+        // 首次有内容到达，隐藏loading动画
+        hideLoading();
         streamEl = createMessageEl(msg);
         streamEl.id = 'streaming-msg';
         container.appendChild(streamEl);
