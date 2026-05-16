@@ -4,15 +4,18 @@
     var DARK = 'dark';
     var LIGHT = 'light';
 
+    function safeGet(key) { try { return localStorage.getItem(key); } catch(e) { return null; } }
+    function safeSet(key, val) { try { localStorage.setItem(key, val); } catch(e) {} }
+
     function getTheme() {
-        var saved = localStorage.getItem(THEME_KEY);
+        var saved = safeGet(THEME_KEY);
         if (saved === LIGHT || saved === DARK) return saved;
         return DARK;
     }
 
     function applyTheme(theme) {
         document.documentElement.setAttribute('data-theme', theme);
-        localStorage.setItem(THEME_KEY, theme);
+        safeSet(THEME_KEY, theme);
         var btn = document.getElementById('themeToggleBtn');
         if (btn) {
             if (theme === LIGHT) {
