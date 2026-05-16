@@ -4,11 +4,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Chat Platform</title>
-    <!-- 第三方依赖 -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Layui -->
+    <link rel="stylesheet" href="/layui/css/layui.css">
+    <!-- Highlight.js + Marked.js + Mermaid.js -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.0/mermaid.min.js"></script>
+    <!-- Layui JS -->
+    <script src="/layui/layui.js"></script>
     <!-- 自定义样式 -->
     <link rel="stylesheet" href="my_css/chat.css">
 </head>
@@ -18,17 +25,23 @@
     <div class="sidebar-content">
         <div class="sidebar-header">
             <div class="brand">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M8 12h8M12 8v8"/></svg>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M8 12h8M12 8v8"/></svg>
                 <span>AI Chat</span>
             </div>
             <button class="icon-btn close-sidebar-btn" onclick="toggleSidebar()" title="关闭">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
         </div>
-        <button class="new-chat-btn" onclick="newChat()">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            新建会话
+        <button class="layui-btn layui-btn-fluid new-chat-btn" onclick="newChat()">
+            <i class="layui-icon layui-icon-add-1"></i> 新建会话
         </button>
+        <div class="chat-search-box" id="chatSearchBox">
+            <svg class="chat-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" id="chatSearchInput" class="chat-search-input" placeholder="搜索会话..." oninput="filterChatList(this.value)">
+            <button class="chat-search-clear" id="chatSearchClear" onclick="clearChatSearch()" style="display:none">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
         <div class="chat-list" id="chatList"></div>
         <div class="sidebar-footer">
             <div class="user-info" id="userInfo">
@@ -58,23 +71,42 @@
         </button>
         <div class="chat-title" id="chatTitle">新会话</div>
         <div class="spacer"></div>
+        <button class="theme-toggle-btn" id="themeToggleBtn" onclick="toggleTheme()" title="切换浅色主题">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        </button>
     </div>
 
     <div class="chat-container" id="chatContainer"></div>
 
+    <!-- 滚动导航按钮 -->
+    <div class="scroll-nav" id="scrollNav">
+        <button class="scroll-nav-btn" id="scrollToTopBtn" onclick="scrollToTop()" title="回到顶部" style="display:none">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg>
+        </button>
+        <button class="scroll-nav-btn" id="scrollToBottomBtn" onclick="scrollToBottom()" title="回到底部" style="display:none">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+    </div>
+
     <div class="input-area">
         <div class="input-toolbar">
-            <select id="modelSelect" class="model-select" onchange="onModelChange()">
-                <option value="">加载中...</option>
-            </select>
-            <label class="think-toggle" id="thinkToggle" style="display:none">
-                <input type="checkbox" id="deepThinkCheck" onchange="toggleDeepThinking()">
+            <!-- 自定义模型选择下拉框 -->
+            <div class="model-select-area" id="modelSelectArea">
+                <div class="model-select-trigger" id="modelSelectTrigger" onclick="toggleModelDropdown()">
+                    <span class="model-select-value" id="modelSelectValue">选择模型</span>
+                    <svg class="model-select-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                </div>
+                <div class="model-select-dropdown" id="modelSelectDropdown"></div>
+            </div>
+            <!-- 深度思考开关 -->
+            <div class="think-toggle" id="thinkToggle" style="display:none">
+                <input type="checkbox" id="deepThinkCheck" lay-skin="switch" lay-text="思考|关闭" lay-filter="deepThink">
                 <span class="think-label">深度思考</span>
-            </label>
+            </div>
         </div>
         <div class="input-row">
             <textarea id="userInput" placeholder="输入消息，Enter发送，Shift+Enter换行..." rows="1"></textarea>
-            <button class="send-btn" id="sendButton" onclick="sendMessage(true)">
+            <button class="layui-btn send-btn" id="sendButton" onclick="sendMessage(true)">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
             </button>
         </div>
@@ -82,24 +114,7 @@
     </div>
 </div>
 
-<!-- 通知 -->
-<div class="toast" id="toast"></div>
-
-<!-- 退出登录确认弹窗 -->
-<div class="confirm-overlay" id="confirmOverlay">
-    <div class="confirm-dialog">
-        <div class="confirm-icon">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-        </div>
-        <div class="confirm-title">退出登录</div>
-        <div class="confirm-msg">确定要退出当前账号吗？</div>
-        <div class="confirm-actions">
-            <button class="confirm-cancel" onclick="hideConfirm()">取消</button>
-            <button class="confirm-ok" onclick="doLogout()">退出</button>
-        </div>
-    </div>
-</div>
-
+<script src="my_js/theme.js"></script>
 <script src="my_js/chat.js"></script>
 </body>
 </html>

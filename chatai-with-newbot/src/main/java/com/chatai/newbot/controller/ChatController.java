@@ -67,7 +67,7 @@ public class ChatController {
         usageLog.setDeepThinking(request.isDeepThinking());
         storageService.addUsageLog(usageLog);
 
-        return chatService.chat(request, modelConfigId);
+        return chatService.chat(request, modelConfigId, usageLog);
     }
 
     /**
