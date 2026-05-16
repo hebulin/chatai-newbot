@@ -4,9 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Chat - 管理后台</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/layui/css/layui.css">
     <link rel="stylesheet" href="my_css/admin.css">
 </head>
@@ -57,10 +54,12 @@
                     </button>
                 </div>
                 <div class="card">
-                    <table class="layui-table data-table" id="modelTable" lay-skin="nob">
-                        <thead><tr><th>名称</th><th>厂商</th><th>模型</th><th>思考</th><th>状态</th><th>可见性</th><th>操作</th></tr></thead>
-                        <tbody id="modelTableBody"></tbody>
-                    </table>
+                    <div class="table-scroll-wrapper">
+                        <table class="layui-table data-table" id="modelTable" lay-skin="nob">
+                            <thead><tr><th>名称</th><th>厂商</th><th>模型</th><th>思考</th><th>状态</th><th>可见性</th><th>操作</th></tr></thead>
+                            <tbody id="modelTableBody"></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 
@@ -68,12 +67,17 @@
             <div class="layui-tab-item">
                 <div class="section-header">
                     <h2>用户管理</h2>
+                    <button class="primary-btn" onclick="showAddUser()">
+                        <i class="layui-icon layui-icon-addition"></i> 添加用户
+                    </button>
                 </div>
                 <div class="card">
-                    <table class="layui-table data-table" id="userTable" lay-skin="nob">
-                        <thead><tr><th>用户名</th><th>角色</th><th>注册时间</th><th>最近登录</th><th>登录IP</th><th>浏览器</th><th>操作</th></tr></thead>
-                        <tbody id="userTableBody"></tbody>
-                    </table>
+                    <div class="table-scroll-wrapper">
+                        <table class="layui-table data-table" id="userTable" lay-skin="nob">
+                            <thead><tr><th>用户名</th><th>角色</th><th>注册时间</th><th>最近登录</th><th>登录IP</th><th>浏览器</th><th>操作</th></tr></thead>
+                            <tbody id="userTableBody"></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 
@@ -132,10 +136,12 @@
                                 <button class="cancel-btn" onclick="resetUsage()">重置</button>
                             </div>
                         </div>
-                        <table class="layui-table data-table" id="usageTable" lay-skin="nob">
-                            <thead><tr><th>时间</th><th>用户</th><th>模型</th><th>输入Token</th><th>输出Token</th><th>缓存Token</th><th>思考模式</th></tr></thead>
-                            <tbody id="usageTableBody"></tbody>
-                        </table>
+                        <div class="table-scroll-wrapper">
+                            <table class="layui-table data-table" id="usageTable" lay-skin="nob">
+                                <thead><tr><th>时间</th><th>用户</th><th>模型</th><th>输入Token</th><th>输出Token</th><th>缓存Token</th><th>思考模式</th></tr></thead>
+                                <tbody id="usageTableBody"></tbody>
+                            </table>
+                        </div>
                         <div id="usagePagination"></div>
                     </div>
                 </div>
@@ -172,10 +178,12 @@
                                 <button class="cancel-btn" onclick="resetUsageStats()">重置</button>
                             </div>
                         </div>
-                        <table class="layui-table data-table" id="statsTable" lay-skin="nob">
-                            <thead><tr><th>用户</th><th>日期</th><th>模型</th><th>调用次数</th><th>输入Token</th><th>输出Token</th><th>缓存Token</th><th>思考模式次数</th></tr></thead>
-                            <tbody id="statsTableBody"></tbody>
-                        </table>
+                        <div class="table-scroll-wrapper">
+                            <table class="layui-table data-table" id="statsTable" lay-skin="nob">
+                                <thead><tr><th>用户</th><th>日期</th><th>模型</th><th>调用次数</th><th>输入Token</th><th>输出Token</th><th>缓存Token</th><th>思考模式次数</th></tr></thead>
+                                <tbody id="statsTableBody"></tbody>
+                            </table>
+                        </div>
                         <div id="statsPagination"></div>
                     </div>
                 </div>

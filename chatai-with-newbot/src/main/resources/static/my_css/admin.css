@@ -65,7 +65,15 @@ body {
 .layui-tab-title {
     border-bottom: 1px solid rgba(99, 102, 241, 0.2);
     background: transparent;
+    white-space: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
 }
+
+.layui-tab-title::-webkit-scrollbar { display: none; }
 
 .layui-tab-title li {
     color: #94a3b8;
@@ -228,6 +236,8 @@ body {
     align-items: center;
     justify-content: space-between;
     margin-bottom: 16px;
+    flex-wrap: wrap;
+    gap: 8px;
 }
 
 .section-header h2 {
@@ -255,6 +265,7 @@ body {
     align-items: center;
     gap: 6px;
     transition: all 0.2s;
+    white-space: nowrap;
 }
 
 .primary-btn:hover { opacity: 0.9; transform: scale(1.02); }
@@ -268,6 +279,7 @@ body {
     font-size: 14px;
     cursor: pointer;
     transition: all 0.2s;
+    white-space: nowrap;
 }
 
 .cancel-btn:hover { border-color: #6366f1; color: #818cf8; }
@@ -278,6 +290,16 @@ body {
     border: 1px solid rgba(99, 102, 241, 0.15);
     border-radius: 12px;
     padding: 16px;
+    overflow: hidden;
+}
+
+/* ===== Table Scroll Wrapper ===== */
+.table-scroll-wrapper {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 0 -16px;
+    padding: 0 16px;
 }
 
 /* ===== Stats Search Bar ===== */
@@ -352,6 +374,7 @@ body {
     width: 100%;
     background: transparent !important;
     color: #e2e8f0;
+    min-width: 600px;
 }
 
 .data-table thead tr {
@@ -465,6 +488,7 @@ body {
 .action-btns {
     display: flex;
     gap: 6px;
+    flex-wrap: nowrap;
 }
 
 .action-btn {
@@ -480,6 +504,7 @@ body {
     justify-content: center;
     transition: all 0.2s;
     font-size: 16px;
+    flex-shrink: 0;
 }
 
 .action-btn:hover { border-color: #6366f1; color: #818cf8; }
@@ -512,6 +537,7 @@ body {
     align-items: center;
     gap: 8px;
     line-height: 38px;
+    flex-wrap: wrap;
 }
 
 .model-checkbox-group {
@@ -631,17 +657,18 @@ body {
 .layui-layer-setwin a:hover { color: #f87171 !important; }
 
 .layui-layer-ico { background: none !important; }
-.layui-layer-close1::before { content: '\u2715'; font-size: 16px; }
-.layui-layer-close2::before { content: '\u2715'; font-size: 16px; }
+/* Fix: CSS unicode escape should use \2715 not \u2715 */
+.layui-layer-close1::before { content: '\2715'; font-size: 16px; font-family: inherit; }
+.layui-layer-close2::before { content: '\2715'; font-size: 16px; font-family: inherit; }
 
 /* ===== Laypage Override ===== */
-.layui-laypage { display: flex; align-items: center; gap: 4px; }
+.layui-laypage { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; justify-content: center; }
 .layui-laypage a, .layui-laypage span {
     background: rgba(30, 41, 59, 0.8) !important;
     color: #94a3b8 !important;
     border: 1px solid rgba(99, 102, 241, 0.2) !important;
     border-radius: 6px !important;
-    margin: 0 2px;
+    margin: 2px;
 }
 
 .layui-laypage a:hover {
@@ -917,8 +944,7 @@ body {
     background: linear-gradient(135deg, #6366f1, #818cf8);
     color: white;
     border: none;
-    border-radius:
- 8px;
+    border-radius: 8px;
     font-size: 14px;
     cursor: pointer;
     transition: all 0.2s;
@@ -980,27 +1006,108 @@ body {
 
 .layui-layer-btn { background: #1e293b !important; }
 
-/* ===== Responsive ===== */
+/* ===== Responsive - Tablet (768px) ===== */
 @media (max-width: 768px) {
     .admin-container { padding: 10px; }
     .admin-header { padding: 12px 16px; flex-direction: column; gap: 12px; }
     .admin-header h1 { font-size: 18px; }
+    .admin-main { padding: 12px; }
+    .admin-nav { padding: 0 12px; }
+    .nav-brand { font-size: 14px; }
+    .nav-btn { padding: 5px 10px; font-size: 13px; }
+    .nav-btn .layui-icon { font-size: 14px; }
+
     .provider-grid { grid-template-columns: 1fr; }
-    .filter-row { flex-direction: column; align-items: stretch; }
-    .filter-row .layui-input { width: 100%; }
-    .filter-row .layui-form-select { width: 100%; }
+
+    .layui-tab-content { padding: 12px; }
+    .layui-tab-title li { padding: 0 14px; font-size: 13px; min-width: 80px; }
+
+    .section-header h2 { font-size: 16px; }
+
+    /* Search bar: stack vertically */
+    .stats-search-bar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+    }
+    .search-field { width: 100%; }
+    .stats-search-select,
+    .stats-search-input { width: 100%; }
     .custom-select-area { width: 100%; }
-    .form-group { flex-direction: column; }
-    .form-label { text-align: left; width: auto; }
-    .layui-tab-title li { padding: 0 12px; font-size: 13px; }
+    .search-actions { width: 100%; }
+    .search-actions .primary-btn,
+    .search-actions .cancel-btn { flex: 1; justify-content: center; }
+
+    /* Sub tab cards: stack vertically */
     .sub-tab-card-group { flex-direction: column; gap: 8px; }
     .sub-tab-card { padding: 10px 14px; }
+
+    /* Form: stack label above value */
+    .form-group { flex-direction: column; gap: 4px; }
+    .form-label { text-align: left; width: auto; line-height: 1.5; }
+    .form-value { width: 100%; }
+
+    /* Table: horizontal scroll */
+    .card { padding: 12px; }
+    .table-scroll-wrapper { margin: 0 -12px; padding: 0 12px; }
+
+    /* Layer dialog: responsive width */
+    .layui-layer { max-width: calc(100vw - 24px) !important; left: 12px !important; right: 12px !important; width: auto !important; }
+    .layui-layer-content { overflow-x: auto !important; }
+
+    /* Pagination: smaller */
+    .layui-laypage a, .layui-laypage span { font-size: 12px !important; min-width: 28px !important; height: 28px !important; line-height: 28px !important; }
 }
 
+/* ===== Responsive - Mobile (480px) ===== */
 @media (max-width: 480px) {
-    .provider-card { flex-direction: column; text-align: center; }
+    .admin-nav { padding: 0 8px; height: 48px; }
+    .nav-brand { font-size: 13px; gap: 6px; }
+    .nav-brand svg { width: 18px; height: 18px; }
+    .nav-btn { padding: 4px 8px; font-size: 12px; gap: 4px; }
+    .nav-btn .layui-icon { font-size: 12px; }
+
+    .admin-main { padding: 8px; }
+    .layui-tab-content { padding: 8px; }
+    .layui-tab-title li { padding: 0 10px; font-size: 12px; min-width: 64px; line-height: 40px; }
+    .layui-tab-title li.layui-this::after { height: 2px; }
+
+    .section-header { margin-bottom: 12px; }
+    .section-header h2 { font-size: 15px; }
+    .section-tip { font-size: 12px; margin-left: 0; display: block; width: 100%; }
+
+    .provider-card { flex-direction: column; text-align: center; padding: 12px; gap: 8px; }
+    .provider-card-info { text-align: center; }
     .provider-card-action { width: 100%; }
     .provider-card-btn { width: 100%; text-align: center; }
+
+    .card { padding: 8px; border-radius: 8px; }
+    .table-scroll-wrapper { margin: 0 -8px; padding: 0 8px; }
+
+    .data-table th, .data-table td { padding: 8px 10px; font-size: 12px; }
+    .data-table { min-width: 500px; }
+
+    .action-btns { gap: 4px; }
+    .action-btn { width: 28px; height: 28px; font-size: 14px; }
+
+    .status-badge { padding: 2px 8px; font-size: 11px; }
+    .think-badge { padding: 1px 6px; font-size: 10px; }
+
+    .primary-btn, .cancel-btn { padding: 6px 14px; font-size: 13px; }
+
+    .sub-tab-card { padding: 8px 12px; gap: 8px; }
+    .sub-tab-card-icon { width: 16px; height: 16px; }
+    .sub-tab-card-title { font-size: 13px; }
+    .sub-tab-card-desc { font-size: 11px; }
+
+    .model-checkbox-group { max-height: 150px; gap: 6px; padding: 6px; }
+    .model-checkbox-item { padding: 3px 6px; font-size: 12px; }
+
+    /* Layer dialog: full width on mobile */
+    .layui-layer { left: 4px !important; right: 4px !important; max-width: calc(100vw - 8px) !important; border-radius: 8px !important; }
+    .layui-layer-title { font-size: 14px !important; padding: 0 10px !important; }
+    .layui-layer-content { padding: 10px !important; }
+    .layui-layer-setwin a { width: 28px !important; height: 28px !important; line-height: 28px !important; font-size: 14px !important; }
 }
 
 /* ===== Theme Toggle Button (Admin) ===== */
@@ -1099,4 +1206,3 @@ body {
 [data-theme="light"] .layui-layer{background:#fff!important;border:1px solid rgba(99,102,241,.15)!important;box-shadow:0 20px 60px rgba(0,0,0,.1)!important}
 [data-theme="light"] .layui-layer-msg{background:#fff!important;border:1px solid rgba(99,102,241,.15)!important}
 [data-theme="light"] .layui-layer-msg .layui-layer-content{color:#1e293b!important}
-

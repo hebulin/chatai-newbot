@@ -231,6 +231,69 @@ public class AdminController {
         return result;
     }
 
+    @PostMapping("/users")
+    public Map<String, Object> addUser(@RequestBody Map<String, Object> body,
+                                        HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        String username = (String) body.get("username");
+        String password = (String) body.get("password");
+        String role = (String) body.get("role");
+        if (username == null || username.trim().isEmpty() || password == null || password.trim().isEmpty()) {
+            result.put("success", false);
+            result.put("message", "用户名和密码不能为空");
+            return result;
+        }
+        if (role == null || role.trim().isEmpty()) role = "user";
+        User user = storageService.register(username.trim(), password, request.getRemoteAddr());
+        if (user == null) {
+            result.put("success", false);
+            result.put("message", "用户名已存在或不可用");
+            return result;
+        }
+        // 如果指定角色为admin，更新角色
+        if ("admin".equals(role) && !"admin".equals(user.getRole())) {
+            user.setRole("admin");
+            storageService.updateUser(user);
+        }
+        result.put("success", true);
+        result.put("message", "添加成功");
+        return result;
+    }
+
+    @PutMapping("/users/{id}")
+    public Map<String, Object> updateUser(@PathVariable String id, @RequestBody Map<String, Object> body,
+                                           HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        User user = storageService.getUserById(id);
+        if (user == null) {
+            result.put("success", false);
+            result.put("message", "用户不存在");
+            return result;
+        }
+        String role = (String) body.get("role");
+        if (role != null && !user.getUsername().equals("admin")) {
+            user.setRole(role);
+        }
+        String password = (String) body.get("password");
+        if (password != null && !password.trim().isEmpty()) {
+            user.setPassword(FileStorageService.hashPassword(password));
+        }
+        storageService.updateUser(user);
+        result.put("success", true);
+        result.put("message", "保存成功");
+        return result;
+    }
+
     @DeleteMapping("/users/{id}")
     public Map<String, Object> deleteUser(@PathVariable String id,
                                            HttpServletRequest request, HttpServletResponse response) {

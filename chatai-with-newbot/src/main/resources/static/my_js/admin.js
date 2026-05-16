@@ -17,6 +17,15 @@ var providerIconMap = {
 function esc(s) { if (!s) return ''; var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function fmtToken(n) { if (n === undefined || n === null) return '0'; if (n >= 1000000) return (n/1000000).toFixed(1) + 'M'; if (n >= 1000) return (n/1000).toFixed(1) + 'K'; return String(n); }
 
+// 响应式弹窗宽度：移动端自适应，PC端固定最大宽度
+function getDialogWidth(maxWidth) {
+    maxWidth = maxWidth || 500;
+    var viewportWidth = window.innerWidth;
+    if (viewportWidth <= 480) return Math.min(viewportWidth - 16, maxWidth);
+    if (viewportWidth <= 768) return Math.min(viewportWidth - 32, maxWidth);
+    return maxWidth;
+}
+
 function getProviderIconHtml(pid, size) {
     size = size || 24;
     var icon = providerIconMap[pid];
@@ -43,20 +52,25 @@ function inferProviderId(modelName) {
     return '';
 }
 
+// 安全的localStorage访问封装
+function safeStorageGet(key) { try { return localStorage.getItem(key); } catch(e) { return null; } }
+function safeStorageSet(key, value) { try { localStorage.setItem(key, value); } catch(e) { console.warn('localStorage不可用:', e.message); } }
+function safeStorageRemove(key) { try { localStorage.removeItem(key); } catch(e) {} }
+
 // Auth check
 (function() {
-    var token = localStorage.getItem('token');
+    var token = safeStorageGet('token');
     if (!token) { window.location.href = '/login.html'; return; }
 })();
 
 function headers() {
-    return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + localStorage.getItem('token') };
+    return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + safeStorageGet('token') };
 }
 function api(url, opts) {
     opts = opts || {};
     opts.headers = Object.assign({}, headers(), opts.headers || {});
     return fetch(url, opts).then(function(r) {
-        if (r.status === 401 || r.status === 403) { localStorage.removeItem('token'); window.location.href = '/login.html'; throw new Error('Auth failed'); }
+        if (r.status === 401 || r.status === 403) { safeStorageRemove('token'); window.location.href = '/login.html'; throw new Error('Auth failed'); }
         return r.json();
     });
 }
@@ -153,7 +167,7 @@ function showQuickAdd(providerId) {
     html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
     html += '<button type="button" class="layui-btn" onclick="submitQuickAdd()">确认接入</button>';
     html += '</div></div>';
-    layer.open({ type:1, title:'快速接入 - ' + provider.name, area:['480px','auto'], content:html,
+    layer.open({ type:1, title:'快速接入 - ' + provider.name, area:[getDialogWidth(480) + 'px','auto'], content:html,
         success: function(layero) { form.render(null,'quickAddForm'); }
     });
 }
@@ -237,7 +251,7 @@ function editModel(id) {
     html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
     html += '<button type="button" class="layui-btn" onclick="saveModel(\'' + esc(id) + '\')">保存</button>';
     html += '</div></div>';
-    layer.open({ type:1, title:'编辑模型 - '+(model.displayName||model.modelId), area:['500px','auto'], content:html,
+    layer.open({ type:1, title:'编辑模型 - '+(model.displayName||model.modelId), area:[getDialogWidth(500) + 'px','auto'], content:html,
         success: function(layero) { form.render(null,'editModelForm'); }
     });
 }
@@ -290,7 +304,7 @@ function showAddModel() {
     html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
     html += '<button type="button" class="layui-btn" onclick="submitAddModel()">添加</button>';
     html += '</div></div>';
-    layer.open({ type:1, title:'添加模型', area:['500px','auto'], content:html,
+    layer.open({ type:1, title:'添加模型', area:[getDialogWidth(500) + 'px','auto'], content:html,
         success: function(layero) { form.render(null,'addModelForm'); }
     });
 }
@@ -365,7 +379,7 @@ function showAddUser() {
     html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
     html += '<button type="button" class="layui-btn" onclick="submitAddUser()">添加</button>';
     html += '</div></div>';
-    layer.open({ type:1, title:'添加用户', area:['420px','auto'], content:html,
+    layer.open({ type:1, title:'添加用户', area:[getDialogWidth(420) + 'px','auto'], content:html,
         success: function(layero) { form.render('select','addUserForm'); }
     });
 }
@@ -404,7 +418,7 @@ function editUser(id) {
     html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
     html += '<button type="button" class="layui-btn" onclick="saveUser(\'' + esc(id) + '\')">保存</button>';
     html += '</div></div>';
-    layer.open({ type:1, title:'编辑用户 - ' + user.username, area:['420px','auto'], content:html,
+    layer.open({ type:1, title:'编辑用户 - ' + user.username, area:[getDialogWidth(420) + 'px','auto'], content:html,
         success: function(layero) { if (user.username !== 'admin') form.render('select','editUserForm'); }
     });
 }
@@ -459,7 +473,7 @@ function showPerms(userId) {
     html += '<button type="button" class="layui-btn" onclick="savePermissions(\'' + esc(userId) + '\')">保存</button>';
     html += '</div></div>';
 
-    layer.open({ type:1, title:'用户权限 - ' + user.username, area:['520px','auto'], content:html,
+    layer.open({ type:1, title:'用户权限 - ' + user.username, area:[getDialogWidth(520) + 'px','auto'], content:html,
         success: function(layero) { form.render(null,'permsForm'); }
     });
 }
@@ -680,9 +694,8 @@ function toggleCustomDropdown(areaId) {
 // ===== Logout =====
 function doLogout() {
     window._layer.confirm('确定退出登录吗？', {icon:3, title:'确认退出'}, function(idx) {
-        localStorage.removeItem('token');
+        safeStorageRemove('token');
         window._layer.close(idx);
         window.location.href = '/login.html';
     });
 }
-
