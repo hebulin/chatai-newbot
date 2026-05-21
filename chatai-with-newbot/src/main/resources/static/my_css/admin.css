@@ -1263,3 +1263,16 @@ body {
 [data-theme="light"] .layui-layer-msg{background:#fff!important;border:1px solid rgba(99,102,241,.15)!important}
 [data-theme="light"] .layui-layer-msg .layui-layer-content{color:#1e293b!important}
 
+/* ===== Admin Footer ===== */
+.admin-footer {
+    text-align: center;
+    padding: 16px 0;
+    color: #64748b;
+    font-size: 12px;
+    letter-spacing: 0.02em;
+}
+
+[data-theme="light"] .admin-footer {
+    color: #94a3b8;
+}
+
