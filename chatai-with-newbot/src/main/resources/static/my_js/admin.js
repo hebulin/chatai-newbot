@@ -610,8 +610,15 @@ function renderStatsTable(items) {
 
 function renderPagination(elemId, total, current, size, callback) {
     if (!window._laypage) return;
-    window._laypage.render({ elem:elemId, count:total, limit:size, curr:current, theme:'#6366f1',
-        layout:['prev','page','next','count'],
+    var isMobile = window.innerWidth <= 480;
+    window._laypage.render({ 
+        elem: elemId, 
+        count: total, 
+        limit: size, 
+        curr: current, 
+        theme: '#6366f1',
+        groups: isMobile ? 3 : 5,  // Mobile: show 3 page buttons, Desktop: 5
+        layout: isMobile ? ['prev', 'page', 'next'] : ['prev', 'page', 'next', 'count'],
         jump: function(obj, first) { if (!first) callback(obj.curr); }
     });
 }
