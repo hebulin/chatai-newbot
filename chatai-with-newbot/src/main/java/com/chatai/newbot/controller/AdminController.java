@@ -402,6 +402,7 @@ public class AdminController {
             row.put("promptTokens", group.stream().mapToInt(UsageLog::getPromptTokens).sum());
             row.put("completionTokens", group.stream().mapToInt(UsageLog::getCompletionTokens).sum());
             row.put("cachedTokens", group.stream().mapToInt(UsageLog::getCachedTokens).sum());
+            row.put("reasoningTokens", group.stream().mapToInt(UsageLog::getReasoningTokens).sum());
             row.put("thinkingCount", group.stream().filter(UsageLog::isDeepThinking).count());
             statsList.add(row);
         }

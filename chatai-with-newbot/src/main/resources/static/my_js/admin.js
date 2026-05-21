@@ -21,7 +21,22 @@ var providerIconMap = {
 };
 
 function esc(s) { if (!s) return ''; var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-function fmtToken(n) { if (n === undefined || n === null) return '0'; if (n >= 1000000) return (n/1000000).toFixed(1) + 'M'; if (n >= 1000) return (n/1000).toFixed(1) + 'K'; return String(n); }
+// 科学计数法格式化token数量，精确到个位
+function toSuperscript(n) {
+    var map = {'0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','-':'⁻'};
+    return String(n).split('').map(function(c) { return map[c] || c; }).join('');
+}
+function fmtToken(n) {
+    if (n === undefined || n === null || n === 0) return '0';
+    if (n < 1000) return '' + n;
+    var exp = Math.floor(Math.log10(Math.abs(n)));
+    var coeff = n / Math.pow(10, exp);
+    var decimals = Math.min(exp, 3);
+    var coeffStr = coeff.toFixed(decimals);
+    coeffStr = coeffStr.replace(/0+$/, '');
+    coeffStr = coeffStr.replace(/\.$/, '');
+    return coeffStr + '×10' + toSuperscript(exp);
+}
 
 function getProviderIconHtml(pid, size) {
     size = size || 24;
@@ -569,7 +584,7 @@ function renderUsageTable(items) {
     var $ = window._$, tbody = $('#usageTableBody');
     tbody.empty();
     if (!items || items.length === 0) {
-        tbody.html('<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:40px;">暂无使用记录</td></tr>');
+        tbody.html('<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:40px;">暂无使用记录</td></tr>');
         return;
     }
     items.forEach(function(r) {
@@ -579,6 +594,7 @@ function renderUsageTable(items) {
             + '<td><div class="model-name-cell">' + getUsageModelIconHtml(r.modelName) + '<span>' + esc(r.modelName || '-') + '</span></div></td>'
             + '<td>' + fmtToken(r.promptTokens) + '</td>'
             + '<td>' + fmtToken(r.completionTokens) + '</td>'
+            + '<td>' + fmtToken(r.reasoningTokens) + '</td>'
             + '<td>' + fmtToken(r.cachedTokens) + '</td>'
             + '<td>' + (r.deepThinking ? '<span class="think-badge">思考</span>' : '-') + '</td>'
             + '</tr>';
@@ -590,7 +606,7 @@ function renderStatsTable(items) {
     var $ = window._$, tbody = $('#statsTableBody');
     tbody.empty();
     if (!items || items.length === 0) {
-        tbody.html('<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:40px;">暂无统计数据</td></tr>');
+        tbody.html('<tr><td colspan="9" style="text-align:center;color:#94a3b8;padding:40px;">暂无统计数据</td></tr>');
         return;
     }
     items.forEach(function(r) {
@@ -601,6 +617,7 @@ function renderStatsTable(items) {
             + '<td>' + (r.count || 0) + '</td>'
             + '<td>' + fmtToken(r.promptTokens) + '</td>'
             + '<td>' + fmtToken(r.completionTokens) + '</td>'
+            + '<td>' + fmtToken(r.reasoningTokens) + '</td>'
             + '<td>' + fmtToken(r.cachedTokens) + '</td>'
             + '<td>' + (r.thinkingCount || 0) + '</td>'
             + '</tr>';

@@ -48,6 +48,11 @@ public class UnifiedChatService {
         Map<String, Object> requestBody = new HashMap<>();
         requestBody.put("model", modelId);
         requestBody.put("stream", true);
+        // 要求API在流式响应中返回usage数据（OpenAI兼容协议要求）
+        // 解决Qwen、Kimi等厂商在流式模式下不返回token用量的问题
+        Map<String, Object> streamOptions = new HashMap<>();
+        streamOptions.put("include_usage", true);
+        requestBody.put("stream_options", streamOptions);
 
         // 构建消息列表
         List<Map<String, String>> messages = new ArrayList<>();
@@ -233,6 +238,7 @@ public class UnifiedChatService {
 
     /**
      * 将提取的 usage 数据写入 UsageLog 并持久化
+     * 支持不同厂商的 usage 字段格式差异
      */
     @SuppressWarnings("unchecked")
     private void updateUsageLog(UsageLog usageLog, Map<String, Object> usage) {
@@ -249,9 +255,17 @@ public class UnifiedChatService {
                 if (cached != null) usageLog.setCachedTokens(((Number) cached).intValue());
             }
 
+            // 提取思考/推理 token: completion_tokens_details.reasoning_tokens
+            // DeepSeek、Qwen、Kimi等支持思考模式的模型会返回此字段
+            Object compDetails = usage.get("completion_tokens_details");
+            if (compDetails instanceof Map) {
+                Object reasoning = ((Map<String, Object>) compDetails).get("reasoning_tokens");
+                if (reasoning != null) usageLog.setReasoningTokens(((Number) reasoning).intValue());
+            }
+
             storageService.updateUsageLog(usageLog);
-            log.info("已更新使用记录 token: prompt={}, completion={}, cached={}",
-                    usageLog.getPromptTokens(), usageLog.getCompletionTokens(), usageLog.getCachedTokens());
+            log.info("已更新使用记录 token: prompt={}, completion={}, cached={}, reasoning={}",
+                    usageLog.getPromptTokens(), usageLog.getCompletionTokens(), usageLog.getCachedTokens(), usageLog.getReasoningTokens());
         } catch (Exception e) {
             log.error("更新 usage log token 数据失败", e);
         }
