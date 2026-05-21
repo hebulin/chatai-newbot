@@ -768,12 +768,83 @@ body {
     color: #94a3b8;
 }
 
+/* ===== Data Sub Tab Nav ===== */
+.data-sub-tab-nav {
+    display: flex;
+    gap: 0;
+    margin-bottom: 16px;
+    background: rgba(30, 41, 59, 0.6);
+    border: 1px solid rgba(99, 102, 241, 0.15);
+    border-radius: 10px;
+    padding: 4px;
+    width: fit-content;
+}
+
+.data-sub-tab-item {
+    padding: 8px 24px;
+    border-radius: 8px;
+    font-size: 14px;
+    color: #94a3b8;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.data-sub-tab-item:hover {
+    color: #c7d2fe;
+}
+
+.data-sub-tab-item.active {
+    background: #6366f1;
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+}
+
+/* Light theme sub tab */
+[data-theme="light"] .data-sub-tab-nav {
+    background: #fff;
+    border-color: rgba(99, 102, 241, 0.12);
+}
+[data-theme="light"] .data-sub-tab-item {
+    color: #64748b;
+}
+[data-theme="light"] .data-sub-tab-item:hover {
+    color: #1e293b;
+}
+[data-theme="light"] .data-sub-tab-item.active {
+    background: #6366f1;
+    color: #fff;
+}
+
+/* ===== Data Sub Content Layout ===== */
 .data-sub-content {
     display: none;
 }
 
 .data-sub-content.active {
     display: block;
+}
+
+/* Stats card wrapper - separates search bar from scrollable table */
+.stats-card {
+    background: rgba(30, 41, 59, 0.6);
+    border: 1px solid rgba(99, 102, 241, 0.15);
+    border-radius: 12px;
+    padding: 16px;
+}
+
+.stats-card .stats-search-bar {
+    margin-bottom: 16px;
+}
+
+.stats-card .table-scroll-wrapper {
+    overflow-x: auto;
+}
+
+[data-theme="light"] .stats-card {
+    background: #fff;
+    border-color: rgba(99, 102, 241, 0.1);
 }
 
 .data-sub-tab {
@@ -993,6 +1064,21 @@ body {
 .layui-layer-msg { background: #1e293b !important; border: 1px solid rgba(99, 102, 241, 0.3) !important; border-radius: 8px !important; }
 .layui-layer-msg .layui-layer-content { color: #e2e8f0 !important; }
 .layui-layer-msg .layui-layer-content .layui-icon { color: #818cf8 !important; }
+
+/* ===== Fix: layui msg icon and text overlap ===== */
+.layui-layer-msg .layui-layer-content {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    padding: 12px 16px !important;
+    min-height: 42px !important;
+}
+.layui-layer-msg .layui-layer-content .layui-icon {
+    flex-shrink: 0 !important;
+    margin: 0 !important;
+    margin-right: 6px !important;
+    font-size: 16px !important;
+}
 
 /* ===== Confirm Dialog ===== */
 .layui-layer-dialog .layui-layer-content {
