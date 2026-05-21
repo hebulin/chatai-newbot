@@ -781,14 +781,26 @@ function finishStream(interrupted) {
             }
         }
         chats[currentChatId].push(msg);
-        // 同时将promptTokens更新到上一个user消息（用于在用户消息块中显示输入token）
+        // 计算本次增量输入token（仅本次对话新增的输入token，而非累计）
         if (streamUsage && streamUsage.prompt_tokens) {
-            for (var i = chats[currentChatId].length - 1; i >= 0; i--) {
-                if (chats[currentChatId][i].role === 'user') {
-                    chats[currentChatId][i].promptTokens = streamUsage.prompt_tokens;
+            var turnInputTokens = streamUsage.prompt_tokens;
+            // 查找上一个assistant消息的promptTokens（累计值），用于计算增量
+            for (var j = chats[currentChatId].length - 2; j >= 0; j--) {
+                if (chats[currentChatId][j].role === 'assistant' && chats[currentChatId][j].promptTokens) {
+                    turnInputTokens = streamUsage.prompt_tokens - chats[currentChatId][j].promptTokens;
                     break;
                 }
             }
+            if (turnInputTokens < 0) turnInputTokens = streamUsage.prompt_tokens;
+            // 更新user消息的promptTokens为增量值（仅本次输入token）
+            for (var i = chats[currentChatId].length - 1; i >= 0; i--) {
+                if (chats[currentChatId][i].role === 'user') {
+                    chats[currentChatId][i].promptTokens = turnInputTokens;
+                    break;
+                }
+            }
+            // 在assistant消息上保存增量输入token，用于显示"总Token"
+            msg.turnInputTokens = turnInputTokens;
         }
         saveChats();
     }
@@ -948,11 +960,11 @@ function createMessageEl(msg) {
             outputToken.textContent = '输出Token≈' + fmtToken(msg.completionTokens);
             footer.appendChild(outputToken);
         }
-        // 显示本次输出全部token（输入+输出）
-        if (msg.promptTokens && msg.completionTokens) {
+        // 显示本次输出全部token（增量输入+输出）
+        if (msg.turnInputTokens && msg.completionTokens) {
             var totalToken = document.createElement('span');
             totalToken.className = 'msg-token-info msg-token-total';
-            totalToken.textContent = '总Token(输入+输出)≈' + fmtToken(msg.promptTokens + msg.completionTokens);
+            totalToken.textContent = '总Token(输入+输出)≈' + fmtToken(msg.turnInputTokens + msg.completionTokens);
             footer.appendChild(totalToken);
         }
         var copyBtn = document.createElement('button');
