@@ -488,14 +488,14 @@ function savePermissions(userId) {
 function switchDataSubTab(tab, el) {
     dataSubTab = tab;
     var $ = window._$;
-    $('.sub-tab-card').removeClass('active');
+    $('.data-sub-tab-item').removeClass('active');
     $('.data-sub-content').removeClass('active').hide();
     if (tab === 'usage') {
-        $(el || '.sub-tab-card:first').addClass('active');
+        $(el || '.data-sub-tab-item:first').addClass('active');
         $('#data-sub-usage').addClass('active').show();
         loadUsage();
     } else {
-        $(el || '.sub-tab-card:last').addClass('active');
+        $(el || '.data-sub-tab-item:last').addClass('active');
         $('#data-sub-stats').addClass('active').show();
         loadUsageStats();
     }

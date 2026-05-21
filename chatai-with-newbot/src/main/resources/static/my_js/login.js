@@ -49,7 +49,7 @@ layui.use(['form', 'layer', 'jquery'], function() {
     form.on('submit(loginSubmit)', function(data) {
         var btn = $('#loginBtn');
         btn.addClass('layui-btn-disabled').prop('disabled', true);
-        btn.text('登录中...');
+        btn.html('<span class="login-btn-loading"></span> 登录中...');
 
         fetch('/api/auth/login', {
             method: 'POST',
@@ -65,12 +65,14 @@ layui.use(['form', 'layer', 'jquery'], function() {
                 localStorage.setItem('username', data.username);
                 localStorage.setItem('role', data.role);
                 window.location.href = '/index.html';
+                // Don't reset button state since we're redirecting
             } else {
                 layer.msg(data.message || '登录失败', { icon: 2, anim: 6 });
+                btn.removeClass('layui-btn-disabled').prop('disabled', false);
+                btn.text('登录');
             }
         }).catch(function(err) {
             layer.msg('网络错误，请稍后重试', { icon: 2, anim: 6 });
-        }).finally(function() {
             btn.removeClass('layui-btn-disabled').prop('disabled', false);
             btn.text('登录');
         });
@@ -88,7 +90,7 @@ layui.use(['form', 'layer', 'jquery'], function() {
         }
 
         btn.addClass('layui-btn-disabled').prop('disabled', true);
-        btn.text('注册中...');
+        btn.html('<span class="login-btn-loading"></span> 注册中...');
 
         fetch('/api/auth/register', {
             method: 'POST',
@@ -104,12 +106,14 @@ layui.use(['form', 'layer', 'jquery'], function() {
                 localStorage.setItem('username', data.username);
                 localStorage.setItem('role', data.role);
                 window.location.href = '/index.html';
+                // Don't reset button state since we're redirecting
             } else {
                 layer.msg(data.message || '注册失败', { icon: 2, anim: 6 });
+                btn.removeClass('layui-btn-disabled').prop('disabled', false);
+                btn.text('注册');
             }
         }).catch(function(err) {
             layer.msg('网络错误，请稍后重试', { icon: 2, anim: 6 });
-        }).finally(function() {
             btn.removeClass('layui-btn-disabled').prop('disabled', false);
             btn.text('注册');
         });
