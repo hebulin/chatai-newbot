@@ -18,25 +18,10 @@ var thinkingStartTime = null;
 var modelDropdownOpen = false; // 自定义下拉框状态
 var streamUsage = null; // 流式响应中的usage数据
 
-// ===== 科学计数法格式化 =====
-// 将token数量用科学计数法显示，精确到个位
-function toSuperscript(n) {
-    var map = {'0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','-':'⁻'};
-    return String(n).split('').map(function(c) { return map[c] || c; }).join('');
-}
-
-function fmtSciToken(n) {
+// ===== 千分位格式化 =====
+function fmtToken(n) {
     if (n === undefined || n === null || n === 0) return '0';
-    if (n < 1000) return '' + n;
-    var exp = Math.floor(Math.log10(Math.abs(n)));
-    var coeff = n / Math.pow(10, exp);
-    // 系数保留足够小数位，使精确到个位（cap at 3位小数保持可读性）
-    var decimals = Math.min(exp, 3);
-    var coeffStr = coeff.toFixed(decimals);
-    // 移除不必要的尾部0
-    coeffStr = coeffStr.replace(/0+$/, '');
-    coeffStr = coeffStr.replace(/\.$/, '');
-    return coeffStr + '×10' + toSuperscript(exp);
+    return Number(n).toLocaleString('en-US');
 }
 
 // 厂商图标映射：provider id -> SVG图标路径
@@ -951,23 +936,23 @@ function createMessageEl(msg) {
             footer.appendChild(modelSpan);
         }
         // token消耗显示
-        if (msg.reasoningTokens && msg.reasoningTokens > 0) {
+        if (msg.reasoningTokens !== undefined && msg.reasoningTokens !== null) {
             var thinkToken = document.createElement('span');
             thinkToken.className = 'msg-token-info msg-token-thinking';
-            thinkToken.textContent = '≈思考Token ' + fmtSciToken(msg.reasoningTokens);
+            thinkToken.textContent = '思考Token≈' + fmtToken(msg.reasoningTokens);
             footer.appendChild(thinkToken);
         }
         if (msg.completionTokens) {
             var outputToken = document.createElement('span');
             outputToken.className = 'msg-token-info';
-            outputToken.textContent = '≈输出Token ' + fmtSciToken(msg.completionTokens);
+            outputToken.textContent = '输出Token≈' + fmtToken(msg.completionTokens);
             footer.appendChild(outputToken);
         }
         // 显示本次输出全部token（输入+输出）
         if (msg.promptTokens && msg.completionTokens) {
             var totalToken = document.createElement('span');
             totalToken.className = 'msg-token-info msg-token-total';
-            totalToken.textContent = '≈总Token(输入+输出) ' + fmtSciToken(msg.promptTokens + msg.completionTokens);
+            totalToken.textContent = '总Token(输入+输出)≈' + fmtToken(msg.promptTokens + msg.completionTokens);
             footer.appendChild(totalToken);
         }
         var copyBtn = document.createElement('button');
@@ -988,7 +973,7 @@ function createMessageEl(msg) {
         if (msg.promptTokens) {
             var inputToken = document.createElement('span');
             inputToken.className = 'msg-token-info';
-            inputToken.textContent = '≈输入Token ' + fmtSciToken(msg.promptTokens);
+            inputToken.textContent = '输入Token≈' + fmtToken(msg.promptTokens);
             footer.appendChild(inputToken);
         }
         if (msg.time) {

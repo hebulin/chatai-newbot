@@ -21,21 +21,10 @@ var providerIconMap = {
 };
 
 function esc(s) { if (!s) return ''; var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-// 科学计数法格式化token数量，精确到个位
-function toSuperscript(n) {
-    var map = {'0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','-':'⁻'};
-    return String(n).split('').map(function(c) { return map[c] || c; }).join('');
-}
+// 千分位格式化token数量
 function fmtToken(n) {
     if (n === undefined || n === null || n === 0) return '0';
-    if (n < 1000) return '' + n;
-    var exp = Math.floor(Math.log10(Math.abs(n)));
-    var coeff = n / Math.pow(10, exp);
-    var decimals = Math.min(exp, 3);
-    var coeffStr = coeff.toFixed(decimals);
-    coeffStr = coeffStr.replace(/0+$/, '');
-    coeffStr = coeffStr.replace(/\.$/, '');
-    return coeffStr + '×10' + toSuperscript(exp);
+    return Number(n).toLocaleString('en-US');
 }
 
 function getProviderIconHtml(pid, size) {
