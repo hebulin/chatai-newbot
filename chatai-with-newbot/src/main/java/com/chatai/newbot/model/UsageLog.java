@@ -15,5 +15,6 @@ public class UsageLog {
     private int promptTokens;
     private int completionTokens;
     private int cachedTokens;
+    private int reasoningTokens;
     private boolean deepThinking;
 }

@@ -16,6 +16,28 @@ var currentThinkingContent = '';
 var currentAnswerContent = '';
 var thinkingStartTime = null;
 var modelDropdownOpen = false; // 自定义下拉框状态
+var streamUsage = null; // 流式响应中的usage数据
+
+// ===== 科学计数法格式化 =====
+// 将token数量用科学计数法显示，精确到个位
+function toSuperscript(n) {
+    var map = {'0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','-':'⁻'};
+    return String(n).split('').map(function(c) { return map[c] || c; }).join('');
+}
+
+function fmtSciToken(n) {
+    if (n === undefined || n === null || n === 0) return '0';
+    if (n < 1000) return '' + n;
+    var exp = Math.floor(Math.log10(Math.abs(n)));
+    var coeff = n / Math.pow(10, exp);
+    // 系数保留足够小数位，使精确到个位（cap at 3位小数保持可读性）
+    var decimals = Math.min(exp, 3);
+    var coeffStr = coeff.toFixed(decimals);
+    // 移除不必要的尾部0
+    coeffStr = coeffStr.replace(/0+$/, '');
+    coeffStr = coeffStr.replace(/\.$/, '');
+    return coeffStr + '×10' + toSuperscript(exp);
+}
 
 // 厂商图标映射：provider id -> SVG图标路径
 var providerIconMap = {
@@ -628,6 +650,7 @@ function sendMessage(fromButton) {
     currentThinkingContent = '';
     currentAnswerContent = '';
     thinkingStartTime = null;
+    streamUsage = null;
 
     var assistantMsg = { role: 'assistant', content: '', time: null, modelName: currentModelName || undefined };
     var hasResponse = false;
@@ -689,6 +712,10 @@ function sendMessage(fromButton) {
                                 currentAnswerContent += '\n\n**错误:** ' + (json.error.message || '未知错误');
                                 updated = true;
                                 return;
+                            }
+                            // 提取usage数据（token消耗）
+                            if (json.usage) {
+                                streamUsage = json.usage;
                             }
                             if (json.choices && json.choices[0] && json.choices[0].delta) {
                                 var delta = json.choices[0].delta;
@@ -754,7 +781,30 @@ function finishStream(interrupted) {
         if (thinkingStartTime && !msg.thinkingTime) {
             msg.thinkingTime = Math.round((Date.now() - thinkingStartTime) / 1000);
         }
+        // 保存token消耗数据到assistant消息
+        if (streamUsage) {
+            msg.promptTokens = streamUsage.prompt_tokens || 0;
+            msg.completionTokens = streamUsage.completion_tokens || 0;
+            msg.reasoningTokens = 0;
+            // 提取思考/推理token
+            if (streamUsage.completion_tokens_details && streamUsage.completion_tokens_details.reasoning_tokens) {
+                msg.reasoningTokens = streamUsage.completion_tokens_details.reasoning_tokens;
+            }
+            msg.cachedTokens = 0;
+            if (streamUsage.prompt_tokens_details && streamUsage.prompt_tokens_details.cached_tokens) {
+                msg.cachedTokens = streamUsage.prompt_tokens_details.cached_tokens;
+            }
+        }
         chats[currentChatId].push(msg);
+        // 同时将promptTokens更新到上一个user消息（用于在用户消息块中显示输入token）
+        if (streamUsage && streamUsage.prompt_tokens) {
+            for (var i = chats[currentChatId].length - 1; i >= 0; i--) {
+                if (chats[currentChatId][i].role === 'user') {
+                    chats[currentChatId][i].promptTokens = streamUsage.prompt_tokens;
+                    break;
+                }
+            }
+        }
         saveChats();
     }
     resetState();
@@ -774,6 +824,7 @@ function resetState() {
     currentAnswerContent = '';
     thinkingStartTime = null;
     isStreamActive = false;
+    streamUsage = null;
 }
 
 // ===== 消息渲染 - 性能优化 =====
@@ -879,14 +930,14 @@ function createMessageEl(msg) {
     wrapper.appendChild(row);
 
     // 底部信息栏
-    // 输出气泡(assistant)：时间、模型、复制icon；输入气泡(user)：复制icon、时间
+    // 输出气泡(assistant)：时间、模型、token消耗(≈输入/≈思考/≈输出)、复制icon；输入气泡(user)：复制icon、token消耗(≈输入)、时间
     var footer = document.createElement('div');
     footer.className = 'msg-footer';
-
+    
     var copyIconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
-
+    
     if (msg.role === 'assistant') {
-        // 输出气泡顺序：时间、模型、复制icon
+        // 输出气泡顺序：时间、模型、token消耗、复制icon
         if (msg.time) {
             var time = document.createElement('span');
             time.className = 'msg-time-inline';
@@ -899,6 +950,26 @@ function createMessageEl(msg) {
             modelSpan.textContent = msg.modelName;
             footer.appendChild(modelSpan);
         }
+        // token消耗显示
+        if (msg.reasoningTokens && msg.reasoningTokens > 0) {
+            var thinkToken = document.createElement('span');
+            thinkToken.className = 'msg-token-info msg-token-thinking';
+            thinkToken.textContent = '≈思考Token ' + fmtSciToken(msg.reasoningTokens);
+            footer.appendChild(thinkToken);
+        }
+        if (msg.completionTokens) {
+            var outputToken = document.createElement('span');
+            outputToken.className = 'msg-token-info';
+            outputToken.textContent = '≈输出Token ' + fmtSciToken(msg.completionTokens);
+            footer.appendChild(outputToken);
+        }
+        // 显示本次输出全部token（输入+输出）
+        if (msg.promptTokens && msg.completionTokens) {
+            var totalToken = document.createElement('span');
+            totalToken.className = 'msg-token-info msg-token-total';
+            totalToken.textContent = '≈总Token(输入+输出) ' + fmtSciToken(msg.promptTokens + msg.completionTokens);
+            footer.appendChild(totalToken);
+        }
         var copyBtn = document.createElement('button');
         copyBtn.className = 'footer-copy-btn';
         copyBtn.innerHTML = copyIconSvg;
@@ -906,13 +977,20 @@ function createMessageEl(msg) {
         copyBtn.onclick = function() { copyMsgContent(this); };
         footer.appendChild(copyBtn);
     } else {
-        // 输入气泡顺序：复制icon、时间
+        // 输入气泡顺序：复制icon、token消耗、时间
         var copyBtn = document.createElement('button');
         copyBtn.className = 'footer-copy-btn';
         copyBtn.innerHTML = copyIconSvg;
         copyBtn.title = '复制';
         copyBtn.onclick = function() { copyMsgContent(this); };
         footer.appendChild(copyBtn);
+        // 用户端显示输入token
+        if (msg.promptTokens) {
+            var inputToken = document.createElement('span');
+            inputToken.className = 'msg-token-info';
+            inputToken.textContent = '≈输入Token ' + fmtSciToken(msg.promptTokens);
+            footer.appendChild(inputToken);
+        }
         if (msg.time) {
             var time = document.createElement('span');
             time.className = 'msg-time-inline';
