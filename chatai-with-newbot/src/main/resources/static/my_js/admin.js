@@ -1,3 +1,9 @@
+function getDialogArea(maxWidth) {
+    var w = window.innerWidth;
+    if (w <= maxWidth + 20) return ['92%', 'auto'];
+    return [maxWidth + 'px', 'auto'];
+}
+
 /* Admin JS - Layui Refactored */
 var providers = [], allModels = [], allUsers = [];
 var quickAddProviderId = null;
@@ -153,7 +159,7 @@ function showQuickAdd(providerId) {
     html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
     html += '<button type="button" class="layui-btn" onclick="submitQuickAdd()">确认接入</button>';
     html += '</div></div>';
-    layer.open({ type:1, title:'快速接入 - ' + provider.name, area:['480px','auto'], content:html,
+    layer.open({ type:1, title:'快速接入 - ' + provider.name, area:getDialogArea(480), content:html,
         success: function(layero) { form.render(null,'quickAddForm'); }
     });
 }
@@ -237,7 +243,7 @@ function editModel(id) {
     html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
     html += '<button type="button" class="layui-btn" onclick="saveModel(\'' + esc(id) + '\')">保存</button>';
     html += '</div></div>';
-    layer.open({ type:1, title:'编辑模型 - '+(model.displayName||model.modelId), area:['500px','auto'], content:html,
+    layer.open({ type:1, title:'编辑模型 - '+(model.displayName||model.modelId), area:getDialogArea(500), content:html,
         success: function(layero) { form.render(null,'editModelForm'); }
     });
 }
@@ -290,7 +296,7 @@ function showAddModel() {
     html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
     html += '<button type="button" class="layui-btn" onclick="submitAddModel()">添加</button>';
     html += '</div></div>';
-    layer.open({ type:1, title:'添加模型', area:['500px','auto'], content:html,
+    layer.open({ type:1, title:'添加模型', area:getDialogArea(500), content:html,
         success: function(layero) { form.render(null,'addModelForm'); }
     });
 }
@@ -365,7 +371,7 @@ function showAddUser() {
     html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
     html += '<button type="button" class="layui-btn" onclick="submitAddUser()">添加</button>';
     html += '</div></div>';
-    layer.open({ type:1, title:'添加用户', area:['420px','auto'], content:html,
+    layer.open({ type:1, title:'添加用户', area:getDialogArea(420), content:html,
         success: function(layero) { form.render('select','addUserForm'); }
     });
 }
@@ -404,7 +410,7 @@ function editUser(id) {
     html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
     html += '<button type="button" class="layui-btn" onclick="saveUser(\'' + esc(id) + '\')">保存</button>';
     html += '</div></div>';
-    layer.open({ type:1, title:'编辑用户 - ' + user.username, area:['420px','auto'], content:html,
+    layer.open({ type:1, title:'编辑用户 - ' + user.username, area:getDialogArea(420), content:html,
         success: function(layero) { if (user.username !== 'admin') form.render('select','editUserForm'); }
     });
 }
@@ -459,7 +465,7 @@ function showPerms(userId) {
     html += '<button type="button" class="layui-btn" onclick="savePermissions(\'' + esc(userId) + '\')">保存</button>';
     html += '</div></div>';
 
-    layer.open({ type:1, title:'用户权限 - ' + user.username, area:['520px','auto'], content:html,
+    layer.open({ type:1, title:'用户权限 - ' + user.username, area:getDialogArea(520), content:html,
         success: function(layero) { form.render(null,'permsForm'); }
     });
 }

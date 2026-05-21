@@ -278,6 +278,7 @@ body {
     border: 1px solid rgba(99, 102, 241, 0.15);
     border-radius: 12px;
     padding: 16px;
+    overflow-x: auto;
 }
 
 /* ===== Stats Search Bar ===== */
@@ -631,8 +632,29 @@ body {
 .layui-layer-setwin a:hover { color: #f87171 !important; }
 
 .layui-layer-ico { background: none !important; }
-.layui-layer-close1::before { content: '\u2715'; font-size: 16px; }
-.layui-layer-close2::before { content: '\u2715'; font-size: 16px; }
+.layui-layer-close1::before,
+.layui-layer-close2::before {
+    content: ''; 
+    display: block; 
+    width: 16px; 
+    height: 16px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='18' y1='6' x2='6' y2='18'/%3E%3Cline x1='6' y1='6' x2='18' y2='18'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 14px 14px;
+}
+.layui-layer-close1:hover::before,
+.layui-layer-close2:hover::before {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f87171' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='18' y1='6' x2='6' y2='18'/%3E%3Cline x1='6' y1='6' x2='18' y2='18'/%3E%3C/svg%3E");
+}
+[data-theme="light"] .layui-layer-close1::before,
+[data-theme="light"] .layui-layer-close2::before {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='18' y1='6' x2='6' y2='18'/%3E%3Cline x1='6' y1='6' x2='18' y2='18'/%3E%3C/svg%3E");
+}
+[data-theme="light"] .layui-layer-close1:hover::before,
+[data-theme="light"] .layui-layer-close2:hover::before {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ef4444' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='18' y1='6' x2='6' y2='18'/%3E%3Cline x1='6' y1='6' x2='18' y2='18'/%3E%3C/svg%3E");
+}
 
 /* ===== Laypage Override ===== */
 .layui-laypage { display: flex; align-items: center; gap: 4px; }
@@ -1001,6 +1023,14 @@ body {
     .provider-card { flex-direction: column; text-align: center; }
     .provider-card-action { width: 100%; }
     .provider-card-btn { width: 100%; text-align: center; }
+    .card { padding: 8px; }
+    .data-table th, .data-table td { padding: 6px 8px; font-size: 12px; }
+    .stats-search-bar { flex-direction: column; align-items: stretch; }
+    .stats-search-select, .stats-search-input { width: 100%; }
+    .search-actions { width: 100%; justify-content: stretch; }
+    .search-actions .primary-btn, .search-actions .cancel-btn { flex: 1; justify-content: center; }
+    .layui-layer { left: 4% !important; width: 92% !important; }
+    .layui-layer-content { padding: 16px !important; }
 }
 
 /* ===== Theme Toggle Button (Admin) ===== */
