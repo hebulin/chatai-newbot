@@ -1117,6 +1117,53 @@ body {
     .search-actions .primary-btn, .search-actions .cancel-btn { flex: 1; justify-content: center; }
     .layui-layer { left: 4% !important; width: 92% !important; }
     .layui-layer-content { padding: 16px !important; }
+
+    /* ===== Mobile Pagination Optimization ===== */
+    .layui-laypage {
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 3px;
+    }
+    /* Hide count text on mobile */
+    .layui-laypage .layui-laypage-count {
+        display: none !important;
+    }
+    /* Convert prev/next text to icons */
+    .layui-laypage .layui-laypage-prev::before,
+    .layui-laypage .layui-laypage-next::before {
+        font-family: 'layui-icon' !important;
+        font-size: 14px;
+    }
+    .layui-laypage .layui-laypage-prev {
+        font-size: 0 !important;
+        padding: 0 8px !important;
+        min-width: 32px;
+    }
+    .layui-laypage .layui-laypage-prev::before {
+        content: '\e603' !important; /* layui left arrow icon */
+        font-size: 14px !important;
+    }
+    .layui-laypage .layui-laypage-next {
+        font-size: 0 !important;
+        padding: 0 8px !important;
+        min-width: 32px;
+    }
+    .layui-laypage .layui-laypage-next::before {
+        content: '\e602' !important; /* layui right arrow icon */
+        font-size: 14px !important;
+    }
+    /* Reduce page button size */
+    .layui-laypage a,
+    .layui-laypage span {
+        padding: 4px 8px !important;
+        font-size: 13px !important;
+        min-width: 28px;
+        text-align: center;
+    }
+    /* Hide skip input on mobile */
+    .layui-laypage .layui-laypage-skip {
+        display: none !important;
+    }
 }
 
 /* ===== Theme Toggle Button (Admin) ===== */
