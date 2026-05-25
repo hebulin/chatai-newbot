@@ -72,12 +72,12 @@ layui.use(['form', 'layer', 'jquery'], function() {
                 window.location.href = '/index.html';
                 // Don't reset button state since we're redirecting
             } else {
-                layer.msg(data.message || '登录失败', { icon: 2, anim: 6 });
+                layer.msg(data.message || '登录失败', { icon: 2, anim: 6, shade: 0.3 });
                 btn.removeClass('layui-btn-disabled').prop('disabled', false);
                 btn.text('登录');
             }
         }).catch(function(err) {
-            layer.msg('网络错误，请稍后重试', { icon: 2, anim: 6 });
+            layer.msg('网络错误，请稍后重试', { icon: 2, anim: 6, shade: 0.3 });
             btn.removeClass('layui-btn-disabled').prop('disabled', false);
             btn.text('登录');
         });
@@ -90,7 +90,7 @@ layui.use(['form', 'layer', 'jquery'], function() {
         var btn = $('#regBtn');
 
         if (data.field.password !== data.field.password2) {
-            layer.msg('两次输入的密码不一致', { icon: 2, anim: 6 });
+            layer.msg('两次输入的密码不一致', { icon: 2, anim: 6, shade: 0.3 });
             return false;
         }
 
@@ -118,7 +118,7 @@ layui.use(['form', 'layer', 'jquery'], function() {
                 btn.text('注册');
             }
         }).catch(function(err) {
-            layer.msg('网络错误，请稍后重试', { icon: 2, anim: 6 });
+            layer.msg('网络错误，请稍后重试', { icon: 2, anim: 6, shade: 0.3 });
             btn.removeClass('layui-btn-disabled').prop('disabled', false);
             btn.text('注册');
         });

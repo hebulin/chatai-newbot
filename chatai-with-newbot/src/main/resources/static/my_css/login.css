@@ -222,12 +222,23 @@ body {
 }
 
 /* ===== Layui Layer Msg Override (Dark Theme) ===== */
+.layui-layer-shade {
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+    background-color: rgba(0, 0, 0, 0.35) !important;
+}
+.layui-layer-msg {
+    background: rgba(30, 27, 75, 0.85) !important;
+    border: 1px solid rgba(99, 102, 241, 0.3) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6) !important;
+    backdrop-filter: blur(16px) !important;
+    -webkit-backdrop-filter: blur(16px) !important;
+    z-index: 10000 !important;
+}
 .layui-layer-msg .layui-layer-content {
-    background: rgba(30, 27, 75, 0.95) !important;
+    background: transparent !important;
     color: #e2e8f0 !important;
-    border: 1px solid rgba(99, 102, 241, 0.2);
-    border-radius: 8px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
 }
 
 .layui-layer-msg .layui-layer-content .layui-icon {
@@ -288,11 +299,23 @@ body {
     color: #6366f1;
 }
 
+[data-theme="light"] .layui-layer-shade {
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+    background-color: rgba(0, 0, 0, 0.25) !important;
+}
+[data-theme="light"] .layui-layer-msg {
+    background: rgba(255, 255, 255, 0.9) !important;
+    border: 1px solid rgba(99, 102, 241, 0.25) !important;
+    border-radius: 12px !important;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.15) !important;
+    backdrop-filter: blur(20px) !important;
+    -webkit-backdrop-filter: blur(20px) !important;
+    z-index: 10000 !important;
+}
 [data-theme="light"] .layui-layer-msg .layui-layer-content {
-    background: rgba(255, 255, 255, 0.95) !important;
+    background: transparent !important;
     color: #1e293b !important;
-    border: 1px solid rgba(99, 102, 241, 0.1);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
 }
 
 /* ===== Responsive ===== */

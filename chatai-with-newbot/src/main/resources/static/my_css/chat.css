@@ -28,6 +28,15 @@ body{display:flex}
 .layui-layer-btn .layui-layer-btn0{background:linear-gradient(135deg,#6366f1,#818cf8)!important;border:none!important;color:#fff!important}
 .layui-layer-btn .layui-layer-btn1{background:#374151!important;border:1px solid #4b5563!important;color:#e2e8f0!important}
 
+/* ===== Layui Layer Msg Override ===== */
+.layui-layer-shade {
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+    background-color: rgba(0, 0, 0, 0.35) !important;
+}
+.layui-layer-msg{background:rgba(30,27,75,.85)!important;border:1px solid rgba(99,102,241,.3)!important;border-radius:12px!important;box-shadow:0 16px 48px rgba(0,0,0,.6)!important;backdrop-filter:blur(20px)!important;-webkit-backdrop-filter:blur(20px)!important;z-index:10000!important}
+.layui-layer-msg .layui-layer-content{background:transparent!important;color:#e2e8f0!important}
+
 /* ===== Sidebar ===== */
 .sidebar{width:260px;min-width:260px;background:linear-gradient(180deg,#1e1b4b 0%,#0f172a 100%);border-right:1px solid rgba(99,102,241,.15);display:flex;flex-direction:column;height:100vh;transition:all .3s ease;z-index:100;flex-shrink:0;box-shadow:2px 0 12px rgba(0,0,0,.3)}
 .sidebar.collapsed{width:0;min-width:0;overflow:hidden;border-right:none}
@@ -356,6 +365,13 @@ body{display:flex}
 [data-theme="light"] .layui-layer-content{background:#fff!important;color:#1e293b!important}
 [data-theme="light"] .layui-layer-btn{background:#fff!important;border-top:1px solid rgba(99,102,241,.15)!important}
 [data-theme="light"] .layui-layer-btn .layui-layer-btn1{background:#f1f5f9!important;border:1px solid #d1d5db!important;color:#475569!important}
+[data-theme="light"] .layui-layer-shade {
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+    background-color: rgba(0, 0, 0, 0.25) !important;
+}
+[data-theme="light"] .layui-layer-msg{background:rgba(255,255,255,.9)!important;border:1px solid rgba(99,102,241,.25)!important;border-radius:12px!important;box-shadow:0 16px 48px rgba(0,0,0,.15)!important;backdrop-filter:blur(20px)!important;-webkit-backdrop-filter:blur(20px)!important;z-index:10000!important}
+[data-theme="light"] .layui-layer-msg .layui-layer-content{background:transparent!important;color:#1e293b!important}
 [data-theme="light"] .theme-toggle-btn{color:#64748b}
 [data-theme="light"] .theme-toggle-btn:hover{background:rgba(99,102,241,.1);color:#6366f1}
 [data-theme="light"] .chat-search-box{background:#fff;border:1px solid rgba(99,102,241,.15)}

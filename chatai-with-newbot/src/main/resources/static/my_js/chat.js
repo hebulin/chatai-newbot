@@ -1542,7 +1542,7 @@ function hideLoading() {
 
 function showToast(msg) {
     if (window._layer) {
-        window._layer.msg(msg, { time: 2500, shade: 0 });
+        window._layer.msg(msg, { time: 2500, shade: 0.3 });
     } else {
         var t = document.getElementById('toast');
         if (t) {
