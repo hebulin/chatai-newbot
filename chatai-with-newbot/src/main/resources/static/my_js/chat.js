@@ -1,6 +1,26 @@
+// ===== 安全的localStorage访问封装 =====
+var _storageAvailable = null;
+function safeStorageGet(key) {
+    try { return localStorage.getItem(key); } catch(e) {
+        if (_storageAvailable === null) { console.warn('localStorage不可用，部分功能可能受限:', e.message); _storageAvailable = false; }
+        return null;
+    }
+}
+function safeStorageSet(key, value) {
+    try { localStorage.setItem(key, value); } catch(e) {
+        if (_storageAvailable === null) { console.warn('localStorage不可用，部分功能可能受限:', e.message); _storageAvailable = false; }
+    }
+}
+function safeStorageRemove(key) {
+    try { localStorage.removeItem(key); } catch(e) {}
+}
+function safeStorageParse(key) {
+    try { var v = localStorage.getItem(key); return v ? JSON.parse(v) : null; } catch(e) { return null; }
+}
+
 // ===== 全局状态 =====
-var TOKEN = localStorage.getItem('token');
-var CURRENT_USER = localStorage.getItem('username') || '';
+var TOKEN = safeStorageGet('token');
+var CURRENT_USER = safeStorageGet('username') || '';
 var CHATS_KEY = 'chats_' + CURRENT_USER;
 var LAST_CHAT_KEY = 'lastChatId_' + CURRENT_USER;
 var currentChatId = null;
@@ -56,27 +76,34 @@ layui.use(['layer', 'form', 'element', 'jquery'], function() {
     // ===== 初始化 =====
     if (!TOKEN) { window.location.href = '/login.html'; return; }
 
-    // 初始化marked
-    marked.setOptions({
-        gfm: true, breaks: true, headerIds: false, mangle: false,
-        highlight: function(code, lang) {
-            try {
-                if (lang && hljs.getLanguage(lang)) return hljs.highlight(code, {language: lang}).value;
-                return hljs.highlightAuto(code).value;
-            } catch(e) { return code; }
-        }
-    });
-    mermaid.initialize({ startOnLoad: false, theme: 'default' });
+    // 初始化marked（安全检查：CDN可能被浏览器扩展阻止加载）
+    if (typeof marked !== 'undefined' && marked.setOptions) {
+        marked.setOptions({
+            gfm: true, breaks: true, headerIds: false, mangle: false,
+            highlight: function(code, lang) {
+                try {
+                    if (typeof hljs !== 'undefined') {
+                        if (lang && hljs.getLanguage(lang)) return hljs.highlight(code, {language: lang}).value;
+                        return hljs.highlightAuto(code).value;
+                    }
+                } catch(e) {}
+                return code;
+            }
+        });
+    }
+    if (typeof mermaid !== 'undefined' && mermaid.initialize) {
+        mermaid.initialize({ startOnLoad: false, theme: 'default' });
+    }
 
     // 显示用户信息
-    document.getElementById('usernameDisplay').textContent = localStorage.getItem('username') || '用户';
-    if (localStorage.getItem('role') === 'admin') {
+    document.getElementById('usernameDisplay').textContent = safeStorageGet('username') || '用户';
+    if (safeStorageGet('role') === 'admin') {
         document.getElementById('adminBtn').style.display = 'flex';
     }
 
     // 加载会话（按用户隔离）
-    try { chats = JSON.parse(localStorage.getItem(CHATS_KEY)) || {}; } catch(e) { chats = {}; }
-    var lastId = localStorage.getItem(LAST_CHAT_KEY);
+    try { chats = safeStorageParse(CHATS_KEY) || {}; } catch(e) { chats = {}; }
+    var lastId = safeStorageGet(LAST_CHAT_KEY);
     if (lastId && chats[lastId]) { currentChatId = lastId; } else { newChat(); }
 
     loadModels();
@@ -146,9 +173,9 @@ function showConfirmDialog(msg, title, onOk) {
 
 function doLogout() {
     fetch('/api/auth/logout', { method: 'POST', headers: authHeaders() }).catch(function(){});
-    localStorage.removeItem('token');
-    localStorage.removeItem('username');
-    localStorage.removeItem('role');
+    safeStorageRemove('token');
+    safeStorageRemove('username');
+    safeStorageRemove('role');
     window.location.href = '/login.html';
 }
 
@@ -159,9 +186,9 @@ function loadModels() {
     fetch('/api/models', { headers: authHeaders() })
     .then(function(r) {
         if (r.status === 401) {
-            localStorage.removeItem('token');
-            localStorage.removeItem('username');
-            localStorage.removeItem('role');
+            safeStorageRemove('token');
+            safeStorageRemove('username');
+            safeStorageRemove('role');
             showToast('登录已过期，请重新登录');
             setTimeout(function() { window.location.href = '/login.html'; }, 1500);
             return;
@@ -376,7 +403,7 @@ function newChat() {
     }
     currentChatId = Date.now().toString();
     chats[currentChatId] = [];
-    localStorage.setItem(LAST_CHAT_KEY, currentChatId);
+    safeStorageSet(LAST_CHAT_KEY, currentChatId);
     saveChats();
     updateChatList();
     displayMessages();
@@ -386,7 +413,7 @@ function newChat() {
 function switchChat(id) {
     if (isStreamActive) { showToast('请等待回答完成'); return; }
     currentChatId = id;
-    localStorage.setItem(LAST_CHAT_KEY, id);
+    safeStorageSet(LAST_CHAT_KEY, id);
     resetState();
     updateChatList();
     displayMessages();
@@ -552,7 +579,7 @@ function clearChatSearch() {
     updateChatList();
 }
 
-function saveChats() { localStorage.setItem(CHATS_KEY, JSON.stringify(chats)); }
+function saveChats() { safeStorageSet(CHATS_KEY, JSON.stringify(chats)); }
 
 function exportChats() {
     var text = '';
@@ -655,9 +682,9 @@ function sendMessage(fromButton) {
             chats[currentChatId].pop();
             saveChats();
             displayMessages();
-            localStorage.removeItem('token');
-            localStorage.removeItem('username');
-            localStorage.removeItem('role');
+            safeStorageRemove('token');
+            safeStorageRemove('username');
+            safeStorageRemove('role');
             showToast('登录已过期，请重新登录');
             setTimeout(function() { window.location.href = '/login.html'; }, 1500);
             return;
@@ -674,13 +701,32 @@ function sendMessage(fromButton) {
                 throw new Error(errMsg);
             });
         }
-        hideLoading();
         var reader = resp.body.getReader();
         var decoder = new TextDecoder();
 
         function read() {
             return reader.read().then(function(result) {
-                if (result.done) { finishStream(false); return; }
+                if (result.done) {
+                    // 隐藏loading（如果还没有内容到达的话）
+                    hideLoading();
+                    // 处理buffer中残留的最后一条数据（如API错误消息）
+                    if (buffer.trim()) {
+                        var remainingLine = buffer.trim();
+                        if (remainingLine.startsWith('{')) {
+                            try {
+                                var json = JSON.parse(remainingLine);
+                                if (json.error) {
+                                    currentAnswerContent += '\n\n**错误:** ' + (json.error.message || '未知错误');
+                                    assistantMsg.content = currentAnswerContent;
+                                    if (!assistantMsg.time) assistantMsg.time = nowStr();
+                                    updateStreamingMessage(assistantMsg);
+                                }
+                            } catch(e) { /* skip parse error */ }
+                        }
+                    }
+                    finishStream(false);
+                    return;
+                }
                 var chunk = decoder.decode(result.value, {stream: true});
                 buffer += chunk;
                 var lines = buffer.split('data:');
@@ -749,6 +795,7 @@ function sendMessage(fromButton) {
 
 function finishStream(interrupted) {
     isStreamActive = false;
+    hideLoading();
     if (currentThinkingContent || currentAnswerContent) {
         var content = currentAnswerContent;
         // 避免保存content为空的assistant消息，否则后续请求API会报400错误
@@ -803,9 +850,64 @@ function finishStream(interrupted) {
             msg.turnInputTokens = turnInputTokens;
         }
         saveChats();
+
+        // 就地完成流式消息元素，避免全量DOM重建导致闪烁
+        var streamEl = document.getElementById('streaming-msg');
+        if (streamEl) {
+            // 移除streaming标记，使其成为普通消息元素
+            streamEl.removeAttribute('id');
+            // 更新气泡内容为最终状态
+            var bubble = streamEl.querySelector('.msg-bubble');
+            if (bubble) {
+                bubble.innerHTML = renderMsgContent(msg);
+                bubble.setAttribute('data-raw', msg.content || '');
+            }
+            // 添加footer信息（时间、模型、复制按钮）
+            var existingFooter = streamEl.querySelector('.msg-footer');
+            if (existingFooter) {
+                existingFooter.remove();
+            }
+            var footer = document.createElement('div');
+            footer.className = 'msg-footer';
+            var copyIconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+            if (msg.time) {
+                var time = document.createElement('span');
+                time.className = 'msg-time-inline';
+                time.textContent = msg.time;
+                footer.appendChild(time);
+            }
+            if (msg.modelName) {
+                var modelSpan = document.createElement('span');
+                modelSpan.className = 'msg-model-name';
+                modelSpan.textContent = msg.modelName;
+                footer.appendChild(modelSpan);
+            }
+            var copyBtn = document.createElement('button');
+            copyBtn.className = 'footer-copy-btn';
+            copyBtn.innerHTML = copyIconSvg;
+            copyBtn.title = '复制';
+            copyBtn.onclick = function() { copyMsgContent(this); };
+            footer.appendChild(copyBtn);
+            streamEl.appendChild(footer);
+            // 处理特殊内容（代码高亮等）
+            processSpecialContent(streamEl);
+        }
+    } else {
+        // 没有任何内容，移除可能残留的streaming元素
+        var streamEl = document.getElementById('streaming-msg');
+        if (streamEl) streamEl.remove();
     }
     resetState();
-    displayMessages();
+    // 不再全量重建DOM，仅在必要时刷新（如切换会话后回来）
+    // displayMessages() 会导致闪烁，改为仅更新滚动位置
+    var container = document.getElementById('chatContainer');
+    if (container) {
+        var isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+        if (isNearBottom) {
+            container.scrollTop = container.scrollHeight;
+        }
+        updateScrollNav();
+    }
     resetSendBtn();
 }
 
@@ -843,6 +945,8 @@ function updateStreamingMessage(msg) {
     // 查找或创建流式消息元素
     var streamEl = document.getElementById('streaming-msg');
     if (!streamEl) {
+        // 首次有内容到达，隐藏loading动画
+        hideLoading();
         streamEl = createMessageEl(msg);
         streamEl.id = 'streaming-msg';
         container.appendChild(streamEl);
@@ -1027,7 +1131,7 @@ function renderMarkdown(text) {
         return '%%MERMAID_' + idx + '%%';
     });
 
-    var html = marked.parse(text);
+    var html = (typeof marked !== 'undefined' && marked.parse) ? marked.parse(text) : escapeHtml(text).replace(/\n/g, '<br>');
 
     // 还原mermaid - 添加代码/视图切换工具栏 + 功能按钮
     mermaidBlocks.forEach(function(code, idx) {
@@ -1101,7 +1205,7 @@ function switchMermaidView(btn, mode) {
         // 确保代码块已高亮
         codeDiv.querySelectorAll('pre code:not([data-processed])').forEach(function(block) {
             block.dataset.processed = 'true';
-            hljs.highlightElement(block);
+            if (typeof hljs !== 'undefined' && hljs.highlightElement) hljs.highlightElement(block);
             var pre = block.parentElement;
             if (!pre.querySelector('.code-header')) {
                 var lang = (block.className.match(/language-(\w+)/) || ['', 'text'])[1];
@@ -1381,11 +1485,13 @@ function processSpecialContent(container) {
         });
     });
 
-    // 代码块处理
+    // 代码块处理（安全检查：hljs可能未加载）
     container.querySelectorAll('pre code').forEach(function(block) {
         if (block.dataset.processed) return;
         block.dataset.processed = 'true';
-        hljs.highlightElement(block);
+        if (typeof hljs !== 'undefined' && hljs.highlightElement) {
+            hljs.highlightElement(block);
+        }
         var pre = block.parentElement;
         if (pre.querySelector('.code-header')) return;
         var lang = (block.className.match(/language-(\w+)/) || ['', 'text'])[1];
@@ -1395,17 +1501,19 @@ function processSpecialContent(container) {
         pre.insertBefore(header, pre.firstChild);
     });
 
-    // Mermaid渲染
-    container.querySelectorAll('.mermaid:not([data-processed])').forEach(function(el) {
-        el.dataset.processed = 'true';
-        try {
-            var id = 'mermaid-' + Date.now() + '-' + Math.random().toString(36).substr(2,5);
-            mermaid.render(id, el.textContent).then(function(result) {
-                el.innerHTML = result.svg;
-                el.classList.remove('mermaid');
-            }).catch(function() {});
-        } catch(e) {}
-    });
+    // Mermaid渲染（仅在mermaid库可用时执行）
+    if (typeof mermaid !== 'undefined' && mermaid.render) {
+        container.querySelectorAll('.mermaid:not([data-processed])').forEach(function(el) {
+            el.dataset.processed = 'true';
+            try {
+                var id = 'mermaid-' + Date.now() + '-' + Math.random().toString(36).substr(2,5);
+                mermaid.render(id, el.textContent).then(function(result) {
+                    el.innerHTML = result.svg;
+                    el.classList.remove('mermaid');
+                }).catch(function() {});
+            } catch(e) {}
+        });
+    }
 }
 
 function copyCode(btn) {

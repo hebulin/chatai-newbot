@@ -1,6 +1,11 @@
+// 安全的localStorage访问封装
+function safeStorageGet(key) { try { return localStorage.getItem(key); } catch(e) { return null; } }
+function safeStorageSet(key, value) { try { localStorage.setItem(key, value); } catch(e) { console.warn('localStorage不可用:', e.message); } }
+function safeStorageRemove(key) { try { localStorage.removeItem(key); } catch(e) {} }
+
 // 检查是否已登录
 (function() {
-    var token = localStorage.getItem('token');
+    var token = safeStorageGet('token');
     if (token) {
         fetch('/api/auth/me', {
             headers: { 'Authorization': 'Bearer ' + token }
@@ -61,9 +66,9 @@ layui.use(['form', 'layer', 'jquery'], function() {
         }).then(function(r) { return r.json(); })
         .then(function(data) {
             if (data.success) {
-                localStorage.setItem('token', data.token);
-                localStorage.setItem('username', data.username);
-                localStorage.setItem('role', data.role);
+                safeStorageSet('token', data.token);
+                safeStorageSet('username', data.username);
+                safeStorageSet('role', data.role);
                 window.location.href = '/index.html';
                 // Don't reset button state since we're redirecting
             } else {
@@ -102,9 +107,9 @@ layui.use(['form', 'layer', 'jquery'], function() {
         }).then(function(r) { return r.json(); })
         .then(function(data) {
             if (data.success) {
-                localStorage.setItem('token', data.token);
-                localStorage.setItem('username', data.username);
-                localStorage.setItem('role', data.role);
+                safeStorageSet('token', data.token);
+                safeStorageSet('username', data.username);
+                safeStorageSet('role', data.role);
                 window.location.href = '/index.html';
                 // Don't reset button state since we're redirecting
             } else {
