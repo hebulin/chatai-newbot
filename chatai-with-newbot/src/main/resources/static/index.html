@@ -30,7 +30,7 @@
             </button>
         </div>
         <button class="layui-btn layui-btn-fluid new-chat-btn" onclick="newChat()">
-            <i class="layui-icon layui-icon-add-1"></i> 新建会话
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> 新建会话
         </button>
         <div class="chat-search-box" id="chatSearchBox">
             <svg class="chat-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -50,7 +50,7 @@
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 </button>
                 <button class="icon-btn" id="adminBtn" onclick="goAdmin()" title="管理后台" style="display:none">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7z"/><line x1="9" y1="22" x2="15" y2="22"/></svg>
                 </button>
                 <button class="icon-btn" onclick="logout()" title="退出登录">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
@@ -86,30 +86,30 @@
     </div>
 
     <div class="input-area">
-        <div class="input-toolbar">
-            <!-- 自定义模型选择下拉框 -->
-            <div class="model-select-area" id="modelSelectArea">
-                <div class="model-select-trigger" id="modelSelectTrigger" onclick="toggleModelDropdown()">
-                    <span class="model-select-value" id="modelSelectValue">选择模型</span>
-                    <svg class="model-select-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-                </div>
-                <div class="model-select-dropdown" id="modelSelectDropdown"></div>
-            </div>
-            <!-- 深度思考开关 -->
-            <div class="think-toggle" id="thinkToggle" style="display:none">
-                <input type="checkbox" id="deepThinkCheck" lay-skin="switch" lay-text="思考|关闭" lay-filter="deepThink">
-                <span class="think-label">深度思考</span>
-            </div>
-        </div>
         <!-- 图片预览区域（粘贴图片后显示缩略图） -->
         <div class="image-preview-area" id="imagePreviewArea" style="display:none"></div>
         <!-- 粘贴不支持多模态时的警告 -->
         <div class="paste-warning" id="pasteWarning" style="display:none"></div>
         <div class="input-row">
-            <textarea id="userInput" placeholder="输入消息，Enter发送，Shift+Enter换行..." rows="1"></textarea>
-            <button class="layui-btn send-btn" id="sendButton" onclick="sendMessage(true)">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-            </button>
+            <div class="input-textarea-wrap">
+                <textarea id="userInput" placeholder="输入消息，Enter发送，Shift+Enter换行..." rows="1"></textarea>
+                <!-- 输入框内工具栏 -->
+                <div class="input-inner-toolbar">
+                    <div class="think-icon-btn" id="thinkIconBtn" style="display:none" title="深度思考">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7z"/><line x1="9" y1="22" x2="15" y2="22"/></svg>
+                    </div>
+                    <div class="model-select-area" id="modelSelectArea">
+                        <div class="model-select-trigger" id="modelSelectTrigger" onclick="toggleModelDropdown()">
+                            <span class="model-select-value" id="modelSelectValue">选择模型</span>
+                            <svg class="model-select-arrow" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                        </div>
+                        <div class="model-select-dropdown" id="modelSelectDropdown"></div>
+                    </div>
+                    <button class="send-btn" id="sendButton" onclick="sendMessage(true)" title="发送">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                    </button>
+                </div>
+            </div>
         </div>
         <div class="input-footer">内容由 AI 生成，请仔细甄别</div>
     </div>
