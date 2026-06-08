@@ -37,6 +37,8 @@ var currentAnswerContent = '';
 var thinkingStartTime = null;
 var modelDropdownOpen = false; // 自定义下拉框状态
 var streamUsage = null; // 流式响应中的usage数据
+var pendingImages = []; // 待发送的图片base64列表
+var MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 单张图片最大5MB
 
 // ===== 千分位格式化 =====
 function fmtToken(n) {
@@ -116,6 +118,8 @@ layui.use(['layer', 'form', 'element', 'jquery'], function() {
     textarea.addEventListener('keydown', function(e) {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(false); }
     });
+    // 图片粘贴监听（多模态支持）
+    textarea.addEventListener('paste', handlePasteImage);
 
     // 响应式
     window.addEventListener('resize', handleResize);
@@ -202,6 +206,8 @@ function loadModels() {
             currentModelId = models[0].id;
             currentModelName = models[0].displayName;
             updateModelSelectDisplay(models[0]);
+            // 存储当前模型的多模态支持状态
+            window._currentModelSupportsMultimodal = models[0].supportsMultimodal || false;
         }
         renderModelSelector(models);
         // 初始化深度思考状态（在renderModelSelector之后，确保DOM已就绪）
@@ -287,6 +293,8 @@ function selectModel(model) {
     var prevModelId = currentModelId;
     currentModelId = model.id;
     currentModelName = model.displayName;
+    // 存储当前模型的多模态支持状态
+    window._currentModelSupportsMultimodal = model.supportsMultimodal || false;
     updateModelSelectDisplay(model);
     updateThinkToggle(model, prevModelId !== model.id);
     closeModelDropdown();
@@ -612,14 +620,27 @@ function sendMessage(fromButton) {
     }
 
     var text = input.value.trim();
-    if (!text || !currentModelId) return;
+    var hasImages = pendingImages.length > 0;
+    // 有图片时检查多模态支持
+    if (hasImages && !window._currentModelSupportsMultimodal) {
+        showToast('当前模型不支持图像理解，请删除图片后再发送');
+        return;
+    }
+    if (!text && !hasImages) return;
+    if (!currentModelId) return;
 
-    var userMsg = { role: 'user', content: text, time: nowStr() };
+    var userMsg = { role: 'user', content: text || '(图片)', time: nowStr() };
+    // 将图片保存到用户消息中（用于历史记录显示）
+    if (hasImages) {
+        userMsg.images = pendingImages.slice();
+    }
     if (!chats[currentChatId]) chats[currentChatId] = [];
     chats[currentChatId].push(userMsg);
     saveChats();
     input.value = '';
     input.style.height = 'auto';
+    // 清除图片预览区
+    clearPendingImages();
 
     displayMessages();
     updateChatList();
@@ -647,6 +668,12 @@ function sendMessage(fromButton) {
             chats[currentChatId].filter(function(m) {
                 // 过滤掉content为空的assistant消息，避免API报400错误
                 return m.role === 'user' || (m.role === 'assistant' && m.content && m.content.trim());
+            }).map(function(m) {
+                // 将用户消息中的images字段传递给后端
+                if (m.role === 'user' && m.images && m.images.length > 0) {
+                    return { role: m.role, content: m.content, images: m.images };
+                }
+                return { role: m.role, content: m.content };
             })
         ),
         stream: true,
@@ -1082,7 +1109,16 @@ function createMessageEl(msg) {
     bubble.setAttribute('data-raw', msg.content || '');
 
     if (msg.role === 'user') {
-        bubble.innerHTML = escapeHtml(msg.content).replace(/\n/g, '<br>');
+        var userHtml = escapeHtml(msg.content).replace(/\n/g, '<br>');
+        // 用户消息中显示已发送的图片
+        if (msg.images && msg.images.length > 0) {
+            var imgsHtml = '';
+            msg.images.forEach(function(base64) {
+                imgsHtml += '<img class="user-msg-img" src="' + base64 + '" alt="发送的图片" onclick="openImageLightbox(this.src)" />';
+            });
+            userHtml = imgsHtml + userHtml;
+        }
+        bubble.innerHTML = userHtml;
     } else {
         bubble.innerHTML = renderMsgContent(msg);
     }
@@ -1534,6 +1570,49 @@ function processSpecialContent(container) {
             } catch(e) {}
         });
     }
+
+    // AI生成的图片增强：添加预览/放大/下载功能
+    container.querySelectorAll('.msg-bubble img:not(.user-msg-img):not([data-img-enhanced])').forEach(function(img) {
+        img.setAttribute('data-img-enhanced', 'true');
+        img.style.cursor = 'pointer';
+        img.onclick = function() { openImageLightbox(this.src); };
+        // 添加图片工具栏
+        var wrapper = document.createElement('div');
+        wrapper.className = 'ai-image-wrapper';
+        img.parentNode.insertBefore(wrapper, img);
+        wrapper.appendChild(img);
+        var toolbar = document.createElement('div');
+        toolbar.className = 'ai-image-toolbar';
+        toolbar.innerHTML =
+            '<button class="ai-img-btn" onclick="event.stopPropagation();openImageLightbox(this.closest(\'.ai-image-wrapper\').querySelector(\'img\').src)" title="放大预览">' +
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>' +
+            '</button>' +
+            '<button class="ai-img-btn" onclick="event.stopPropagation();downloadImage(this.closest(\'.ai-image-wrapper\').querySelector(\'img\').src)" title="下载">' +
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>' +
+            '</button>';
+        wrapper.appendChild(toolbar);
+    });
+
+    // AI生成的视频增强：添加下载按钮
+    container.querySelectorAll('.msg-bubble video:not([data-video-enhanced])').forEach(function(video) {
+        video.setAttribute('data-video-enhanced', 'true');
+        video.setAttribute('controls', 'true');
+        video.setAttribute('controlslist', 'nodownload');
+        video.setAttribute('preload', 'metadata');
+        // 添加视频工具栏
+        var wrapper = document.createElement('div');
+        wrapper.className = 'ai-video-wrapper';
+        video.parentNode.insertBefore(wrapper, video);
+        wrapper.appendChild(video);
+        var toolbar = document.createElement('div');
+        toolbar.className = 'ai-video-toolbar';
+        toolbar.innerHTML =
+            '<button class="ai-vid-btn" onclick="event.stopPropagation();downloadVideo(this.closest(\'.ai-video-wrapper\').querySelector(\'video\').src)" title="下载视频">' +
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>' +
+            ' 下载' +
+            '</button>';
+        wrapper.appendChild(toolbar);
+    });
 }
 
 function copyCode(btn) {
@@ -1642,6 +1721,88 @@ function autoResize() {
     ta.style.height = Math.min(ta.scrollHeight, 150) + 'px';
 }
 
+// ===== 图片粘贴处理（多模态支持） =====
+function handlePasteImage(e) {
+    var items = (e.clipboardData || e.originalEvent.clipboardData).items;
+    if (!items) return;
+    var imageItems = [];
+    for (var i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+            imageItems.push(items[i]);
+        }
+    }
+    if (imageItems.length === 0) return;
+    e.preventDefault();
+
+    var supportsMultimodal = window._currentModelSupportsMultimodal;
+    imageItems.forEach(function(item) {
+        var file = item.getAsFile();
+        if (!file) return;
+        if (file.size > MAX_IMAGE_SIZE) {
+            showToast('图片超过5MB限制');
+            return;
+        }
+        var reader = new FileReader();
+        reader.onload = function(event) {
+            var base64 = event.target.result;
+            if (!supportsMultimodal) {
+                // 不支持多模态：显示警告
+                showPasteWarning('当前模型不支持图像理解，请切换支持多模态的模型或删除图片');
+            }
+            pendingImages.push(base64);
+            renderImagePreview();
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
+function showPasteWarning(msg) {
+    var warning = document.getElementById('pasteWarning');
+    if (!warning) return;
+    warning.textContent = msg;
+    warning.style.display = 'block';
+}
+
+function hidePasteWarning() {
+    var warning = document.getElementById('pasteWarning');
+    if (warning) warning.style.display = 'none';
+}
+
+function renderImagePreview() {
+    var area = document.getElementById('imagePreviewArea');
+    if (!area) return;
+    if (pendingImages.length === 0) {
+        area.style.display = 'none';
+        area.innerHTML = '';
+        // 如果没有图片了且警告显示中，隐藏警告
+        hidePasteWarning();
+        return;
+    }
+    area.style.display = 'flex';
+    area.innerHTML = '';
+    pendingImages.forEach(function(base64, idx) {
+        var item = document.createElement('div');
+        item.className = 'image-preview-item';
+        item.innerHTML = '<img src="' + base64 + '" alt="粘贴图片">' +
+            '<button class="image-preview-remove" data-idx="' + idx + '" title="删除">' +
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>' +
+            '</button>';
+        item.querySelector('.image-preview-remove').onclick = function() {
+            pendingImages.splice(idx, 1);
+            // 删除图片后，如果警告显示中，隐藏警告
+            if (pendingImages.length === 0) hidePasteWarning();
+            renderImagePreview();
+        };
+        area.appendChild(item);
+    });
+}
+
+function clearPendingImages() {
+    pendingImages = [];
+    renderImagePreview();
+    hidePasteWarning();
+}
+
 function escapeHtml(str) {
     var div = document.createElement('div');
     div.textContent = str;
@@ -1650,4 +1811,115 @@ function escapeHtml(str) {
 
 function nowStr() {
     return new Date().toLocaleString('zh-CN');
+}
+
+// ===== 图片灯箱（预览/放大/缩小/下载） =====
+function openImageLightbox(src) {
+    var overlay = document.createElement('div');
+    overlay.className = 'image-lightbox-overlay';
+
+    var scale = 1;
+    var translateX = 0;
+    var translateY = 0;
+
+    // 工具栏
+    var toolbar = document.createElement('div');
+    toolbar.className = 'image-lightbox-toolbar';
+    toolbar.innerHTML =
+        '<button class="lightbox-btn" id="lbZoomIn" title="放大">' +
+        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>' +
+        '</button>' +
+        '<button class="lightbox-btn" id="lbZoomOut" title="缩小">' +
+        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>' +
+        '</button>' +
+        '<button class="lightbox-btn" id="lbZoomReset" title="重置">1:1</button>' +
+        '<span class="lightbox-sep"></span>' +
+        '<button class="lightbox-btn" id="lbDownload" title="下载">' +
+        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>' +
+        '</button>';
+
+    // 关闭按钮
+    var closeBtn = document.createElement('button');
+    closeBtn.className = 'image-lightbox-close';
+    closeBtn.innerHTML = '✕';
+
+    // 图片容器
+    var imgContainer = document.createElement('div');
+    imgContainer.className = 'image-lightbox-content';
+    var img = document.createElement('img');
+    img.src = src;
+    img.className = 'image-lightbox-img';
+    imgContainer.appendChild(img);
+
+    function updateTransform() {
+        img.style.transform = 'translate(' + translateX + 'px,' + translateY + 'px) scale(' + scale + ')';
+    }
+
+    // 工具栏事件
+    toolbar.querySelector('#lbZoomIn').onclick = function() { scale = Math.min(scale + 0.25, 5); updateTransform(); };
+    toolbar.querySelector('#lbZoomOut').onclick = function() { scale = Math.max(scale - 0.25, 0.25); updateTransform(); };
+    toolbar.querySelector('#lbZoomReset').onclick = function() { scale = 1; translateX = 0; translateY = 0; updateTransform(); };
+    toolbar.querySelector('#lbDownload').onclick = function() { downloadImage(src); };
+
+    // 滚轮缩放
+    imgContainer.addEventListener('wheel', function(e) {
+        e.preventDefault();
+        var delta = e.deltaY > 0 ? -0.15 : 0.15;
+        scale = Math.max(0.25, Math.min(scale + delta, 5));
+        updateTransform();
+    }, { passive: false });
+
+    // 拖动
+    var isDragging = false, startX = 0, startY = 0, startTX = 0, startTY = 0;
+    imgContainer.addEventListener('mousedown', function(e) {
+        isDragging = true; startX = e.clientX; startY = e.clientY;
+        startTX = translateX; startTY = translateY;
+        imgContainer.style.cursor = 'grabbing';
+    });
+    document.addEventListener('mousemove', function(e) {
+        if (!isDragging) return;
+        translateX = startTX + (e.clientX - startX);
+        translateY = startTY + (e.clientY - startY);
+        updateTransform();
+    });
+    document.addEventListener('mouseup', function() {
+        isDragging = false;
+        if (imgContainer) imgContainer.style.cursor = 'grab';
+    });
+    imgContainer.style.cursor = 'grab';
+
+    // 关闭
+    function closeLightbox() {
+        overlay.remove();
+        document.removeEventListener('keydown', escHandler);
+    }
+    var escHandler = function(e) { if (e.key === 'Escape') closeLightbox(); };
+    document.addEventListener('keydown', escHandler);
+    closeBtn.onclick = closeLightbox;
+    overlay.onclick = function(e) { if (e.target === overlay) closeLightbox(); };
+
+    overlay.appendChild(closeBtn);
+    overlay.appendChild(toolbar);
+    overlay.appendChild(imgContainer);
+    document.body.appendChild(overlay);
+}
+
+function downloadImage(src) {
+    var a = document.createElement('a');
+    a.href = src;
+    a.download = 'image-' + Date.now() + '.png';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    showToast('已开始下载');
+}
+
+function downloadVideo(src) {
+    var a = document.createElement('a');
+    a.href = src;
+    a.download = 'video-' + Date.now() + '.mp4';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    showToast('已开始下载');
 }

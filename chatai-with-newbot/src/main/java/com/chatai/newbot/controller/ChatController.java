@@ -79,6 +79,9 @@ public class ChatController {
         User user = (User) request.getAttribute("currentUser");
         List<ModelConfig> models = storageService.getVisibleModels(user);
 
+        // 自动同步多模态/思考支持状态（从 providers.json 更新旧数据）
+        syncModelCapabilities(models);
+
         // 构建返回数据 - 不暴露apiKey
         List<Map<String, Object>> modelList = new ArrayList<>();
         for (ModelConfig m : models) {
@@ -90,6 +93,7 @@ public class ChatController {
             item.put("providerIcon", m.getProviderIcon());
             item.put("modelId", m.getModelId());
             item.put("supportsThinking", m.isSupportsThinking());
+            item.put("supportsMultimodal", m.isSupportsMultimodal());
             item.put("thinkingParamType", m.getThinkingParamType());
             modelList.add(item);
         }
@@ -97,5 +101,33 @@ public class ChatController {
         result.put("success", true);
         result.put("data", modelList);
         return result;
+    }
+
+    /**
+     * 从 providers.json 自动同步已存储模型的多模态/思考支持状态，修复旧数据
+     */
+    private void syncModelCapabilities(List<ModelConfig> models) {
+        List<Provider> providers = storageService.getAllProviders();
+        boolean updated = false;
+        for (ModelConfig model : models) {
+            Provider provider = providers.stream()
+                    .filter(p -> p.getId().equals(model.getProviderId()))
+                    .findFirst().orElse(null);
+            if (provider == null) continue;
+            ProviderModel pm = (provider.getModels() == null) ? null :
+                    provider.getModels().stream().filter(m -> m.getId().equals(model.getModelId())).findFirst().orElse(null);
+            if (pm == null) continue;
+            if (model.isSupportsMultimodal() != pm.isSupportsMultimodal()) {
+                model.setSupportsMultimodal(pm.isSupportsMultimodal());
+                storageService.updateModelConfig(model);
+                updated = true;
+            }
+            if (model.isSupportsThinking() != pm.isSupportsThinking()) {
+                model.setSupportsThinking(pm.isSupportsThinking());
+                storageService.updateModelConfig(model);
+                updated = true;
+            }
+        }
+        if (updated) log.info("已自动同步模型能力状态（多模态/思考支持）");
     }
 }

@@ -18,6 +18,7 @@ public class ModelConfig {
     private String protocol;        // 协议类型 "openai" / "custom"
     private String thinkingParamType; // 思考模式参数类型: deepseek/qwen/kimi/doubao/default
     private boolean supportsThinking; // 是否支持思考模式
+    private boolean supportsMultimodal; // 是否支持多模态（图片/视频理解）
     private boolean enabled;        // 是否启用
     private Boolean visibleToAll;    // 是否对所有用户可见，默认true
     private boolean builtIn;        // 是否为系统内置

@@ -41,6 +41,8 @@ public class AdminController {
             return result;
         }
         List<ModelConfig> models = storageService.getAllModelConfigs();
+        // 自动同步多模态/思考支持状态：从 providers.json 更新已存储模型的能力标记
+        syncModelCapabilities(models);
         // 脱敏 API Key，防止泄露（创建安全副本，不污染原始数据）
         List<ModelConfig> safeModels = models.stream()
                 .map(this::toSafeModel)
@@ -187,6 +189,7 @@ public class AdminController {
             config.setProtocol(provider.getProtocol());
             config.setThinkingParamType(provider.getThinkingParamType());
             config.setSupportsThinking(pm.isSupportsThinking());
+            config.setSupportsMultimodal(pm.isSupportsMultimodal());
             config.setEnabled(true);
             config.setVisibleToAll(visibleToAll);
             config.setBuiltIn(false);
@@ -512,6 +515,34 @@ public class AdminController {
     }
 
     /**
+     * 从 providers.json 自动同步已存储模型的多模态/思考支持状态，修复旧数据
+     */
+    private void syncModelCapabilities(List<ModelConfig> models) {
+        List<Provider> providers = storageService.getAllProviders();
+        boolean updated = false;
+        for (ModelConfig model : models) {
+            Provider provider = providers.stream()
+                    .filter(p -> p.getId().equals(model.getProviderId()))
+                    .findFirst().orElse(null);
+            if (provider == null) continue;
+            ProviderModel pm = (provider.getModels() == null) ? null :
+                    provider.getModels().stream().filter(m -> m.getId().equals(model.getModelId())).findFirst().orElse(null);
+            if (pm == null) continue;
+            if (model.isSupportsMultimodal() != pm.isSupportsMultimodal()) {
+                model.setSupportsMultimodal(pm.isSupportsMultimodal());
+                storageService.updateModelConfig(model);
+                updated = true;
+            }
+            if (model.isSupportsThinking() != pm.isSupportsThinking()) {
+                model.setSupportsThinking(pm.isSupportsThinking());
+                storageService.updateModelConfig(model);
+                updated = true;
+            }
+        }
+        if (updated) log.info("已自动同步模型能力状态（多模态/思考支持）");
+    }
+
+    /**
      * 创建 ModelConfig 的安全副本，apiKey 脱敏处理，不污染原始内存数据
      */
     private ModelConfig toSafeModel(ModelConfig m) {
@@ -527,6 +558,7 @@ public class AdminController {
         copy.setProtocol(m.getProtocol());
         copy.setThinkingParamType(m.getThinkingParamType());
         copy.setSupportsThinking(m.isSupportsThinking());
+        copy.setSupportsMultimodal(m.isSupportsMultimodal());
         copy.setEnabled(m.isEnabled());
         copy.setVisibleToAll(m.getVisibleToAll());
         copy.setBuiltIn(m.isBuiltIn());
