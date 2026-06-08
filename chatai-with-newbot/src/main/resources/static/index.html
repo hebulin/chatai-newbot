@@ -101,6 +101,10 @@
                 <span class="think-label">深度思考</span>
             </div>
         </div>
+        <!-- 图片预览区域（粘贴图片后显示缩略图） -->
+        <div class="image-preview-area" id="imagePreviewArea" style="display:none"></div>
+        <!-- 粘贴不支持多模态时的警告 -->
+        <div class="paste-warning" id="pasteWarning" style="display:none"></div>
         <div class="input-row">
             <textarea id="userInput" placeholder="输入消息，Enter发送，Shift+Enter换行..." rows="1"></textarea>
             <button class="layui-btn send-btn" id="sendButton" onclick="sendMessage(true)">

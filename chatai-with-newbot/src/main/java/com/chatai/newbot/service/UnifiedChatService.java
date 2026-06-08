@@ -54,17 +54,39 @@ public class UnifiedChatService {
         streamOptions.put("include_usage", true);
         requestBody.put("stream_options", streamOptions);
 
-        // 构建消息列表
-        List<Map<String, String>> messages = new ArrayList<>();
+        // 构建消息列表（支持多模态：当消息含图片时，content转为数组格式）
+        List<Object> messages = new ArrayList<>();
         if (request.getMessages() != null) {
             for (NewBotMessage msg : request.getMessages()) {
                 // 过滤掉content为空的assistant消息，避免API报400错误
                 if ("assistant".equals(msg.getRole()) && (msg.getContent() == null || msg.getContent().trim().isEmpty())) {
                     continue;
                 }
-                Map<String, String> m = new HashMap<>();
+                Map<String, Object> m = new HashMap<>();
                 m.put("role", msg.getRole());
-                m.put("content", msg.getContent());
+                // 多模态：当消息含图片时，content转为 OpenAI Vision 格式的数组
+                if (msg.getImages() != null && !msg.getImages().isEmpty() && config.isSupportsMultimodal()) {
+                    List<Map<String, Object>> contentParts = new ArrayList<>();
+                    // 添加图片部分
+                    for (String imageBase64 : msg.getImages()) {
+                        Map<String, Object> imagePart = new HashMap<>();
+                        imagePart.put("type", "image_url");
+                        Map<String, String> imageUrl = new HashMap<>();
+                        imageUrl.put("url", imageBase64);
+                        imagePart.put("image_url", imageUrl);
+                        contentParts.add(imagePart);
+                    }
+                    // 添加文本部分
+                    if (msg.getContent() != null && !msg.getContent().trim().isEmpty()) {
+                        Map<String, Object> textPart = new HashMap<>();
+                        textPart.put("type", "text");
+                        textPart.put("text", msg.getContent());
+                        contentParts.add(textPart);
+                    }
+                    m.put("content", contentParts);
+                } else {
+                    m.put("content", msg.getContent());
+                }
                 messages.add(m);
             }
         }

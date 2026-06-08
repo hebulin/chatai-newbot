@@ -150,7 +150,10 @@ function showQuickAdd(providerId) {
         var exists = allModels.some(function(m) { return m.providerId === providerId && m.modelId === pm.id; });
         if (!exists) {
             modelCheckboxes += '<div class="model-checkbox-item"><input type="checkbox" name="modelIds" value="' + esc(pm.id) + '" lay-skin="primary" checked>';
-            modelCheckboxes += '<label>' + esc(pm.name) + (pm.supportsThinking ? ' <span class="think-badge">思考</span>' : '') + '</label></div>';
+            modelCheckboxes += '<label>' + esc(pm.name);
+            if (pm.supportsThinking) modelCheckboxes += ' <span class="think-badge">思考</span>';
+            if (pm.supportsMultimodal) modelCheckboxes += ' <span class="think-badge" style="background:rgba(99,102,241,.15);color:#818cf8">多模态</span>';
+            modelCheckboxes += '</label></div>';
         }
     });
     if (!modelCheckboxes) { layer.msg('该厂商所有模型已接入', {icon: 0}); return; }
@@ -190,7 +193,7 @@ function renderModelTable(models) {
     var $ = window._$, tbody = $('#modelTableBody');
     tbody.empty();
     if (!models || models.length === 0) {
-        tbody.html('<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:40px;">暂无模型数据</td></tr>');
+        tbody.html('<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:40px;">暂无模型数据</td></tr>');
         return;
     }
     models.forEach(function(m) {
@@ -200,7 +203,8 @@ function renderModelTable(models) {
         var visBtn = m.visibleToAll
             ? '<span class="status-badge vis-all">所有人</span>'
             : '<span class="status-badge vis-admin">仅管理员</span>';
-        var thinkBadge = m.supportsThinking ? '<span class="think-badge">思考</span>' : '-';
+        var thinkBadge = m.supportsThinking ? '<span class="think-badge">支持</span>' : '<span style="color:#64748b">不支持</span>';
+        var mmBadge = m.supportsMultimodal ? '<span class="think-badge" style="background:rgba(99,102,241,.15);color:#818cf8">支持</span>' : '<span style="color:#64748b">不支持</span>';
         var actions = '<div class="action-btns">';
         actions += '<button class="action-btn edit-btn" onclick="editModel(\'' + esc(m.id) + '\')"><i class="layui-icon layui-icon-edit"></i></button>';
         actions += '<button class="action-btn del-btn" onclick="deleteModel(\'' + esc(m.id) + '\')"><i class="layui-icon layui-icon-delete"></i></button>';
@@ -210,6 +214,7 @@ function renderModelTable(models) {
             + '<td>' + esc(m.providerName || m.providerId) + '</td>'
             + '<td><span class="model-id-text">' + esc(m.modelId) + '</span></td>'
             + '<td>' + thinkBadge + '</td>'
+            + '<td>' + mmBadge + '</td>'
             + '<td>' + statusBtn + '</td>'
             + '<td>' + visBtn + '</td>'
             + '<td>' + actions + '</td>'
@@ -237,11 +242,20 @@ function isPresetThinkingModel(providerId, modelId) {
     return pm && pm.supportsThinking;
 }
 
+function isPresetMultimodalModel(providerId, modelId) {
+    var provider = providers.find(function(p) { return p.id === providerId; });
+    if (!provider) return false;
+    var pm = (provider.models || []).find(function(m) { return m.id === modelId; });
+    return pm && pm.supportsMultimodal;
+}
+
 function editModel(id) {
     var layer = window._layer, form = window._form;
     var model = allModels.find(function(m) { return m.id === id; });
     if (!model) return;
-    var isPresetThinking = isPresetThinkingModel(model.providerId, model.modelId);
+    // 从模型自身数据读取能力（而非从 providers.json 查找，确保一致性）
+    var isPresetThinking = model.supportsThinking || false;
+    var isPresetMm = model.supportsMultimodal || false;
     var html = '<div class="layui-form" lay-filter="editModelForm" style="padding:20px 20px 0;">';
     html += '<div class="form-group"><label class="form-label">厂商</label><div class="form-value">' + getProviderSmallIconHtml(model.providerId) + esc(model.providerName || model.providerId) + '</div></div>';
     html += '<div class="form-group"><label class="form-label">显示名</label><div class="form-value"><input type="text" id="emDisplayName" class="layui-input" value="' + esc(model.displayName||'') + '"/></div></div>';
@@ -250,11 +264,13 @@ function editModel(id) {
     html += '<div class="form-group"><label class="form-label">API Key</label><div class="form-value"><input type="text" id="emApiKey" class="layui-input" value="' + esc(model.apiKey||'') + '" placeholder="不修改则留空"/></div></div>';
     html += '<div class="form-group"><label class="form-label">状态</label><div class="form-value"><input type="checkbox" id="emEnabled" lay-skin="switch" lay-text="启用|禁用"' + (model.enabled?' checked':'') + '></div></div>';
     html += '<div class="form-group"><label class="form-label">可见性</label><div class="form-value"><input type="checkbox" id="emVisibleToAll" lay-skin="switch" lay-text="所有人|仅管理员"' + (model.visibleToAll?' checked':'') + '></div></div>';
-    if (isPresetThinking) {
-        html += '<div class="form-group"><label class="form-label">思考模式</label><div class="form-value"><span class="think-badge" style="font-size:13px;padding:4px 12px;">该模型支持深度思考</span><input type="hidden" id="emSupportsThinking" value="1"></div></div>';
-    } else {
-        html += '<div class="form-group"><label class="form-label">思考模式</label><div class="form-value"><input type="checkbox" id="emSupportsThinking" lay-skin="switch" lay-text="支持|不支持"' + (model.supportsThinking?' checked':'') + '></div></div>';
-    }
+    // 能力提示（只读展示，不可设置）
+    var capHtml = '<div class="form-group"><label class="form-label">能力</label><div class="form-value" style="display:flex;gap:8px;flex-wrap:wrap;">';
+    capHtml += '<span style="font-size:13px;padding:4px 12px;border-radius:6px;' + (isPresetThinking ? 'background:rgba(16,185,129,.15);color:#10b981' : 'background:rgba(100,116,139,.1);color:#64748b') + '">思考模式：' + (isPresetThinking ? '支持' : '不支持') + '</span>';
+    capHtml += '<span style="font-size:13px;padding:4px 12px;border-radius:6px;' + (isPresetMm ? 'background:rgba(99,102,241,.15);color:#818cf8' : 'background:rgba(100,116,139,.1);color:#64748b') + '">多模态：' + (isPresetMm ? '支持' : '不支持') + '</span>';
+    capHtml += '<input type="hidden" id="emSupportsThinking" value="' + (isPresetThinking ? '1' : '0') + '">';
+    capHtml += '</div></div>';
+    html += capHtml;
     html += '<div style="text-align:right;padding:10px 0;">';
     html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
     html += '<button type="button" class="layui-btn" onclick="saveModel(\'' + esc(id) + '\')">保存</button>';
@@ -280,7 +296,9 @@ function saveModel(id) {
         apiUrl: $('#emApiUrl').val().trim(),
         enabled: $('#emEnabled').is(':checked'),
         visibleToAll: $('#emVisibleToAll').is(':checked'),
-        supportsThinking: supportsThinking
+        supportsThinking: supportsThinking,
+        // 同步多模态支持状态：优先从 providers.json 获取，确保数据一致
+        supportsMultimodal: isPresetMultimodalModel(model.providerId, model.modelId) || model.supportsMultimodal || false
     });
     var ak = $('#emApiKey').val().trim();
     if (ak) payload.apiKey = ak;
@@ -374,7 +392,8 @@ function onAddModelProviderChange() {
         $('#amApiUrl').val('');
         // 重置思考模式为开关
         $('#amThinkingValue').html('<input type="checkbox" id="amSupportsThinking" lay-skin="switch" lay-text="支持|不支持">');
-        form.render(null, 'addModelForm');
+        // 只渲染checkbox，避免重新渲染select导致下拉框损坏
+        form.render('checkbox', 'addModelForm');
     } else {
         // 内置厂商：隐藏自定义厂商名称，显示模型选择
         $('#amCustomProviderFields').hide();
@@ -396,10 +415,12 @@ function updateAddModelSelect() {
     var selectHtml = '<select id="amModelSelect" lay-filter="amModelSelect">';
     pModels.forEach(function(pm) {
         var exists = allModels.some(function(m) { return m.providerId === providerId && m.modelId === pm.id; });
-        if (!exists) {
-            selectHtml += '<option value="' + esc(pm.id) + '">' + esc(pm.name) + (pm.supportsThinking ? ' (思考)' : '') + '</option>';
-            hasPreset = true;
-        }
+        var optLabel = esc(pm.name);
+        if (pm.supportsThinking) optLabel += ' (思考)';
+        if (pm.supportsMultimodal) optLabel += ' (多模态)';
+        if (exists) optLabel += ' ✓已接入';
+        selectHtml += '<option value="' + esc(pm.id) + '">' + optLabel + '</option>';
+        hasPreset = true;
     });
     selectHtml += '<option value="__custom__">自定义模型...</option>';
     selectHtml += '</select>';
@@ -446,17 +467,18 @@ function showAddModelPresetFields(provider, modelId) {
         $('#amPresetModelId').val(pm.id);
         $('#amPresetApiUrl').val(provider ? provider.defaultApiUrl : '');
     }
-    // 思考模式：预设模型只标注，不可设置开关
-    var thinkingInfo = $('#amPresetThinkingInfo');
-    if (pm && pm.supportsThinking) {
-        thinkingInfo.html('<div class="form-group"><label class="form-label">思考模式</label><div class="form-value"><span class="think-badge" style="font-size:13px;padding:4px 12px;">该模型支持深度思考</span></div></div>');
-    } else {
-        thinkingInfo.html('');
-    }
-    form.render(null, 'addModelForm');
+    // 能力提示：预设模型只标注，不可设置
+    var capInfo = $('#amPresetThinkingInfo');
+    var capHtml = '<div class="form-group"><label class="form-label">能力</label><div class="form-value" style="display:flex;gap:8px;flex-wrap:wrap;">';
+    capHtml += '<span style="font-size:13px;padding:4px 12px;border-radius:6px;' + (pm && pm.supportsThinking ? 'background:rgba(16,185,129,.15);color:#10b981' : 'background:rgba(100,116,139,.1);color:#64748b') + '">思考模式：' + (pm && pm.supportsThinking ? '支持' : '不支持') + '</span>';
+    capHtml += '<span style="font-size:13px;padding:4px 12px;border-radius:6px;' + (pm && pm.supportsMultimodal ? 'background:rgba(99,102,241,.15);color:#818cf8' : 'background:rgba(100,116,139,.1);color:#64748b') + '">多模态：' + (pm && pm.supportsMultimodal ? '支持' : '不支持') + '</span>';
+    capHtml += '</div></div>';
+    capInfo.html(capHtml);
+    // 只渲染checkbox，避免重新渲染select导致下拉框损坏
+    form.render('checkbox', 'addModelForm');
 }
 
-// 显示自定义模型字段（内置厂商+自定义模型）
+// 显示自定义模型字段（内置厂商+自定义模型 或 自定义厂商）
 function showAddModelCustomModelFields(provider) {
     var $ = window._$, form = window._form;
     $('#amPresetFields').hide();
@@ -467,7 +489,8 @@ function showAddModelCustomModelFields(provider) {
     }
     // 重置思考模式为开关
     $('#amThinkingValue').html('<input type="checkbox" id="amSupportsThinking" lay-skin="switch" lay-text="支持|不支持">');
-    form.render(null, 'addModelForm');
+    // 只渲染checkbox，避免重新渲染select导致下拉框损坏
+    form.render('checkbox', 'addModelForm');
 }
 
 function submitAddModel() {
@@ -542,6 +565,7 @@ function submitAddModel() {
                 apiKey: apiKey,
                 visibleToAll: $('#amPresetVisibleToAll').is(':checked'),
                 supportsThinking: pm.supportsThinking || false,
+                supportsMultimodal: pm.supportsMultimodal || false,
                 enabled: true
             };
             if (provider) {
