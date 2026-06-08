@@ -67,13 +67,16 @@ layui.use(['layer', 'form', 'element', 'jquery'], function() {
     window._$ = $;
     window._form = form;
 
-    // 监听深度思考开关
-    form.on('switch(deepThink)', function(data) {
-        // data.elem 是原生checkbox，data.value 是值，data.othis 是Layui渲染的switch DOM
-        // 使用 data.othis 是否有 layui-form-onswitch 类来判断实际开关状态
-        isDeepThinking = data.othis.hasClass('layui-form-onswitch');
-        console.log('深度思考开关切换:', isDeepThinking);
-    });
+    // 初始化思考图标按钮
+    var thinkIconBtn = document.getElementById('thinkIconBtn');
+    if (thinkIconBtn) {
+        thinkIconBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            isDeepThinking = !isDeepThinking;
+            thinkIconBtn.classList.toggle('active', isDeepThinking);
+            console.log('深度思考图标切换:', isDeepThinking);
+        });
+    }
 
     // ===== 初始化 =====
     if (!TOKEN) { window.location.href = '/login.html'; return; }
@@ -212,12 +215,10 @@ function loadModels() {
         renderModelSelector(models);
         // 初始化深度思考状态（在renderModelSelector之后，确保DOM已就绪）
         if (models.length > 0) {
-            isDeepThinking = models[0].supportsThinking;
-            var deepThinkCheck = document.getElementById('deepThinkCheck');
-            if (deepThinkCheck) deepThinkCheck.checked = models[0].supportsThinking;
-            var thinkToggle = document.getElementById('thinkToggle');
-            if (thinkToggle) thinkToggle.style.display = models[0].supportsThinking ? 'flex' : 'none';
-            if (window._form) window._form.render('checkbox');
+            isDeepThinking = false; // 默认关闭深度思考
+            var thinkIconBtn = document.getElementById('thinkIconBtn');
+            if (thinkIconBtn) thinkIconBtn.classList.toggle('active', false);
+            updateThinkToggle(models[0], false);
         }
     }).catch(function(e) { console.error('加载模型失败:', e); });
 }
@@ -373,26 +374,19 @@ function closeModelDropdown() {
 }
 
 // 更新深度思考开关
-// isModelChanged: 是否是切换了模型（true=模型变了，默认开启思考；false=同模型，保持当前状态）
 function updateThinkToggle(model, isModelChanged) {
-    var thinkToggle = document.getElementById('thinkToggle');
-    var deepThinkCheck = document.getElementById('deepThinkCheck');
+    var thinkIconBtn = document.getElementById('thinkIconBtn');
+    if (!thinkIconBtn) return;
     if (model.supportsThinking) {
-        thinkToggle.style.display = 'flex';
+        thinkIconBtn.style.display = 'flex';
         if (isModelChanged) {
-            // 切换到新模型时，默认开启深度思考
-            isDeepThinking = true;
-            deepThinkCheck.checked = true;
+            // 切换到新模型时，默认关闭深度思考
+            isDeepThinking = false;
         }
-        // 如果不是模型切换（如初始化），保持当前 isDeepThinking 状态
+        thinkIconBtn.classList.toggle('active', isDeepThinking);
     } else {
-        thinkToggle.style.display = 'none';
+        thinkIconBtn.style.display = 'none';
         isDeepThinking = false;
-        deepThinkCheck.checked = false;
-    }
-    // 重新渲染 Layui switch
-    if (window._form) {
-        window._form.render('checkbox');
     }
 }
 
@@ -646,22 +640,9 @@ function sendMessage(fromButton) {
     updateChatList();
     showLoading();
 
-    // 准备请求 - 直接从DOM读取深度思考开关的实际状态，而非依赖全局变量
-    var thinkToggle = document.getElementById('thinkToggle');
-    var actualDeepThinking = false;
-    if (thinkToggle && thinkToggle.style.display !== 'none') {
-        // 方式1：从Layui渲染的switch DOM读取状态
-        var layuiSwitch = thinkToggle.querySelector('.layui-form-switch');
-        if (layuiSwitch && layuiSwitch.classList.contains('layui-form-onswitch')) {
-            actualDeepThinking = true;
-        }
-        // 方式2：从原生checkbox读取（Layui切换时会同步更新checked属性）
-        var deepThinkCheck = document.getElementById('deepThinkCheck');
-        if (deepThinkCheck) {
-            actualDeepThinking = deepThinkCheck.checked;
-        }
-    }
-    console.log('发送消息，深度思考:', actualDeepThinking, '全局变量:', isDeepThinking);
+    // 准备请求 - 直接使用全局变量 isDeepThinking
+    var actualDeepThinking = isDeepThinking;
+    console.log('发送消息，深度思考:', actualDeepThinking);
     var requestBody = {
         modelConfigId: currentModelId,
         messages: [{ role: 'system', content: 'You are a helpful assistant.' }].concat(
@@ -854,12 +835,11 @@ function finishStream(interrupted) {
                 msg.cachedTokens = streamUsage.prompt_tokens_details.cached_tokens;
             }
         }
-        chats[currentChatId].push(msg);
         // 计算本次增量输入token（仅本次对话新增的输入token，而非累计）
         if (streamUsage && streamUsage.prompt_tokens) {
             var turnInputTokens = streamUsage.prompt_tokens;
             // 查找上一个assistant消息的promptTokens（累计值），用于计算增量
-            for (var j = chats[currentChatId].length - 2; j >= 0; j--) {
+            for (var j = chats[currentChatId].length - 1; j >= 0; j--) {
                 if (chats[currentChatId][j].role === 'assistant' && chats[currentChatId][j].promptTokens) {
                     turnInputTokens = streamUsage.prompt_tokens - chats[currentChatId][j].promptTokens;
                     break;
@@ -876,6 +856,7 @@ function finishStream(interrupted) {
             // 在assistant消息上保存增量输入token，用于显示"总Token"
             msg.turnInputTokens = turnInputTokens;
         }
+        chats[currentChatId].push(msg);
         saveChats();
 
         // 就地完成流式消息元素，避免全量DOM重建导致闪烁
