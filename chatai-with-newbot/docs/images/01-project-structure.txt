@@ -1,0 +1,30 @@
+PS> git branch --show-current; git remote -v; dir .github\workflows; dir scripts; dir docs
+
+dev
+origin	https://github.com/hebulin/chatai-newbot.git (fetch)
+origin	https://github.com/hebulin/chatai-newbot.git (push)
+
+
+    目录: C:\Users\hebul\IdeaProjects\chatai-newbot\chatai-with-newbot\.github\workflows
+
+
+Mode                 LastWriteTime         Length Name
+----                 -------------         ------ ----
+-a----         2026/6/10     18:16           1443 deploy.yml
+
+
+    目录: C:\Users\hebul\IdeaProjects\chatai-newbot\chatai-with-newbot\scripts
+
+
+Mode                 LastWriteTime         Length Name
+----                 -------------         ------ ----
+-a----         2026/6/10     18:16           1444 deploy.sh
+
+
+    目录: C:\Users\hebul\IdeaProjects\chatai-newbot\chatai-with-newbot\docs
+
+
+Mode                 LastWriteTime         Length Name
+----                 -------------         ------ ----
+d-----         2026/6/10     18:19                images
+-a----         2026/6/10     18:19          12547 cicd-github-actions-deploy.md
