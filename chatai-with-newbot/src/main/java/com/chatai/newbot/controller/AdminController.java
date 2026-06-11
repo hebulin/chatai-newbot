@@ -104,7 +104,6 @@ public class AdminController {
     }
 
     // ========== 厂商信息 =========
-
     @GetMapping("/providers")
     public Map<String, Object> listProviders(HttpServletRequest request, HttpServletResponse response) {
         Map<String, Object> result = new HashMap<>();
