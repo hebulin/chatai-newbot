@@ -103,7 +103,7 @@ public class AdminController {
         return result;
     }
 
-    // ========== 厂商信息 ==========
+    // ========== 厂商信息 =========
 
     @GetMapping("/providers")
     public Map<String, Object> listProviders(HttpServletRequest request, HttpServletResponse response) {
