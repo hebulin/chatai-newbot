@@ -27,25 +27,36 @@ jobs:
           cache: maven
 
       - name: Build Spring Boot JAR
+        working-directory: ./chatai-with-newbot
         run: mvn -B clean package -DskipTests
+
+      - name: Get JAR filename
+        id: jar
+        working-directory: ./chatai-with-newbot
+        run: |
+          JAR_FILE=$(ls target/*.jar | head -1)
+          echo "file=chatai-with-newbot/$JAR_FILE" >> $GITHUB_OUTPUT
+          echo "name=$(basename $JAR_FILE)" >> $GITHUB_OUTPUT
 
       - name: Prepare SSH key
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
+          ssh-keyscan -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
 
       - name: Upload JAR to server
         run: |
           RELEASE_NAME="chatai-with-newbot-${{ github.sha }}.jar"
           scp -i ~/.ssh/deploy_key \
-            target/chatai-with-newbot-*.jar \
+            -o StrictHostKeyChecking=accept-new \
+            "${{ steps.jar.outputs.file }}" \
             "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/opt/chatai-with-newbot/releases/${RELEASE_NAME}"
 
       - name: Deploy on server
         run: |
           RELEASE_NAME="chatai-with-newbot-${{ github.sha }}.jar"
           ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=accept-new \
             "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}" \
             "bash /opt/chatai-with-newbot/deploy.sh ${RELEASE_NAME}"
