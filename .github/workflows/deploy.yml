@@ -38,25 +38,44 @@ jobs:
           echo "file=chatai-with-newbot/$JAR_FILE" >> $GITHUB_OUTPUT
           echo "name=$(basename $JAR_FILE)" >> $GITHUB_OUTPUT
 
-      - name: Prepare SSH key
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+      - name: Upload JAR via SCP
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: 22
+          source: "${{ steps.jar.outputs.file }}"
+          target: "/opt/chatai-with-newbot/releases/"
+          strip_components: 2
+          rm: false
+          command_timeout: 60s
 
-      - name: Upload JAR to server
-        run: |
-          RELEASE_NAME="chatai-with-newbot-${{ github.sha }}.jar"
-          scp -i ~/.ssh/deploy_key \
-            -o StrictHostKeyChecking=accept-new \
-            "${{ steps.jar.outputs.file }}" \
-            "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/opt/chatai-with-newbot/releases/${RELEASE_NAME}"
+      - name: Rename uploaded JAR on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: 22
+          script: |
+            RELEASE_NAME="chatai-with-newbot-${{ github.sha }}.jar"
+            UPLOADED_FILE=$(ls /opt/chatai-with-newbot/releases/chatai-with-newbot-*.jar 2>/dev/null | head -1)
+            if [ -n "$UPLOADED_FILE" ]; then
+              mv "$UPLOADED_FILE" "/opt/chatai-with-newbot/releases/${RELEASE_NAME}"
+              echo "Renamed to ${RELEASE_NAME}"
+            else
+              echo "No JAR found to rename"
+              exit 1
+            fi
 
       - name: Deploy on server
-        run: |
-          RELEASE_NAME="chatai-with-newbot-${{ github.sha }}.jar"
-          ssh -i ~/.ssh/deploy_key \
-            -o StrictHostKeyChecking=accept-new \
-            "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}" \
-            "bash /opt/chatai-with-newbot/deploy.sh ${RELEASE_NAME}"
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: 22
+          script: |
+            RELEASE_NAME="chatai-with-newbot-${{ github.sha }}.jar"
+            bash /opt/chatai-with-newbot/deploy.sh ${RELEASE_NAME}
