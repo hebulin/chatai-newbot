@@ -103,7 +103,11 @@ layui.use(['layer', 'form', 'element', 'jquery'], function() {
     // 显示用户信息
     document.getElementById('usernameDisplay').textContent = safeStorageGet('username') || '用户';
     if (safeStorageGet('role') === 'admin') {
-        document.getElementById('adminBtn').style.display = 'flex';
+        var adminMenuItem = document.getElementById('adminMenuItem');
+        if (adminMenuItem) adminMenuItem.style.display = 'flex';
+        // 兼容旧 DOM（若仍存在）
+        var adminBtn = document.getElementById('adminBtn');
+        if (adminBtn) adminBtn.style.display = 'flex';
     }
 
     // 加载会话（按用户隔离）
@@ -1948,6 +1952,8 @@ function toggleUserMenu(e) {
     if (e) e.stopPropagation();
     var menu = document.getElementById('userMenu');
     if (!menu) return;
+    // 如果点击源自菜单内部（菜单项），不切换显隐
+    if (e && e.target && menu.contains(e.target)) return;
     if (menu.style.display === 'block') {
         menu.style.display = 'none';
     } else {
@@ -1961,9 +1967,9 @@ function toggleUserMenu(e) {
 
 function closeUserMenuOnOutside(e) {
     var menu = document.getElementById('userMenu');
-    var wrap = document.getElementById('userAvatarWrap');
+    var userInfo = document.getElementById('userInfo');
     if (!menu) return;
-    if (wrap && wrap.contains(e.target)) return;
+    if (userInfo && userInfo.contains(e.target)) return;
     if (menu.contains(e.target)) return;
     menu.style.display = 'none';
     document.removeEventListener('click', closeUserMenuOnOutside);
