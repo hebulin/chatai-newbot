@@ -1086,6 +1086,8 @@ function updateAvatarIcons() {
     if (sidebarImg) sidebarImg.src = getAvatarIconSrc('user');
     var thinkImg = document.getElementById('thinkIconImg');
     if (thinkImg) thinkImg.src = getAvatarIconSrc('icon_深度思考');
+    var brandIcon = document.getElementById('brandIcon');
+    if (brandIcon) brandIcon.src = getAvatarIconSrc('AIBot');
 }
 
 function getAvatarIconSrc(name) {
@@ -1937,4 +1939,233 @@ function downloadVideo(src) {
     if (sidebarImg) sidebarImg.src = getAvatarIconSrc('user');
     var thinkImg = document.getElementById('thinkIconImg');
     if (thinkImg) thinkImg.src = getAvatarIconSrc('icon_深度思考');
+    var brandIcon = document.getElementById('brandIcon');
+    if (brandIcon) brandIcon.src = getAvatarIconSrc('AIBot');
 })();
+
+// ===== 用户头像菜单（设置/关于） =====
+function toggleUserMenu(e) {
+    if (e) e.stopPropagation();
+    var menu = document.getElementById('userMenu');
+    if (!menu) return;
+    if (menu.style.display === 'block') {
+        menu.style.display = 'none';
+    } else {
+        menu.style.display = 'block';
+        // 点击外部关闭
+        setTimeout(function() {
+            document.addEventListener('click', closeUserMenuOnOutside);
+        }, 0);
+    }
+}
+
+function closeUserMenuOnOutside(e) {
+    var menu = document.getElementById('userMenu');
+    var wrap = document.getElementById('userAvatarWrap');
+    if (!menu) return;
+    if (wrap && wrap.contains(e.target)) return;
+    if (menu.contains(e.target)) return;
+    menu.style.display = 'none';
+    document.removeEventListener('click', closeUserMenuOnOutside);
+}
+
+// ===== 关于弹窗 =====
+function openAboutModal() {
+    var menu = document.getElementById('userMenu');
+    if (menu) menu.style.display = 'none';
+    var ver = (typeof APP_VERSION !== 'undefined') ? APP_VERSION : '';
+    var logoSrc = getAvatarIconSrc('AIBot');
+    var html = '<div class="about-modal-content">' +
+        '<div class="about-logo"><img src="' + logoSrc + '" alt="AI Chat" /></div>' +
+        '<div class="about-title">AI Chat Platform</div>' +
+        '<div class="about-version">软件版本号：v' + escapeHtml(ver) + '</div>' +
+        '<div class="about-desc">一个简洁高效的多模型 AI 聊天平台</div>' +
+        '</div>';
+    if (window._layer) {
+        window._layer.open({
+            type: 1,
+            title: '关于',
+            area: ['380px', 'auto'],
+            shadeClose: true,
+            content: html
+        });
+    } else {
+        alert('AI Chat Platform\n版本：v' + ver);
+    }
+}
+
+// ===== 设置弹窗（带侧边栏） =====
+var _settingsLayerIndex = null;
+var _currentSettingsTab = 'changePassword';
+
+function openSettingsModal() {
+    var menu = document.getElementById('userMenu');
+    if (menu) menu.style.display = 'none';
+    if (!window._layer) { showToast('UI组件未加载完成'); return; }
+
+    // 防止浏览器密码自动填充时把用户名灌入会话搜索框
+    var searchInput = document.getElementById('chatSearchInput');
+    var savedSearchValue = searchInput ? searchInput.value : '';
+    // 在弹窗打开后短时间内多次还原搜索框值，抵消浏览器 autofill
+    var restoreTimers = [];
+    function scheduleRestore() {
+        [0, 30, 100, 300, 600, 1000].forEach(function(ms) {
+            restoreTimers.push(setTimeout(function() {
+                if (searchInput && searchInput.value !== savedSearchValue) {
+                    searchInput.value = savedSearchValue;
+                }
+            }, ms));
+        });
+    }
+    scheduleRestore();
+
+    var content = buildSettingsModalHtml();
+    _settingsLayerIndex = window._layer.open({
+        type: 1,
+        title: '设置',
+        area: ['720px', '480px'],
+        shadeClose: false,
+        maxmin: false,
+        content: content,
+        success: function(layero, index) {
+            // 移除layui-layer-content默认padding，让侧边栏贴边
+            try {
+                var contentEl = layero.find('.layui-layer-content')[0];
+                if (contentEl) {
+                    contentEl.style.padding = '0';
+                    contentEl.style.overflow = 'hidden';
+                }
+            } catch(e) {}
+            // 默认选中第一个菜单项
+            switchSettingsTab('changePassword');
+            // 再次保险还原搜索框值（在表单渲染后）
+            scheduleRestore();
+        },
+        end: function() {
+            _settingsLayerIndex = null;
+            // 清理定时器
+            restoreTimers.forEach(function(t) { clearTimeout(t); });
+            restoreTimers = [];
+        }
+    });
+}
+
+function buildSettingsModalHtml() {
+    return '' +
+        '<div class="settings-modal">' +
+        '  <div class="settings-sidebar">' +
+        '    <div class="settings-menu-item active" data-tab="changePassword" onclick="switchSettingsTab(\'changePassword\')">' +
+        '      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>' +
+        '      <span>修改密码</span>' +
+        '    </div>' +
+        '  </div>' +
+        '  <div class="settings-content" id="settingsContent">' +
+        '    ' + buildChangePasswordPanel() +
+        '  </div>' +
+        '</div>';
+}
+
+function buildChangePasswordPanel() {
+    return '' +
+        '<div class="settings-panel" id="panel-changePassword">' +
+        '  <h3 class="settings-panel-title">修改密码</h3>' +
+        '  <form autocomplete="off" onsubmit="return false;">' +
+        // 防浏览器自动填充：放置一个隐藏的 username 和 password 占位字段，吸收浏览器的 autofill
+        '  <input type="text" name="fakeusernameremembered" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0" tabindex="-1" autocomplete="username" />' +
+        '  <input type="password" name="fakepasswordremembered" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0" tabindex="-1" autocomplete="new-password" />' +
+        '  <div class="settings-form-group">' +
+        '    <label>当前密码</label>' +
+        '    <input type="password" id="cp_oldPwd" class="settings-input" placeholder="请输入当前密码" autocomplete="off" data-lpignore="true" data-form-type="other" />' +
+        '  </div>' +
+        '  <div class="settings-form-group">' +
+        '    <label>新密码</label>' +
+        '    <input type="password" id="cp_newPwd" class="settings-input" placeholder="请输入新密码（至少4位）" autocomplete="off" data-lpignore="true" data-form-type="other" />' +
+        '  </div>' +
+        '  <div class="settings-form-group">' +
+        '    <label>确认新密码</label>' +
+        '    <input type="password" id="cp_confirmPwd" class="settings-input" placeholder="请再次输入新密码" autocomplete="off" data-lpignore="true" data-form-type="other" />' +
+        '    <div class="settings-form-tip" id="cp_tip"></div>' +
+        '  </div>' +
+        '  <div class="settings-form-actions">' +
+        '    <button type="button" class="settings-btn settings-btn-primary" onclick="submitChangePassword()">提交</button>' +
+        '  </div>' +
+        '  <div class="settings-form-note">提交成功后将自动退出登录，请使用新密码重新登录。</div>' +
+        '  </form>' +
+        '</div>';
+}
+
+function switchSettingsTab(tab) {
+    _currentSettingsTab = tab;
+    // 更新菜单选中态
+    var items = document.querySelectorAll('.settings-menu-item');
+    items.forEach(function(it) {
+        if (it.getAttribute('data-tab') === tab) it.classList.add('active');
+        else it.classList.remove('active');
+    });
+    // 切换面板
+    var content = document.getElementById('settingsContent');
+    if (!content) return;
+    if (tab === 'changePassword') {
+        content.innerHTML = buildChangePasswordPanel();
+    }
+}
+
+function submitChangePassword() {
+    var oldPwd = (document.getElementById('cp_oldPwd') || {}).value || '';
+    var newPwd = (document.getElementById('cp_newPwd') || {}).value || '';
+    var confirmPwd = (document.getElementById('cp_confirmPwd') || {}).value || '';
+    var tipEl = document.getElementById('cp_tip');
+    if (tipEl) { tipEl.textContent = ''; tipEl.classList.remove('error'); }
+
+    if (!oldPwd || !newPwd || !confirmPwd) {
+        if (tipEl) { tipEl.textContent = '请完整填写所有密码字段'; tipEl.classList.add('error'); }
+        return;
+    }
+    if (newPwd.length < 4) {
+        if (tipEl) { tipEl.textContent = '新密码长度不能少于4位'; tipEl.classList.add('error'); }
+        return;
+    }
+    if (newPwd !== confirmPwd) {
+        if (tipEl) { tipEl.textContent = '两次输入的新密码不一致'; tipEl.classList.add('error'); }
+        return;
+    }
+    if (oldPwd === newPwd) {
+        if (tipEl) { tipEl.textContent = '新密码不能与当前密码相同'; tipEl.classList.add('error'); }
+        return;
+    }
+
+    fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ oldPassword: oldPwd, newPassword: newPwd, confirmPassword: confirmPwd })
+    }).then(function(r) {
+        if (r.status === 401) {
+            showToast('登录已过期，请重新登录');
+            setTimeout(function() { doLogout(); }, 1000);
+            return null;
+        }
+        return r.json();
+    }).then(function(data) {
+        if (!data) return;
+        if (data.success) {
+            showToast('密码修改成功，即将退出登录');
+            // 关闭设置弹窗
+            if (_settingsLayerIndex !== null && window._layer) {
+                window._layer.close(_settingsLayerIndex);
+                _settingsLayerIndex = null;
+            }
+            setTimeout(function() {
+                // 直接清理本地并跳转登录页（服务端token已失效）
+                safeStorageRemove('token');
+                safeStorageRemove('username');
+                safeStorageRemove('role');
+                window.location.href = '/login.html';
+            }, 1200);
+        } else {
+            if (tipEl) { tipEl.textContent = data.message || '修改失败'; tipEl.classList.add('error'); }
+        }
+    }).catch(function(err) {
+        if (tipEl) { tipEl.textContent = '请求失败：' + (err && err.message ? err.message : '网络异常'); tipEl.classList.add('error'); }
+    });
+}
+
