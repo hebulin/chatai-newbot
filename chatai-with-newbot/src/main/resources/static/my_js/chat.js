@@ -1084,6 +1084,8 @@ function updateAvatarIcons() {
     });
     var sidebarImg = document.getElementById('sidebarUserAvatar');
     if (sidebarImg) sidebarImg.src = getAvatarIconSrc('user');
+    var thinkImg = document.getElementById('thinkIconImg');
+    if (thinkImg) thinkImg.src = getAvatarIconSrc('icon_深度思考');
 }
 
 function getAvatarIconSrc(name) {
@@ -1933,4 +1935,6 @@ function downloadVideo(src) {
 (function() {
     var sidebarImg = document.getElementById('sidebarUserAvatar');
     if (sidebarImg) sidebarImg.src = getAvatarIconSrc('user');
+    var thinkImg = document.getElementById('thinkIconImg');
+    if (thinkImg) thinkImg.src = getAvatarIconSrc('icon_深度思考');
 })();
