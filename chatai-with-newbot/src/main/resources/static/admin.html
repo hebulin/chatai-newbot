@@ -57,6 +57,59 @@
                     </button>
                 </div>
                 <div class="card">
+                    <div class="stats-search-bar">
+                        <div class="search-field">
+                            <label class="search-label">名称</label>
+                            <input type="text" id="mfName" class="stats-search-input" placeholder="模糊查询，忽略大小写" oninput="applyModelFilter()" autocomplete="off" />
+                        </div>
+                        <div class="search-field">
+                            <label class="search-label">厂商</label>
+                            <select id="mfProvider" class="stats-search-select" onchange="applyModelFilter()">
+                                <option value="">全部厂商</option>
+                            </select>
+                        </div>
+                        <div class="search-field">
+                            <label class="search-label">模型</label>
+                            <select id="mfModelId" class="stats-search-select" onchange="applyModelFilter()">
+                                <option value="">全部模型</option>
+                            </select>
+                        </div>
+                        <div class="search-field">
+                            <label class="search-label">思考</label>
+                            <select id="mfThinking" class="stats-search-select" onchange="applyModelFilter()">
+                                <option value="">全部</option>
+                                <option value="1">支持</option>
+                                <option value="0">不支持</option>
+                            </select>
+                        </div>
+                        <div class="search-field">
+                            <label class="search-label">多模态</label>
+                            <select id="mfMm" class="stats-search-select" onchange="applyModelFilter()">
+                                <option value="">全部</option>
+                                <option value="1">支持</option>
+                                <option value="0">不支持</option>
+                            </select>
+                        </div>
+                        <div class="search-field">
+                            <label class="search-label">状态</label>
+                            <select id="mfEnabled" class="stats-search-select" onchange="applyModelFilter()">
+                                <option value="">全部</option>
+                                <option value="1">已启用</option>
+                                <option value="0">已禁用</option>
+                            </select>
+                        </div>
+                        <div class="search-field">
+                            <label class="search-label">可见性</label>
+                            <select id="mfVisible" class="stats-search-select" onchange="applyModelFilter()">
+                                <option value="">全部</option>
+                                <option value="1">所有人</option>
+                                <option value="0">仅管理员</option>
+                            </select>
+                        </div>
+                        <div class="search-actions">
+                            <button class="cancel-btn" onclick="resetModelFilter()">重置</button>
+                        </div>
+                    </div>
                     <table class="layui-table data-table" id="modelTable" lay-skin="nob">
                         <thead><tr><th>名称</th><th>厂商</th><th>模型</th><th>思考</th><th>多模态</th><th>状态</th><th>可见性</th><th>操作</th></tr></thead>
                         <tbody id="modelTableBody"></tbody>
@@ -70,6 +123,15 @@
                     <h2>用户管理</h2>
                 </div>
                 <div class="card">
+                    <div class="stats-search-bar">
+                        <div class="search-field">
+                            <label class="search-label">用户名</label>
+                            <input type="text" id="ufUsername" class="stats-search-input" placeholder="模糊查询，忽略大小写" oninput="applyUserFilter()" autocomplete="off" />
+                        </div>
+                        <div class="search-actions">
+                            <button class="cancel-btn" onclick="resetUserFilter()">重置</button>
+                        </div>
+                    </div>
                     <table class="layui-table data-table" id="userTable" lay-skin="nob">
                         <thead><tr><th>用户名</th><th>角色</th><th>注册时间</th><th>最近登录</th><th>登录IP</th><th>浏览器</th><th>操作</th></tr></thead>
                         <tbody id="userTableBody"></tbody>
