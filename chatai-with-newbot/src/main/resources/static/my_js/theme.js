@@ -16,6 +16,7 @@
     function applyTheme(theme) {
         document.documentElement.setAttribute('data-theme', theme);
         safeSet(THEME_KEY, theme);
+        if (typeof updateAvatarIcons === 'function') updateAvatarIcons();
         var btn = document.getElementById('themeToggleBtn');
         if (btn) {
             if (theme === LIGHT) {
