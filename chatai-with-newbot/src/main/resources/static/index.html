@@ -22,7 +22,7 @@
     <div class="sidebar-content">
         <div class="sidebar-header">
             <div class="brand">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M8 12h8M12 8v8"/></svg>
+                <img id="brandIcon" class="brand-icon" src="/icons/AIBot_ss.svg" alt="AI" />
                 <span>AI Chat</span>
             </div>
             <button class="icon-btn close-sidebar-btn" onclick="toggleSidebar()" title="关闭">
@@ -34,7 +34,7 @@
         </button>
         <div class="chat-search-box" id="chatSearchBox">
             <svg class="chat-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input type="text" id="chatSearchInput" class="chat-search-input" placeholder="搜索会话..." oninput="filterChatList(this.value)">
+            <input type="text" id="chatSearchInput" class="chat-search-input" placeholder="搜索会话..." oninput="filterChatList(this.value)" autocomplete="off" name="chat_search_q" data-lpignore="true" data-form-type="other" />
             <button class="chat-search-clear" id="chatSearchClear" onclick="clearChatSearch()" style="display:none">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
@@ -42,8 +42,21 @@
         <div class="chat-list" id="chatList"></div>
         <div class="sidebar-footer">
             <div class="user-info" id="userInfo">
-                <img id="sidebarUserAvatar" class="avatar-icon" src="/icons/user.svg" style="width:16px;height:16px;border-radius:50%" />
+                <div class="user-avatar-wrap" id="userAvatarWrap" onclick="toggleUserMenu(event)" title="点击展开菜单">
+                    <img id="sidebarUserAvatar" class="avatar-icon" src="/icons/user.svg" style="width:16px;height:16px;border-radius:50%" />
+                </div>
                 <span id="usernameDisplay">用户</span>
+                <!-- 用户头像点击菜单 -->
+                <div class="user-menu" id="userMenu" style="display:none">
+                    <div class="user-menu-item" onclick="openSettingsModal()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                        <span>设置</span>
+                    </div>
+                    <div class="user-menu-item" onclick="openAboutModal()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                        <span>关于</span>
+                    </div>
+                </div>
             </div>
             <div class="sidebar-actions">
                 <button class="icon-btn" onclick="exportChats()" title="导出会话">
@@ -116,6 +129,7 @@
 </div>
 
 <script src="my_js/theme.js"></script>
+<script src="my_js/version.js"></script>
 <script src="my_js/chat.js"></script>
 </body>
 </html>

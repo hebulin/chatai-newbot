@@ -197,6 +197,24 @@ public class FileStorageService {
         }
     }
 
+    /**
+     * 修改用户密码
+     * @param userId 用户ID
+     * @param oldPassword 旧密码（明文）
+     * @param newPassword 新密码（明文）
+     * @return 0=成功; 1=用户不存在; 2=旧密码错误
+     */
+    public int changePassword(String userId, String oldPassword, String newPassword) {
+        User user = getUserById(userId);
+        if (user == null) return 1;
+        if (!user.getPassword().equals(hashPassword(oldPassword))) return 2;
+        user.setPassword(hashPassword(newPassword));
+        saveUsers();
+        // 移除该用户的所有token，强制重新登录
+        activeTokens.entrySet().removeIf(e -> userId.equals(e.getValue()));
+        return 0;
+    }
+
     // ========== 模型配置相关 ==========
 
     public List<ModelConfig> getAllModelConfigs() {

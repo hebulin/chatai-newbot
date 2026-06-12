@@ -130,6 +130,59 @@ public class AuthController {
         return result;
     }
 
+    @PostMapping("/change-password")
+    public Map<String, Object> changePassword(@RequestBody Map<String, String> body, HttpServletRequest request) {
+        Map<String, Object> result = new HashMap<>();
+        User user = (User) request.getAttribute("currentUser");
+        if (user == null) {
+            result.put("success", false);
+            result.put("message", "未登录");
+            return result;
+        }
+
+        String oldPassword = body.get("oldPassword");
+        String newPassword = body.get("newPassword");
+        String confirmPassword = body.get("confirmPassword");
+
+        if (oldPassword == null || newPassword == null || confirmPassword == null
+                || oldPassword.isEmpty() || newPassword.isEmpty() || confirmPassword.isEmpty()) {
+            result.put("success", false);
+            result.put("message", "密码不能为空");
+            return result;
+        }
+
+        if (!newPassword.equals(confirmPassword)) {
+            result.put("success", false);
+            result.put("message", "两次输入的新密码不一致");
+            return result;
+        }
+
+        if (newPassword.length() < 4) {
+            result.put("success", false);
+            result.put("message", "新密码长度不能少于4个字符");
+            return result;
+        }
+
+        if (oldPassword.equals(newPassword)) {
+            result.put("success", false);
+            result.put("message", "新密码不能与旧密码相同");
+            return result;
+        }
+
+        int code = storageService.changePassword(user.getId(), oldPassword, newPassword);
+        if (code == 0) {
+            result.put("success", true);
+            result.put("message", "密码修改成功，请重新登录");
+        } else if (code == 2) {
+            result.put("success", false);
+            result.put("message", "旧密码错误");
+        } else {
+            result.put("success", false);
+            result.put("message", "用户不存在");
+        }
+        return result;
+    }
+
     private String getClientIp(HttpServletRequest request) {
         String ip = request.getHeader("X-Forwarded-For");
         if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
