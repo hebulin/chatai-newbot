@@ -870,7 +870,7 @@ function finishStream(interrupted) {
                 bubble.innerHTML = renderMsgContent(msg);
                 bubble.setAttribute('data-raw', msg.content || '');
             }
-            // 重建footer信息（包含时间、模型、token消耗、复制按钮）
+            // 重建footer信息（包含模型、token消耗、复制按钮）
             var existingFooter = streamEl.querySelector('.msg-footer');
             if (existingFooter) {
                 existingFooter.remove();
@@ -993,42 +993,23 @@ function updateStreamingMessage(msg) {
     }
 }
 
-// 创建assistant消息的footer（包含时间、模型、token消耗、复制按钮）
+// 创建assistant消息的footer（包含模型、token消耗、复制按钮）
 function createAssistantFooter(msg) {
     var footer = document.createElement('div');
     footer.className = 'msg-footer';
     var copyIconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
-    if (msg.time) {
-        var time = document.createElement('span');
-        time.className = 'msg-time-inline';
-        time.textContent = msg.time;
-        footer.appendChild(time);
-    }
     if (msg.modelName) {
         var modelSpan = document.createElement('span');
         modelSpan.className = 'msg-model-name';
         modelSpan.textContent = msg.modelName;
         footer.appendChild(modelSpan);
     }
-    // token消耗显示
-    if (msg.reasoningTokens !== undefined && msg.reasoningTokens !== null) {
-        var thinkToken = document.createElement('span');
-        thinkToken.className = 'msg-token-info msg-token-thinking';
-        thinkToken.textContent = '思考Token≈' + fmtToken(msg.reasoningTokens);
-        footer.appendChild(thinkToken);
-    }
+    // token消耗显示（仅显示输出token，标记为"Token"）
     if (msg.completionTokens) {
         var outputToken = document.createElement('span');
         outputToken.className = 'msg-token-info';
-        outputToken.textContent = '输出Token≈' + fmtToken(msg.completionTokens);
+        outputToken.textContent = 'Token≈' + fmtToken(msg.completionTokens);
         footer.appendChild(outputToken);
-    }
-    // 显示本次输出全部token（增量输入+输出）
-    if (msg.turnInputTokens && msg.completionTokens) {
-        var totalToken = document.createElement('span');
-        totalToken.className = 'msg-token-info msg-token-total';
-        totalToken.textContent = '总Token(输入+输出)≈' + fmtToken(msg.turnInputTokens + msg.completionTokens);
-        footer.appendChild(totalToken);
     }
     var copyBtn = document.createElement('button');
     copyBtn.className = 'footer-copy-btn';
@@ -1039,17 +1020,11 @@ function createAssistantFooter(msg) {
     return footer;
 }
 
-// 创建流式输出期间的footer（包含时间、模型、token计算中动效、复制按钮）
+// 创建流式输出期间的footer（包含模型、token计算中动效、复制按钮）
 function createStreamingFooter(msg) {
     var footer = document.createElement('div');
     footer.className = 'msg-footer';
     var copyIconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
-    if (msg.time) {
-        var time = document.createElement('span');
-        time.className = 'msg-time-inline';
-        time.textContent = msg.time;
-        footer.appendChild(time);
-    }
     if (msg.modelName) {
         var modelSpan = document.createElement('span');
         modelSpan.className = 'msg-model-name';
@@ -1104,6 +1079,14 @@ function createMessageEl(msg) {
         bubble.innerHTML = renderMsgContent(msg);
     }
 
+    // 时间显示在气泡上方
+    if (msg.time) {
+        var timeTop = document.createElement('div');
+        timeTop.className = 'msg-time-top';
+        timeTop.textContent = msg.time;
+        wrapper.appendChild(timeTop);
+    }
+
     row.appendChild(avatar);
     row.appendChild(bubble);
     wrapper.appendChild(row);
@@ -1122,18 +1105,12 @@ function createMessageEl(msg) {
         copyBtn.title = '复制';
         copyBtn.onclick = function() { copyMsgContent(this); };
         footer.appendChild(copyBtn);
-        // 用户端显示输入token
+        // 用户端显示token
         if (msg.promptTokens) {
             var inputToken = document.createElement('span');
             inputToken.className = 'msg-token-info';
-            inputToken.textContent = '输入Token≈' + fmtToken(msg.promptTokens);
+            inputToken.textContent = 'Token≈' + fmtToken(msg.promptTokens);
             footer.appendChild(inputToken);
-        }
-        if (msg.time) {
-            var time = document.createElement('span');
-            time.className = 'msg-time-inline';
-            time.textContent = msg.time;
-            footer.appendChild(time);
         }
     }
 
