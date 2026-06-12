@@ -38,9 +38,11 @@ body{display:flex}
 .layui-layer-msg .layui-layer-content{background:transparent!important;color:#e2e8f0!important}
 
 /* ===== Sidebar ===== */
-.sidebar{width:260px;min-width:260px;background:linear-gradient(180deg,#1e1b4b 0%,#0f172a 100%);border-right:1px solid rgba(99,102,241,.15);display:flex;flex-direction:column;height:100vh;transition:all .3s ease;z-index:100;flex-shrink:0;box-shadow:2px 0 12px rgba(0,0,0,.3)}
-.sidebar.collapsed{width:0;min-width:0;overflow:hidden;border-right:none}
-.sidebar-content{display:flex;flex-direction:column;height:100%;padding:16px;overflow:hidden}
+.sidebar{width:260px;min-width:260px;background:linear-gradient(180deg,#1e1b4b 0%,#0f172a 100%);border-right:1px solid rgba(99,102,241,.15);display:flex;flex-direction:column;height:100vh;transition:width .3s ease, min-width .3s ease, border-right-color .3s ease;z-index:100;flex-shrink:0;box-shadow:2px 0 12px rgba(0,0,0,.3);overflow:hidden;position:relative}
+.sidebar.collapsed{width:0;min-width:0;border-right-color:transparent}
+/* 折叠时让内容整体向左滑出，而不是被挤压 */
+.sidebar-content{display:flex;flex-direction:column;height:100%;padding:16px;overflow:hidden;width:260px;min-width:260px;flex-shrink:0;box-sizing:border-box;position:absolute;top:0;left:0;transition:transform .3s ease}
+.sidebar.collapsed .sidebar-content{transform:translateX(-100%)}
 .sidebar-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
 .brand{display:flex;align-items:center;gap:8px;font-weight:700;font-size:17px;color:#e2e8f0;letter-spacing:-.01em}
 .brand-icon{width:24px;height:24px;border-radius:8px;background:#0f172a;padding:2px;object-fit:contain;display:block}
@@ -281,9 +283,11 @@ body{display:flex}
 
 /* ===== Responsive ===== */
 @media(max-width:768px){
-.sidebar{position:fixed;top:0;left:0;height:100vh;width:85%;max-width:320px;transform:translateX(-100%);z-index:1000;box-shadow:4px 0 20px rgba(0,0,0,.3)}
-.sidebar.open{transform:translateX(0)}
-.sidebar.collapsed{transform:translateX(-100%)}
+.sidebar{position:fixed;top:0;left:0;height:100vh;width:85%;max-width:320px;min-width:0;transform:translateX(-100%);z-index:1000;box-shadow:4px 0 20px rgba(0,0,0,.3);overflow:hidden;transition:transform .3s ease}
+.sidebar.open{transform:translateX(0);width:85%;max-width:320px;min-width:0}
+.sidebar.collapsed{transform:translateX(-100%);width:85%;max-width:320px;min-width:0}
+.sidebar .sidebar-content{position:absolute;top:0;left:0;width:100%;min-width:0;transform:none}
+.sidebar.collapsed .sidebar-content{transform:none}
 .close-sidebar-btn{display:flex}
 .chat-container{padding:12px}
 .msg-row{max-width:92%}
