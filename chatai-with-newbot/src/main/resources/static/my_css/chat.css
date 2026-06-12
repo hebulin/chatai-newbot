@@ -75,8 +75,16 @@ body{display:flex}
 .chat-item:hover .delete-btn{display:flex}
 .chat-item .delete-btn:hover{color:#ef4444;background:rgba(239,68,68,.15)}
 .sidebar-footer{border-top:1px solid rgba(99,102,241,.15);padding-top:12px;margin-top:auto;display:flex;justify-content:space-between;align-items:center}
-.user-info{display:flex;align-items:center;gap:6px;font-size:13px;color:#94a3b8}
+.user-info{display:flex;align-items:center;gap:6px;font-size:13px;color:#94a3b8;flex:1;padding:6px 8px;border-radius:8px;cursor:pointer;transition:all .15s;position:relative;user-select:none}
+.user-info:hover{background:rgba(99,102,241,.12);color:#e2e8f0;box-shadow:0 2px 8px rgba(0,0,0,.25)}
+.user-info #usernameDisplay{flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.user-info-spacer{flex:1}
+.user-info-more{display:flex;align-items:center;justify-content:center;color:#64748b;border-radius:6px;padding:2px 4px;transition:color .15s;flex-shrink:0}
+.user-info:hover .user-info-more{color:#818cf8}
 .sidebar-actions{display:flex;gap:4px}
+[data-theme="light"] .user-info:hover{background:rgba(99,102,241,.08);color:#1e293b;box-shadow:0 2px 8px rgba(99,102,241,.12)}
+[data-theme="light"] .user-info-more{color:#94a3b8}
+[data-theme="light"] .user-info:hover .user-info-more{color:#6366f1}
 
 /* ===== Icon Button ===== */
 .icon-btn{background:none;border:none;padding:6px;border-radius:8px;cursor:pointer;color:#94a3b8;display:flex;align-items:center;justify-content:center;transition:all .15s}
@@ -465,17 +473,20 @@ body{display:flex}
 [data-theme="light"] .lightbox-sep{background:rgba(99,102,241,.15)}
 
 /* ===== User Avatar Menu (用户头像点击菜单) ===== */
-.user-info{position:relative}
-.user-avatar-wrap{display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:50%;padding:2px;transition:all .15s}
-.user-avatar-wrap:hover{background:rgba(99,102,241,.15)}
-.user-menu{position:absolute;bottom:calc(100% + 8px);left:0;min-width:130px;background:#1e293b;border:1px solid rgba(99,102,241,.2);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);padding:4px;z-index:200;animation:userMenuIn .15s ease}
+.user-avatar-wrap{display:flex;align-items:center;justify-content:center;border-radius:50%;padding:2px;flex-shrink:0}
+.user-menu{position:absolute;bottom:calc(100% + 8px);left:0;min-width:160px;background:#1e293b;border:1px solid rgba(99,102,241,.2);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);padding:4px;z-index:200;animation:userMenuIn .15s ease}
 @keyframes userMenuIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
 .user-menu-item{display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:13px;color:#cbd5e1;cursor:pointer;border-radius:6px;transition:all .15s;user-select:none}
 .user-menu-item:hover{background:rgba(99,102,241,.15);color:#818cf8}
+.user-menu-item-danger{color:#f87171}
+.user-menu-item-danger:hover{background:rgba(239,68,68,.12);color:#ef4444}
+.user-menu-divider{height:1px;background:rgba(99,102,241,.15);margin:4px 6px}
 [data-theme="light"] .user-menu{background:#fff;border:1px solid rgba(99,102,241,.15);box-shadow:0 8px 24px rgba(0,0,0,.1)}
 [data-theme="light"] .user-menu-item{color:#475569}
 [data-theme="light"] .user-menu-item:hover{background:rgba(99,102,241,.08);color:#6366f1}
-[data-theme="light"] .user-avatar-wrap:hover{background:rgba(99,102,241,.1)}
+[data-theme="light"] .user-menu-item-danger{color:#dc2626}
+[data-theme="light"] .user-menu-item-danger:hover{background:rgba(239,68,68,.08);color:#dc2626}
+[data-theme="light"] .user-menu-divider{background:rgba(99,102,241,.12)}
 
 /* ===== About Modal ===== */
 .about-modal-content{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 16px;text-align:center}
