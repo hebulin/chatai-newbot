@@ -426,9 +426,37 @@ function deleteChat(id, e) {
     showConfirmDialog('确定删除该会话？', '删除会话', function() {
         delete chats[id];
         saveChats();
-        if (id === currentChatId) newChat();
-        else updateChatList();
+        if (id === currentChatId) {
+            // 优先跳转到已有的空会话（没有用户消息的"新会话"），避免重复创建
+            var emptyId = findEmptyChatId();
+            if (emptyId) {
+                currentChatId = emptyId;
+                safeStorageSet(LAST_CHAT_KEY, emptyId);
+                resetState();
+                updateChatList();
+                displayMessages();
+            } else {
+                newChat();
+            }
+        } else {
+            updateChatList();
+        }
     });
+}
+
+// 查找一个空的会话（没有用户消息的"新会话"）
+function findEmptyChatId() {
+    var ids = Object.keys(chats);
+    for (var i = 0; i < ids.length; i++) {
+        var msgs = chats[ids[i]];
+        if (!msgs || msgs.length === 0) return ids[i];
+        var hasUserMsg = false;
+        for (var j = 0; j < msgs.length; j++) {
+            if (msgs[j].role === 'user') { hasUserMsg = true; break; }
+        }
+        if (!hasUserMsg) return ids[i];
+    }
+    return null;
 }
 
 // 会话搜索关键词
