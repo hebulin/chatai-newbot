@@ -283,8 +283,7 @@ body {
 
 /* ===== Stats Search Bar ===== */
 .stats-search-bar {
-    display: flex;
-    align-items: flex-end;
+    display: flex;    align-items: flex-end;
     gap: 12px;
     margin-bottom: 16px;
     flex-wrap: wrap;
@@ -848,8 +847,7 @@ input[type="password"].layui-input {
 }
 
 .stats-card .stats-search-bar {
-    margin-bottom: 16px;
-}
+    margin-bottom: 16px;}
 
 .stats-card .table-scroll-wrapper {
     overflow-x: auto;

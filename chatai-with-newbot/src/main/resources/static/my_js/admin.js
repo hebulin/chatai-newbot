@@ -98,13 +98,123 @@ function loadProviders() {
 }
 function loadModels() {
     api('/api/admin/models').then(function(data) {
-        if (data && data.success) { allModels = data.data || []; renderModelTable(allModels); renderProviderGrid(); }
+        if (data && data.success) {
+            allModels = data.data || [];
+            populateModelFilterOptions();
+            applyModelFilter();
+            renderProviderGrid();
+        }
     });
 }
 function loadUsers() {
     api('/api/admin/users').then(function(data) {
-        if (data && data.success) { allUsers = data.data || []; renderUsers(); }
+        if (data && data.success) { allUsers = data.data || []; applyUserFilter(); }
     });
+}
+
+// ===== Model Filter =====
+function populateModelFilterOptions() {
+    var $ = window._$;
+    // 厂商下拉：使用模型实际出现的厂商
+    var providerMap = {};
+    allModels.forEach(function(m) {
+        var pid = m.providerId || '__custom__';
+        var pname = m.providerName || pid;
+        if (!providerMap[pid]) providerMap[pid] = pname;
+    });
+    var providerSel = $('#mfProvider');
+    if (providerSel.length) {
+        var prevP = providerSel.val();
+        providerSel.empty();
+        providerSel.append('<option value="">全部厂商</option>');
+        Object.keys(providerMap).sort().forEach(function(pid) {
+            providerSel.append('<option value="' + esc(pid) + '">' + esc(providerMap[pid]) + '</option>');
+        });
+        if (prevP) providerSel.val(prevP);
+    }
+    // 模型ID下拉：使用模型 modelId 列表
+    var modelSel = $('#mfModelId');
+    if (modelSel.length) {
+        var prevM = modelSel.val();
+        modelSel.empty();
+        modelSel.append('<option value="">全部模型</option>');
+        var seen = {};
+        allModels.forEach(function(m) {
+            var mid = m.modelId || '';
+            if (mid && !seen[mid]) {
+                seen[mid] = true;
+                modelSel.append('<option value="' + esc(mid) + '">' + esc(mid) + '</option>');
+            }
+        });
+        if (prevM) modelSel.val(prevM);
+    }
+}
+
+function applyModelFilter() {
+    var $ = window._$;
+    var nameKw = ($('#mfName').val() || '').trim().toLowerCase();
+    var providerKw = $('#mfProvider').val() || '';
+    var modelIdKw = $('#mfModelId').val() || '';
+    var thinkKw = $('#mfThinking').val();
+    var mmKw = $('#mfMm').val();
+    var enabledKw = $('#mfEnabled').val();
+    var visKw = $('#mfVisible').val();
+
+    var filtered = allModels.filter(function(m) {
+        if (nameKw) {
+            var nm = (m.displayName || m.modelId || '').toLowerCase();
+            if (nm.indexOf(nameKw) < 0) return false;
+        }
+        if (providerKw && (m.providerId || '__custom__') !== providerKw) return false;
+        if (modelIdKw && m.modelId !== modelIdKw) return false;
+        if (thinkKw !== '' && thinkKw !== undefined && thinkKw !== null) {
+            var t = m.supportsThinking ? '1' : '0';
+            if (t !== thinkKw) return false;
+        }
+        if (mmKw !== '' && mmKw !== undefined && mmKw !== null) {
+            var mm = m.supportsMultimodal ? '1' : '0';
+            if (mm !== mmKw) return false;
+        }
+        if (enabledKw !== '' && enabledKw !== undefined && enabledKw !== null) {
+            var en = m.enabled ? '1' : '0';
+            if (en !== enabledKw) return false;
+        }
+        if (visKw !== '' && visKw !== undefined && visKw !== null) {
+            var vis = m.visibleToAll ? '1' : '0';
+            if (vis !== visKw) return false;
+        }
+        return true;
+    });
+    renderModelTable(filtered);
+}
+
+function resetModelFilter() {
+    var $ = window._$;
+    $('#mfName').val('');
+    $('#mfProvider').val('');
+    $('#mfModelId').val('');
+    $('#mfThinking').val('');
+    $('#mfMm').val('');
+    $('#mfEnabled').val('');
+    $('#mfVisible').val('');
+    applyModelFilter();
+}
+
+// ===== User Filter =====
+function applyUserFilter() {
+    var $ = window._$;
+    var kw = ($('#ufUsername').val() || '').trim().toLowerCase();
+    var filtered = allUsers.filter(function(u) {
+        if (!kw) return true;
+        return (u.username || '').toLowerCase().indexOf(kw) >= 0;
+    });
+    renderUsersList(filtered);
+}
+
+function resetUserFilter() {
+    var $ = window._$;
+    $('#ufUsername').val('');
+    applyUserFilter();
 }
 
 // ===== Provider Grid =====
@@ -586,13 +696,17 @@ function submitAddModel() {
 
 // ===== Users =====
 function renderUsers() {
+    renderUsersList(allUsers);
+}
+
+function renderUsersList(users) {
     var $ = window._$, tbody = $('#userTableBody');
     tbody.empty();
-    if (!allUsers || allUsers.length === 0) {
+    if (!users || users.length === 0) {
         tbody.html('<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:40px;">暂无用户数据</td></tr>');
         return;
     }
-    allUsers.forEach(function(u) {
+    users.forEach(function(u) {
         var roleBadge = u.role === 'admin'
             ? '<span class="status-badge status-enabled">管理员</span>'
             : '<span class="status-badge vis-admin">普通用户</span>';
