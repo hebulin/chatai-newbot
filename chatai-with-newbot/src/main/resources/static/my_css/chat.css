@@ -224,9 +224,9 @@ body{display:flex}
 .input-inner-toolbar>*{pointer-events:auto}
 
 /* 思考图标按钮 */
-.think-icon-btn{width:26px;height:26px;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .2s;background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.15);color:#94a3b8;flex-shrink:0}
+.think-icon-btn{width:26px;height:26px;border-radius:12px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .2s;background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.15);color:#94a3b8;flex-shrink:0}
 .think-icon-btn:hover{background:rgba(99,102,241,.2);color:#818cf8}
-.think-icon-btn.active{background:rgba(99,102,241,.35);color:#c7d2fe;border-color:rgba(99,102,241,.55);box-shadow:0 0 0 2px rgba(99,102,241,.15)}
+.think-icon-btn.active{background:rgba(79,68,224,.85);color:#fff;border-color:rgba(79,68,224,1);box-shadow:0 0 0 3px rgba(79,68,224,.35)}
 
 /* 简化模型选择器（输入框右下角） */
 .model-select-area{position:relative;margin-left:auto}
