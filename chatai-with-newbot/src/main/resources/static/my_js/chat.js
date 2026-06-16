@@ -1988,10 +1988,12 @@ function openAboutModal() {
         '<div class="about-desc">一个简洁高效的多模型 AI 聊天平台</div>' +
         '</div>';
     if (window._layer) {
+        var isMobile = window.innerWidth <= 768;
+        var aboutWidth = isMobile ? '90%' : '380px';
         window._layer.open({
             type: 1,
             title: '关于',
-            area: ['380px', 'auto'],
+            area: [aboutWidth, 'auto'],
             shadeClose: true,
             content: html
         });
@@ -2026,10 +2028,14 @@ function openSettingsModal() {
     scheduleRestore();
 
     var content = buildSettingsModalHtml();
+    // 移动端使用响应式尺寸，避免弹窗超出视口
+    var isMobile = window.innerWidth <= 768;
+    var areaWidth = isMobile ? '95%' : '720px';
+    var areaHeight = isMobile ? '85%' : '480px';
     _settingsLayerIndex = window._layer.open({
         type: 1,
         title: '设置',
-        area: ['720px', '480px'],
+        area: [areaWidth, areaHeight],
         shadeClose: false,
         maxmin: false,
         content: content,
@@ -2040,6 +2046,13 @@ function openSettingsModal() {
                 if (contentEl) {
                     contentEl.style.padding = '0';
                     contentEl.style.overflow = 'hidden';
+                }
+                // 移动端：确保弹窗不超出视口
+                if (isMobile) {
+                    layero.css({
+                        'max-width': '100vw',
+                        'max-height': '100vh'
+                    });
                 }
             } catch(e) {}
             // 默认选中第一个菜单项
