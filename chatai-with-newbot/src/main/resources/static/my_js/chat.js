@@ -21,8 +21,6 @@ function safeStorageParse(key) {
 // ===== 全局状态 =====
 var TOKEN = safeStorageGet('token');
 var CURRENT_USER = safeStorageGet('username') || '';
-var CHATS_KEY = 'chats_' + CURRENT_USER;
-var LAST_CHAT_KEY = 'lastChatId_' + CURRENT_USER;
 var currentChatId = null;
 var chats = {};
 var models = [];
@@ -39,6 +37,9 @@ var modelDropdownOpen = false; // 自定义下拉框状态
 var streamUsage = null; // 流式响应中的usage数据
 var pendingImages = []; // 待发送的图片base64列表
 var MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 单张图片最大5MB
+var deletedChatIds = []; // 已删除的会话ID列表（用于服务端同步）
+var isChatHistoryLoaded = false; // 标记会话历史是否已从服务端加载
+var syncTimer = null; // 防抖定时器，避免频繁同步
 
 // ===== 千分位格式化 =====
 function fmtToken(n) {
@@ -110,14 +111,12 @@ layui.use(['layer', 'form', 'element', 'jquery'], function() {
         if (adminBtn) adminBtn.style.display = 'flex';
     }
 
-    // 加载会话（按用户隔离）
-    try { chats = safeStorageParse(CHATS_KEY) || {}; } catch(e) { chats = {}; }
-    var lastId = safeStorageGet(LAST_CHAT_KEY);
-    if (lastId && chats[lastId]) { currentChatId = lastId; } else { newChat(); }
-
-    loadModels();
-    updateChatList();
-    displayMessages();
+    // 从服务端加载会话历史（多端同步）
+    loadChatHistoryFromServer(function() {
+        loadModels();
+        updateChatList();
+        displayMessages();
+    });
 
     // 绑定输入框事件
     var textarea = document.getElementById('userInput');
@@ -409,7 +408,6 @@ function newChat() {
     }
     currentChatId = Date.now().toString();
     chats[currentChatId] = [];
-    safeStorageSet(LAST_CHAT_KEY, currentChatId);
     saveChats();
     updateChatList();
     displayMessages();
@@ -419,7 +417,7 @@ function newChat() {
 function switchChat(id) {
     if (isStreamActive) { showToast('请等待回答完成'); return; }
     currentChatId = id;
-    safeStorageSet(LAST_CHAT_KEY, id);
+    saveChats(); // 同步lastChatId到服务端
     resetState();
     updateChatList();
     displayMessages();
@@ -429,13 +427,14 @@ function deleteChat(id, e) {
     e.stopPropagation();
     showConfirmDialog('确定删除该会话？', '删除会话', function() {
         delete chats[id];
+        // 记录已删除的会话ID，用于服务端同步
+        deletedChatIds.push(id);
         saveChats();
         if (id === currentChatId) {
             // 优先跳转到已有的空会话（没有用户消息的"新会话"），避免重复创建
             var emptyId = findEmptyChatId();
             if (emptyId) {
                 currentChatId = emptyId;
-                safeStorageSet(LAST_CHAT_KEY, emptyId);
                 resetState();
                 updateChatList();
                 displayMessages();
@@ -613,7 +612,103 @@ function clearChatSearch() {
     updateChatList();
 }
 
-function saveChats() { safeStorageSet(CHATS_KEY, JSON.stringify(chats)); }
+// ===== 服务端会话同步（多端统一） =====
+
+/**
+ * 从服务端加载会话历史
+ * @param callback 加载完成后的回调函数
+ */
+function loadChatHistoryFromServer(callback) {
+    fetch('/api/chat/history', {
+        method: 'GET',
+        headers: authHeaders()
+    }).then(function(r) {
+        if (r.status === 401) {
+            safeStorageRemove('token');
+            safeStorageRemove('username');
+            safeStorageRemove('role');
+            showToast('登录已过期，请重新登录');
+            setTimeout(function() { window.location.href = '/login.html'; }, 1500);
+            return null;
+        }
+        return r.json();
+    }).then(function(data) {
+        if (!data || !data.success) {
+            // 加载失败，使用空数据
+            chats = {};
+            currentChatId = null;
+            newChat();
+            isChatHistoryLoaded = true;
+            if (callback) callback();
+            return;
+        }
+        // 从服务端数据恢复会话
+        chats = data.chats || {};
+        deletedChatIds = data.deletedChatIds || [];
+        var lastId = data.lastChatId;
+        if (lastId && chats[lastId]) {
+            currentChatId = lastId;
+        } else {
+            // 没有有效的lastChatId，创建新会话
+            currentChatId = null;
+            newChat();
+        }
+        isChatHistoryLoaded = true;
+        console.log('已从服务端加载会话历史，共 ' + Object.keys(chats).length + ' 个会话');
+        if (callback) callback();
+    }).catch(function(e) {
+        console.error('加载会话历史失败:', e);
+        // 加载失败，使用空数据
+        chats = {};
+        currentChatId = null;
+        newChat();
+        isChatHistoryLoaded = true;
+        if (callback) callback();
+    });
+}
+
+/**
+ * 将会话数据同步到服务端（带防抖，避免频繁请求）
+ */
+function syncChatsToServer() {
+    if (!isChatHistoryLoaded) return; // 尚未从服务端加载完成，不同步
+    if (syncTimer) clearTimeout(syncTimer);
+    syncTimer = setTimeout(function() {
+        var payload = {
+            lastChatId: currentChatId,
+            chats: chats,
+            deletedChatIds: deletedChatIds
+        };
+        fetch('/api/chat/history', {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify(payload)
+        }).then(function(r) {
+            if (r.status === 401) {
+                safeStorageRemove('token');
+                safeStorageRemove('username');
+                safeStorageRemove('role');
+                showToast('登录已过期，请重新登录');
+                setTimeout(function() { window.location.href = '/login.html'; }, 1500);
+                return null;
+            }
+            return r.json();
+        }).then(function(data) {
+            if (data && data.success) {
+                console.log('会话已同步到服务端');
+            } else if (data) {
+                console.warn('会话同步失败:', data.message);
+            }
+        }).catch(function(e) {
+            console.error('会话同步请求失败:', e);
+        });
+    }, 500); // 500ms防抖
+}
+
+function saveChats() {
+    // 同步到服务端（多端统一）
+    syncChatsToServer();
+}
 
 function exportChats() {
     var text = '';

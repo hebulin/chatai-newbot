@@ -1,6 +1,7 @@
 package com.chatai.newbot.controller;
 
 import com.chatai.newbot.model.*;
+import com.chatai.newbot.service.ChatHistoryService;
 import com.chatai.newbot.service.FileStorageService;
 import com.chatai.newbot.service.UnifiedChatService;
 import org.slf4j.Logger;
@@ -21,10 +22,13 @@ public class ChatController {
     private static final Logger log = LoggerFactory.getLogger(ChatController.class);
     private final UnifiedChatService chatService;
     private final FileStorageService storageService;
+    private final ChatHistoryService chatHistoryService;
 
-    public ChatController(UnifiedChatService chatService, FileStorageService storageService) {
+    public ChatController(UnifiedChatService chatService, FileStorageService storageService,
+                          ChatHistoryService chatHistoryService) {
         this.chatService = chatService;
         this.storageService = storageService;
+        this.chatHistoryService = chatHistoryService;
     }
 
     @GetMapping("/heartbeat")
@@ -129,5 +133,56 @@ public class ChatController {
             }
         }
         if (updated) log.info("已自动同步模型能力状态（多模态/思考支持）");
+    }
+
+    // ========== 会话历史同步（多端统一） ==========
+
+    /**
+     * 获取当前用户的会话历史
+     */
+    @GetMapping("/chat/history")
+    public Map<String, Object> getChatHistory(HttpServletRequest request) {
+        User user = (User) request.getAttribute("currentUser");
+        Map<String, Object> history = chatHistoryService.loadChatHistory(user.getId());
+        history.put("success", true);
+        return history;
+    }
+
+    /**
+     * 保存当前用户的会话历史
+     * 请求体格式: { "lastChatId": "xxx", "chats": {...}, "deletedChatIds": [...] }
+     */
+    @PostMapping("/chat/history")
+    public Map<String, Object> saveChatHistory(@RequestBody Map<String, Object> body,
+                                                HttpServletRequest request) {
+        User user = (User) request.getAttribute("currentUser");
+        Map<String, Object> result = new HashMap<>();
+        try {
+            chatHistoryService.saveChatHistory(user.getId(), body);
+            result.put("success", true);
+        } catch (Exception e) {
+            log.error("保存会话历史失败: userId={}", user.getId(), e);
+            result.put("success", false);
+            result.put("message", "保存失败: " + e.getMessage());
+        }
+        return result;
+    }
+
+    /**
+     * 删除当前用户的所有会话历史
+     */
+    @DeleteMapping("/chat/history")
+    public Map<String, Object> deleteChatHistory(HttpServletRequest request) {
+        User user = (User) request.getAttribute("currentUser");
+        Map<String, Object> result = new HashMap<>();
+        try {
+            chatHistoryService.deleteChatHistory(user.getId());
+            result.put("success", true);
+        } catch (Exception e) {
+            log.error("删除会话历史失败: userId={}", user.getId(), e);
+            result.put("success", false);
+            result.put("message", "删除失败: " + e.getMessage());
+        }
+        return result;
     }
 }
