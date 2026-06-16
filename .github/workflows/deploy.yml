@@ -1,0 +1,81 @@
+name: Build and Deploy chatai-with-newbot
+
+on:
+  push:
+    branches:
+      - dev
+  workflow_dispatch:
+
+concurrency:
+  group: chatai-with-newbot-deploy
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '8'
+          cache: maven
+
+      - name: Build Spring Boot JAR
+        working-directory: ./chatai-with-newbot
+        run: mvn -B clean package -DskipTests
+
+      - name: Get JAR filename
+        id: jar
+        working-directory: ./chatai-with-newbot
+        run: |
+          JAR_FILE=$(ls target/*.jar | head -1)
+          echo "file=chatai-with-newbot/$JAR_FILE" >> $GITHUB_OUTPUT
+          echo "name=$(basename $JAR_FILE)" >> $GITHUB_OUTPUT
+
+      - name: Upload JAR via SCP
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: 22
+          source: "${{ steps.jar.outputs.file }}"
+          target: "/opt/chatai-with-newbot/releases/"
+          strip_components: 2
+          rm: false
+          command_timeout: 60s
+
+      - name: Rename uploaded JAR on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: 22
+          script: |
+            RELEASE_NAME="chatai-with-newbot-${{ github.sha }}.jar"
+            UPLOADED_FILE=$(ls /opt/chatai-with-newbot/releases/chatai-with-newbot-*.jar 2>/dev/null | head -1)
+            if [ -n "$UPLOADED_FILE" ]; then
+              mv "$UPLOADED_FILE" "/opt/chatai-with-newbot/releases/${RELEASE_NAME}"
+              echo "Renamed to ${RELEASE_NAME}"
+            else
+              echo "No JAR found to rename"
+              exit 1
+            fi
+
+      - name: Deploy on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: 22
+          script: |
+            RELEASE_NAME="chatai-with-newbot-${{ github.sha }}.jar"
+            bash /opt/chatai-with-newbot/deploy.sh ${RELEASE_NAME}

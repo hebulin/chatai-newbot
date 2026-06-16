@@ -1,0 +1,6 @@
+PS> ssh -i "$env:USERPROFILE\.ssh\chatai_newbot_deploy" hebulin@101.43.221.155 "ls -ld /opt/chatai-with-newbot /opt/chatai-with-newbot/releases /var/log/chatai-with-newbot; ls -l /opt/chatai-with-newbot/deploy.sh; sudo /usr/bin/systemctl status chatai-with-newbot --no-pager || true"
+
+drwxr-xr-x 4 hebulin hebulin 4096 Jun 10 18:17 /opt/chatai-with-newbot
+drwxr-xr-x 2 hebulin hebulin 4096 Jun 10 18:15 /opt/chatai-with-newbot/releases
+drwxr-xr-x 2 hebulin hebulin 4096 Jun 10 18:15 /var/log/chatai-with-newbot
+-rwxrwxr-x 1 hebulin hebulin 1444 Jun 10 18:17 /opt/chatai-with-newbot/deploy.sh

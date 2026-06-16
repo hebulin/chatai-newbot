@@ -1,0 +1,10 @@
+PS> ssh -i "$env:USERPROFILE\.ssh\chatai_newbot_deploy" hebulin@101.43.221.155 "echo DEPLOY_KEY_OK; whoami; uname -a; /usr/lib/jvm/jdk1.8.0_202/bin/java -version 2>&1 | head -3; ls -ld ~/.ssh; ls -l ~/.ssh/authorized_keys"
+
+DEPLOY_KEY_OK
+hebulin
+Linux VM-8-13-opencloudos 5.4.119-20.0009.20 #1 SMP Mon Jan 9 13:11:31 CST 2023 x86_64 x86_64 x86_64 GNU/Linux
+java version "1.8.0_202"
+Java(TM) SE Runtime Environment (build 1.8.0_202-b08)
+Java HotSpot(TM) 64-Bit Server VM (build 25.202-b08, mixed mode)
+drwx------ 2 hebulin hebulin 4096 Jun 10 18:18 /home/hebulin/.ssh
+-rw------- 1 hebulin hebulin 110 Jun 10 18:18 /home/hebulin/.ssh/authorized_keys
