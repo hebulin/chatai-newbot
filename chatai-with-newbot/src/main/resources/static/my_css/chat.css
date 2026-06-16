@@ -99,7 +99,7 @@ body{display:flex}
 .spacer{flex:1}
 
 /* ===== Chat Container ===== */
-.chat-container{flex:1;overflow-y:auto;overflow-x:hidden;padding:20px;scroll-behavior:smooth}
+.chat-container{flex:1;overflow-y:auto;overflow-x:hidden;padding:20px;scroll-behavior:smooth;position:relative}
 .chat-container::-webkit-scrollbar{width:8px}
 .chat-container::-webkit-scrollbar-thumb{background:transparent;border-radius:10px;border:2px solid transparent;background-clip:content-box}
 .chat-container:hover::-webkit-scrollbar-thumb{background:rgba(99,102,241,.25);border:2px solid transparent;background-clip:content-box}
@@ -217,7 +217,7 @@ body{display:flex}
 
 
 /* ===== Scroll Navigation ===== */
-.scroll-nav{position:absolute;right:20px;bottom:90px;display:flex;flex-direction:column;gap:8px;z-index:50;pointer-events:none}
+.scroll-nav{position:fixed;right:20px;bottom:80px;display:flex;flex-direction:column;gap:6px;z-index:50;pointer-events:none;transition:right .15s,bottom .15s}
 .scroll-nav-btn{width:36px;height:36px;border-radius:50%;background:rgba(30,27,75,.85);border:1px solid rgba(99,102,241,.25);color:#94a3b8;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;pointer-events:auto;backdrop-filter:blur(8px);box-shadow:0 2px 8px rgba(0,0,0,.3)}
 .scroll-nav-btn:hover{background:rgba(99,102,241,.3);color:#818cf8;border-color:rgba(99,102,241,.4);transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.4)}
 
@@ -300,6 +300,9 @@ body{display:flex}
 .input-area{padding:8px 12px 6px}
 .model-select-area{max-width:160px}
 .model-select-value{max-width:100px}
+.scroll-nav-btn{width:32px;height:32px}
+.scroll-nav-btn svg{width:16px;height:16px}
+.scroll-nav{right:12px;bottom:12px;gap:4px}
 }
 
 /* ===== Lists in messages ===== */
