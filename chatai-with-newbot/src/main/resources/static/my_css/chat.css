@@ -65,6 +65,19 @@ body{display:flex}
 .chat-date-header{font-size:11px;color:#64748b;font-weight:600;padding:8px 12px 4px;user-select:none;letter-spacing:.02em;text-transform:uppercase}
 
 .chat-list{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:0}
+
+/* ===== Chat List Loading Skeleton ===== */
+.chat-list-loading{display:flex;flex-direction:column;gap:8px;padding:4px 0}
+.chat-list-skeleton{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px}
+.chat-list-skeleton-bar{height:14px;border-radius:6px;background:rgba(99,102,241,.12);animation:chatListPulse 1.5s ease-in-out infinite}
+.chat-list-skeleton-bar.short{width:40%}
+.chat-list-skeleton-bar.medium{width:65%}
+.chat-list-skeleton-bar.long{width:80%}
+.chat-list-skeleton-dot{width:8px;height:8px;border-radius:50%;background:rgba(99,102,241,.12);animation:chatListPulse 1.5s ease-in-out infinite;flex-shrink:0}
+@keyframes chatListPulse{0%,100%{opacity:.3;background:rgba(99,102,241,.08)}50%{opacity:.8;background:rgba(99,102,241,.18)}}
+[data-theme="light"] .chat-list-skeleton-bar{background:rgba(99,102,241,.08)}
+[data-theme="light"] .chat-list-skeleton-dot{background:rgba(99,102,241,.08)}
+[data-theme="light"] @keyframes chatListPulse{0%,100%{opacity:.3;background:rgba(99,102,241,.05)}50%{opacity:.8;background:rgba(99,102,241,.12)}}
 .chat-list::-webkit-scrollbar{width:6px}
 .chat-list::-webkit-scrollbar-thumb{background:transparent;border-radius:10px;border:2px solid transparent;background-clip:content-box}
 .chat-list:hover::-webkit-scrollbar-thumb{background:rgba(99,102,241,.25);border:2px solid transparent;background-clip:content-box}

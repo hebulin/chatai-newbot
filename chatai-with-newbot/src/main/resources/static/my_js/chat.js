@@ -1,3 +1,18 @@
+// ===== 会话列表Loading动画 =====
+function showChatListLoading() {
+    var list = document.getElementById('chatList');
+    if (!list) return;
+    list.innerHTML = '<div class="chat-list-loading">' +
+        '<div class="chat-list-skeleton"><span class="chat-list-skeleton-dot"></span><span class="chat-list-skeleton-bar long"></span></div>' +
+        '<div class="chat-list-skeleton"><span class="chat-list-skeleton-dot"></span><span class="chat-list-skeleton-bar medium"></span></div>' +
+        '<div class="chat-list-skeleton"><span class="chat-list-skeleton-dot"></span><span class="chat-list-skeleton-bar short"></span></div>' +
+        '<div class="chat-list-skeleton"><span class="chat-list-skeleton-dot"></span><span class="chat-list-skeleton-bar long"></span></div>' +
+        '<div class="chat-list-skeleton"><span class="chat-list-skeleton-dot"></span><span class="chat-list-skeleton-bar medium"></span></div>' +
+        '</div>'; }
+function hideChatListLoading() {
+    // loading会在updateChatList()中自动清除，无需额外操作
+}
+
 // ===== 安全的localStorage访问封装 =====
 var _storageAvailable = null;
 function safeStorageGet(key) {
@@ -113,6 +128,8 @@ layui.use(['layer', 'form', 'element', 'jquery'], function() {
         if (adminBtn) adminBtn.style.display = 'flex';
     }
 
+    // 显示会话列表加载动画
+    showChatListLoading();
     // 从服务端加载会话历史（多端同步）
     loadChatHistoryFromServer(function() {
         loadModels();
