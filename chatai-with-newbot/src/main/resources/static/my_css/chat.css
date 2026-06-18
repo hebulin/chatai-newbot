@@ -112,7 +112,9 @@ body{display:flex}
 .spacer{flex:1}
 
 /* ===== Chat Container ===== */
-.chat-container{flex:1;overflow-y:auto;overflow-x:hidden;padding:20px;scroll-behavior:smooth;position:relative}
+/* 注意：不在此处设置 scroll-behavior:smooth，避免流式输出时频繁 scrollTop 导致平滑动画叠加闪烁。
+   平滑滚动仅在用户手动操作（点击回到顶部/底部按钮）时由 JS 临时启用。 */
+.chat-container{flex:1;overflow-y:auto;overflow-x:hidden;padding:20px;position:relative}
 .chat-container::-webkit-scrollbar{width:8px}
 .chat-container::-webkit-scrollbar-thumb{background:transparent;border-radius:10px;border:2px solid transparent;background-clip:content-box}
 .chat-container:hover::-webkit-scrollbar-thumb{background:rgba(99,102,241,.25);border:2px solid transparent;background-clip:content-box}

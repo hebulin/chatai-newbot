@@ -152,10 +152,10 @@ layui.use(['layer', 'form', 'element', 'jquery'], function() {
         document.getElementById('sidebar').classList.add('collapsed');
     }
 
-    // 滚动导航监听
+    // 滚动跟随管理器初始化（统一处理自动滚动/中断/恢复/节流/失焦/触摸）
     var chatContainer = document.getElementById('chatContainer');
-    if (chatContainer) {
-        chatContainer.addEventListener('scroll', updateScrollNav);
+    if (chatContainer && typeof ScrollFollowManager !== 'undefined') {
+        ScrollFollowManager.init(chatContainer);
     }
 
     // 点击外部关闭模型下拉框
@@ -1033,14 +1033,20 @@ function finishStream(interrupted) {
     }
     resetState();
     // 不再全量重建DOM，仅在必要时刷新（如切换会话后回来）
-    // displayMessages() 会导致闪烁，改为仅更新滚动位置
-    var container = document.getElementById('chatContainer');
-    if (container) {
-        var isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
-        if (isNearBottom) {
-            container.scrollTop = container.scrollHeight;
+    // displayMessages() 会导致闪烁，改为仅更新滚动位置（通过 ScrollFollowManager 统一处理）
+    // 流结束后同步滚动到底部，确保最终内容完全可见
+    if (typeof ScrollFollowManager !== 'undefined') {
+        ScrollFollowManager.syncScrollToBottom();
+        ScrollFollowManager.updateNavButtons();
+    } else {
+        var container = document.getElementById('chatContainer');
+        if (container) {
+            var isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+            if (isNearBottom) {
+                container.scrollTop = container.scrollHeight;
+            }
+            updateScrollNav();
         }
-        updateScrollNav();
     }
     resetSendBtn();
 }
@@ -1070,11 +1076,16 @@ function displayMessages() {
     container.innerHTML = '';
     container.appendChild(frag);
     processSpecialContent(container);
-    // 切换会话时禁用平滑滚动，确保瞬间跳到底部
-    container.style.scrollBehavior = 'auto';
-    container.scrollTop = container.scrollHeight;
-    container.style.scrollBehavior = 'smooth';
-    updateScrollNav();
+    // 切换会话时重置跟随状态并瞬间跳到底部（通过 ScrollFollowManager 统一处理）
+    if (typeof ScrollFollowManager !== 'undefined') {
+        ScrollFollowManager.reset();
+        ScrollFollowManager.scrollToBottomImmediate();
+    } else {
+        container.style.scrollBehavior = 'auto';
+        container.scrollTop = container.scrollHeight;
+        container.style.scrollBehavior = 'smooth';
+        updateScrollNav();
+    }
 }
 
 function updateStreamingMessage(msg) {
@@ -1135,10 +1146,15 @@ function updateStreamingMessage(msg) {
         }
     }
     processSpecialContent(streamEl); // 边输出边渲染，mermaid通过parse预验证跳过不完整代码
-    // 智能自动滚动：仅在用户处于底部附近时自动跟随，用户向上滚动时不干扰
-    var isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
-    if (isNearBottom) {
-        container.scrollTop = container.scrollHeight;
+    // 智能自动滚动：DOM 内容更新后立即同步滚动（无 rAF 延迟），
+    // 使"内容增长"与"视图跟随"在同一帧完成，避免底部先被撑开再弹回的闪烁
+    if (typeof ScrollFollowManager !== 'undefined') {
+        ScrollFollowManager.syncScrollToBottom();
+    } else {
+        var isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+        if (isNearBottom) {
+            container.scrollTop = container.scrollHeight;
+        }
     }
 }
 
@@ -1822,7 +1838,12 @@ function showLoading() {
     loading.className = 'msg-wrapper assistant';
     loading.innerHTML = '<div class="msg-row"><div class="msg-avatar ai-av"><img class="avatar-icon" src="' + getAvatarIconSrc('AIBot') + '" style="width:100%;height:100%;border-radius:10px;object-fit:cover" /></div><div class="loading-dots"><span></span><span></span><span></span></div></div>';
     appendToChat(loading);
-    container.scrollTop = container.scrollHeight;
+    // 用户发送消息后，强制跟随并滚到底部（用户操作优先级最高）
+    if (typeof ScrollFollowManager !== 'undefined') {
+        ScrollFollowManager.scrollToBottomImmediate();
+    } else {
+        container.scrollTop = container.scrollHeight;
+    }
 }
 
 function hideLoading() {
@@ -1888,16 +1909,31 @@ function appendToChat(el) {
     container.appendChild(el);
 }
 function scrollToTop() {
-    var container = document.getElementById('chatContainer');
-    if (container) container.scrollTo({ top: 0, behavior: 'smooth' });
+    // 用户主动操作：回到顶部 → 中断自动跟随
+    if (typeof ScrollFollowManager !== 'undefined') {
+        ScrollFollowManager.userScrollToTop();
+    } else {
+        var container = document.getElementById('chatContainer');
+        if (container) container.scrollTo({ top: 0, behavior: 'smooth' });
+    }
 }
 
 function scrollToBottom() {
-    var container = document.getElementById('chatContainer');
-    if (container) container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+    // 用户主动操作：回到底部/跳至最新 → 恢复自动跟随
+    if (typeof ScrollFollowManager !== 'undefined') {
+        ScrollFollowManager.userScrollToBottom();
+    } else {
+        var container = document.getElementById('chatContainer');
+        if (container) container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+    }
 }
 
 function updateScrollNav() {
+    // 委托给 ScrollFollowManager 统一更新导航按钮显隐与定位
+    if (typeof ScrollFollowManager !== 'undefined') {
+        ScrollFollowManager.updateNavButtons();
+        return;
+    }
     var container = document.getElementById('chatContainer');
     var topBtn = document.getElementById('scrollToTopBtn');
     var bottomBtn = document.getElementById('scrollToBottomBtn');
