@@ -115,7 +115,7 @@ layui.use(['layer', 'form', 'element', 'jquery'], function() {
         }
     }
     if (typeof mermaid !== 'undefined' && mermaid.initialize) {
-        mermaid.initialize({ startOnLoad: false, theme: 'default' });
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral' });
     }
 
     // 显示用户信息
