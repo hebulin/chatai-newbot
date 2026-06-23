@@ -197,25 +197,25 @@ body{display:flex}
 .msg-bubble .table-wrapper::-webkit-scrollbar-track{background:transparent}
 
 /* ===== Mermaid ===== */
-.mermaid-container{margin:10px 0;background:#1e293b;border-radius:8px;overflow:hidden;max-width:100%;border:1px solid rgba(99,102,241,.15)}
+.mermaid-container{margin:10px 0;background:#ffffff;border-radius:8px;overflow:hidden;max-width:100%;border:1px solid rgba(99,102,241,.15);box-shadow:0 1px 3px rgba(0,0,0,.05)}
 .mermaid-toolbar{display:flex;align-items:center;border-bottom:1px solid rgba(99,102,241,.15);background:rgba(99,102,241,.05)}
 .mermaid-tabs{display:flex}
 .mermaid-tab{padding:6px 14px;border:none;background:none;cursor:pointer;font-size:12px;color:#64748b;transition:all .15s;border-bottom:2px solid transparent}
-.mermaid-tab.active{color:#818cf8;border-bottom-color:#818cf8;font-weight:500}
-.mermaid-tab:hover{color:#818cf8}
+.mermaid-tab.active{color:#6366f1;border-bottom-color:#6366f1;font-weight:500}
+.mermaid-tab:hover{color:#6366f1}
 .mermaid-toolbar-spacer{flex:1}
 .mermaid-toolbar-sep{width:1px;height:16px;background:rgba(99,102,241,.2);margin:0 6px}
 .mermaid-action{display:flex;align-items:center;gap:2px;padding:4px 8px;border:none;background:none;cursor:pointer;font-size:11px;color:#64748b;transition:all .15s;border-radius:4px;white-space:nowrap}
 .mermaid-action svg{flex-shrink:0}
-.mermaid-action:hover{color:#818cf8;background:rgba(99,102,241,.1)}
+.mermaid-action:hover{color:#6366f1;background:rgba(99,102,241,.1)}
 .mermaid-actions{display:flex;align-items:center;gap:2px;padding-right:4px}
 .mermaid-actions.hidden{display:none}
 .mermaid-view{padding:16px;overflow:auto;position:relative}
-.mermaid-view pre{background:#1e293b!important;margin:0!important;padding:0!important;border-radius:0!important}
+.mermaid-view pre{background:#ffffff!important;margin:0!important;padding:0!important;border-radius:0!important}
 .mermaid-view pre svg{max-width:100%;transition:transform .2s ease;transform-origin:center center}
 .mermaid-code{padding:0}
-.mermaid-code pre{background:#0f172a!important;border-radius:0!important;margin:0!important}
-.mermaid-code pre code{color:#e2e8f0!important;padding:14px!important}
+.mermaid-code pre{background:#1e293b!important;border-radius:0!important;margin:0!important}
+.mermaid-code pre code{color:#ffffff!important;padding:14px!important;font-weight:500}
 
 /* Mermaid Fullscreen Overlay */
 .mermaid-fullscreen-overlay{position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,.95);display:flex;flex-direction:column;align-items:center;justify-content:center;animation:mermaidFsIn .2s ease}
