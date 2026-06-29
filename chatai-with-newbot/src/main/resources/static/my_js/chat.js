@@ -109,13 +109,37 @@ layui.use(['layer', 'form', 'element', 'jquery'], function() {
                 }
             };
             marked.use({ gfm: true, breaks: true, renderer: hljsRenderer });
+            // 禁用v5+废弃参数，清除控制台警告
+            marked.setOptions({ mangle: false, headerIds: false, headerPrefix: '' });
         } else if (marked.setOptions) {
             // 旧版本回退
-            marked.setOptions({ gfm: true, breaks: true });
+            marked.setOptions({ gfm: true, breaks: true, mangle: false, headerIds: false, headerPrefix: '' });
         }
     }
     if (typeof mermaid !== 'undefined' && mermaid.initialize) {
-        mermaid.initialize({ startOnLoad: false, theme: 'neutral' });
+        mermaid.initialize({
+            startOnLoad: false,
+            theme: 'neutral',
+            // 提高复杂图表的限制，避免大图表渲染失败
+            maxEdges: 500,
+            maxTextSize: 50000,
+            // 流程图配置：使用更宽松的设置
+            flowchart: {
+                useMaxWidth: true,
+                htmlLabels: true,
+                curve: 'basis'
+            },
+            // 序列图配置
+            sequence: {
+                useMaxWidth: true
+            },
+            // 甘特图配置
+            gantt: {
+                useMaxWidth: true
+            },
+            // 安全级别
+            securityLevel: 'loose'
+        });
     }
 
     // 显示用户信息
@@ -1145,7 +1169,9 @@ function updateStreamingMessage(msg) {
             }
         }
     }
-    processSpecialContent(streamEl); // 边输出边渲染，mermaid通过parse预验证跳过不完整代码
+    // 流式输出期间跳过mermaid渲染（避免复杂图表在DOM频繁重建时渲染失败）
+    // mermaid将在finishStream中统一渲染
+    processSpecialContent(streamEl, true);
     // 智能自动滚动：DOM 内容更新后立即同步滚动（无 rAF 延迟），
     // 使"内容增长"与"视图跟随"在同一帧完成，避免底部先被撑开再弹回的闪烁
     if (typeof ScrollFollowManager !== 'undefined') {
@@ -1672,16 +1698,126 @@ function mermaidFsDownload(btn) {
 }
 
 // ===== 特殊内容处理 =====
+
+// 预处理Mermaid代码，修复AI生成的格式问题
+// 1. 将同一行的多个语句拆分为多行
+// 2. 为含特殊字符的节点标签添加双引号
+function normalizeMermaidCode(code) {
+    if (!code) return code;
+    // 统一换行符
+    code = code.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    var lines = code.split('\n');
+    var normalized = [];
+
+    lines.forEach(function(line) {
+        var trimmed = line.trim();
+        // 跳过空行和注释
+        if (!trimmed || trimmed.startsWith('%')) {
+            normalized.push(line);
+            return;
+        }
+        // 跳过图类型声明和特殊指令
+        if (trimmed.startsWith('graph ') || trimmed.startsWith('flowchart ') ||
+            trimmed.startsWith('sequenceDiagram') || trimmed.startsWith('gantt') ||
+            trimmed.startsWith('classDiagram') || trimmed.startsWith('stateDiagram') ||
+            trimmed.startsWith('pie') || trimmed.startsWith('gitGraph') ||
+            trimmed.startsWith('subgraph') || trimmed === 'end' ||
+            trimmed.startsWith('linkStyle') || trimmed.startsWith('click') ||
+            trimmed.startsWith('style ') || trimmed.startsWith('class ')) {
+            normalized.push(line);
+            return;
+        }
+        // 拆分同一行的多个语句
+        var parts = splitMermaidLine(trimmed);
+        parts.forEach(function(part) {
+            var p = part.trim();
+            if (p) {
+                // 为含特殊字符的节点标签添加双引号
+                p = quoteMermaidLabels(p);
+                normalized.push(p);
+            }
+        });
+    });
+
+    return normalized.join('\n');
+}
+
+// 拆分一行中包含的多个Mermaid语句
+// 在方括号/圆括号外，遇到2个及以上连续空格或Tab，视为语句分隔符
+function splitMermaidLine(line) {
+    var parts = [];
+    var current = '';
+    var bracketDepth = 0;
+    var parenDepth = 0;
+    var i = 0;
+
+    while (i < line.length) {
+        var ch = line[i];
+        if (ch === '[') bracketDepth++;
+        else if (ch === ']') bracketDepth = Math.max(0, bracketDepth - 1);
+        else if (ch === '(') parenDepth++;
+        else if (ch === ')') parenDepth = Math.max(0, parenDepth - 1);
+
+        // 在括号外检测2+空格或Tab作为分隔符
+        if (bracketDepth <= 0 && parenDepth <= 0) {
+            var match = line.substring(i).match(/^(\s{2,}|\t+)/);
+            if (match) {
+                var sepLen = match[1].length;
+                var before = current.trim();
+                var after = line.substring(i + sepLen).trim();
+                // 前后都有内容才拆分
+                if (before && after) {
+                    parts.push(current);
+                    current = '';
+                    i += sepLen;
+                    continue;
+                }
+            }
+        }
+        current += ch;
+        i++;
+    }
+    if (current.trim()) parts.push(current);
+    return parts;
+}
+
+// 为含特殊字符(括号等)的节点标签添加双引号
+// 例如: G[用户验收测试 (UAT)] -> G["用户验收测试 (UAT)"]
+function quoteMermaidLabels(line) {
+    // 匹配 节点ID[标签内容] 的模式，标签内容含特殊字符时加引号
+    // 支持: A[label], A[label](tooltip), 以及边定义中的 B[label]
+    return line.replace(/(\w+)\[([^\]]*)\]/g, function(match, nodeId, label) {
+        // 已经有引号则跳过
+        if (label.startsWith('"') && label.endsWith('"')) return match;
+        // 检测特殊字符: ( ) [ ] { } # & 等
+        if (/[(){}\[\]#&]/.test(label)) {
+            // 转义标签内的双引号
+            var escapedLabel = label.replace(/"/g, '\\"');
+            return nodeId + '["' + escapedLabel + '"]';
+        }
+        return match;
+    });
+}
+
 // 清理mermaid渲染失败遗留的错误SVG（mermaid v10会在body插入）
 function _cleanupMermaidBodyErrors() {
+    // 清理包含 "Syntax error" 或 "Parse error" 的 SVG
     document.querySelectorAll('body > svg').forEach(function(svg) {
         try {
             var txt = svg.textContent || '';
-            if (txt.indexOf('Syntax error') >= 0) svg.remove();
+            if (txt.indexOf('Syntax error') >= 0 || txt.indexOf('Parse error') >= 0 ||
+                txt.indexOf('mermaid') >= 0 || txt.indexOf('version') >= 0) {
+                svg.remove();
+            }
         } catch(e) {}
     });
+    // 清理 mermaid 渲染时插入 body 的临时 div（包含错误图标和版本号）
     document.querySelectorAll('body > div[id^="dmermaid-"], body > div[id^="mermaid-"]').forEach(function(d) {
         if (!d.closest('.chat-container')) d.remove();
+    });
+    // 清理可能包含 mermaid 错误图标的其他元素
+    document.querySelectorAll('body > .mermaid, body > [class*="mermaid"]').forEach(function(el) {
+        if (!el.closest('.chat-container')) el.remove();
     });
 }
 
@@ -1695,11 +1831,15 @@ function renderMermaidEl(el, originalText) {
                 el.innerHTML = result.svg;
                 el.classList.remove('mermaid');
             }
-        }).catch(function() {
+            // 渲染成功后再次清理可能遗留的错误元素
+            _cleanupMermaidBodyErrors();
+        }).catch(function(err) {
             // render失败，清理错误SVG并保留原始文本
+            console.warn('Mermaid render failed:', err);
             _cleanupMermaidBodyErrors();
         });
     } catch(e) {
+        console.warn('Mermaid render exception:', e);
         _cleanupMermaidBodyErrors();
     }
 }
@@ -1760,20 +1900,53 @@ function processSpecialContent(container, skipMermaid) {
         container.querySelectorAll('.mermaid:not([data-processed])').forEach(function(el) {
             var originalText = el.textContent;
             el.dataset.processed = 'true';
+            // 预处理：修复AI生成的Mermaid代码格式问题
+            var normalizedText = normalizeMermaidCode(originalText);
             // 先用 mermaid.parse 验证语法，有效才渲染，避免产生错误SVG
-            var parseOk = false;
             try {
                 // mermaid v10 parse() 返回 Promise
-                var parseResult = mermaid.parse(originalText);
+                var parseResult = mermaid.parse(normalizedText);
                 if (parseResult && typeof parseResult.then === 'function') {
-                    parseResult.then(function() { renderMermaidEl(el, originalText); })
-                        .catch(function() { /* 语法无效，保留原始文本，不做任何操作 */ });
+                    parseResult.then(function() {
+                        // 双重检查：确保元素仍在DOM中
+                        if (el.isConnected) {
+                            renderMermaidEl(el, normalizedText);
+                        }
+                    }).catch(function(err) {
+                        // 语法无效，尝试用原始文本再试一次
+                        console.warn('Mermaid parse failed (normalized):', err.message);
+                        try {
+                            var parseResult2 = mermaid.parse(originalText);
+                            if (parseResult2 && typeof parseResult2.then === 'function') {
+                                parseResult2.then(function() {
+                                    if (el.isConnected) {
+                                        renderMermaidEl(el, originalText);
+                                    }
+                                }).catch(function(err2) {
+                                    console.warn('Mermaid parse failed (original):', err2.message);
+                                });
+                            }
+                        } catch(e2) {
+                            console.warn('Mermaid parse failed (original):', e2.message);
+                        }
+                    });
                 } else {
                     // parse同步返回true/对象，语法有效
-                    renderMermaidEl(el, originalText);
+                    if (el.isConnected) {
+                        renderMermaidEl(el, normalizedText);
+                    }
                 }
             } catch(e) {
-                // parse抛异常 = 语法无效，保留原始文本
+                // parse抛异常 = 语法无效，尝试用原始文本
+                console.warn('Mermaid parse exception (normalized):', e.message);
+                try {
+                    mermaid.parse(originalText);
+                    if (el.isConnected) {
+                        renderMermaidEl(el, originalText);
+                    }
+                } catch(e2) {
+                    console.warn('Mermaid parse exception (original):', e2.message);
+                }
             }
         });
     }
