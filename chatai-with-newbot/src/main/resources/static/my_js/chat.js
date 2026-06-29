@@ -1700,15 +1700,30 @@ function mermaidFsDownload(btn) {
 // ===== 特殊内容处理 =====
 
 // 预处理Mermaid代码，修复AI生成的格式问题
-// 1. 将同一行的多个语句拆分为多行
-// 2. 为含特殊字符的节点标签添加双引号
+// 1. 将同一行的多个语句拆分为多行（仅限flowchart/graph类型）
+// 2. 为含特殊字符的节点标签添加双引号（仅限flowchart/graph类型）
 // 3. 修复subgraph标题中的非法样式分隔符 :::
+// 4. 修复sequenceDiagram中的非法自由文本行（转为Note over）
 function normalizeMermaidCode(code) {
     if (!code) return code;
     // 统一换行符
     code = code.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
     var lines = code.split('\n');
     var normalized = [];
+
+    // 检测图类型
+    var diagramType = detectMermaidDiagramType(code);
+    var isFlowchartType = (diagramType === 'flowchart' || diagramType === 'graph' || diagramType === 'unknown');
+    var isSequenceType = (diagramType === 'sequencediagram');
+
+    // sequenceDiagram: 收集所有 participant 别名，用于 Note over 修复
+    var seqParticipants = [];
+    if (isSequenceType) {
+        lines.forEach(function(line) {
+            var m = line.trim().match(/^participant\s+(\w+)\s+as\s+/);
+            if (m) seqParticipants.push(m[1]);
+        });
+    }
 
     lines.forEach(function(line) {
         var trimmed = line.trim();
@@ -1717,22 +1732,74 @@ function normalizeMermaidCode(code) {
             normalized.push(line);
             return;
         }
-        // 拆分同一行的多个语句（所有行都尝试拆分，包括subgraph行）
-        var parts = splitMermaidLine(trimmed);
-        parts.forEach(function(part) {
-            var p = part.trim();
-            if (!p) return;
-            // 处理subgraph行：移除标题中的非法 :::样式类
+        if (isFlowchartType) {
+            // flowchart类型：拆分同一行的多个语句
+            var parts = splitMermaidLine(trimmed);
+            parts.forEach(function(part) {
+                var p = part.trim();
+                if (!p) return;
+                if (p.startsWith('subgraph ')) {
+                    p = fixSubgraphLine(p);
+                }
+                p = quoteMermaidLabels(p);
+                normalized.push(p);
+            });
+        } else if (isSequenceType) {
+            // sequenceDiagram类型：修复非法自由文本行
+            var p = trimmed;
             if (p.startsWith('subgraph ')) {
                 p = fixSubgraphLine(p);
             }
-            // 为含特殊字符的节点标签添加双引号
-            p = quoteMermaidLabels(p);
+            p = fixSequenceDiagramLine(p, seqParticipants);
             normalized.push(p);
-        });
+        } else {
+            // 其他类型：原样保留
+            var p2 = trimmed;
+            if (p2.startsWith('subgraph ')) {
+                p2 = fixSubgraphLine(p2);
+            }
+            normalized.push(p2);
+        }
     });
 
     return normalized.join('\n');
+}
+
+// 修复sequenceDiagram中的非法自由文本行
+// sequenceDiagram只允许: participant/Note over/loop...end/alt...end/opt...end
+// 以及消息语法 A->>B: 文本
+// AI常生成非法行如 "j=0: 比较5和1 -> 交换 → [1,5,4,2,8]"
+// 将这类行转为 "Note over 第一个participant: 文本"
+function fixSequenceDiagramLine(line, participants) {
+    var trimmed = line.trim();
+    // 图类型声明行，直接返回（不能被误转）
+    if (/^(sequenceDiagram|graph|flowchart|classDiagram|stateDiagram|stateDiagram-v2|gantt|pie|gitGraph|erDiagram|journey|mindmap|timeline|quadrantChart)\b/i.test(trimmed)) {
+        return line;
+    }
+    // 合法的sequenceDiagram关键字行，直接返回
+    if (/^(participant|actor|create|destroy|note|Note|loop|end|alt|else|opt|rect|autonumber|activate|deactivate)\b/.test(trimmed)) {
+        return line;
+    }
+    // 合法的消息语法: A->>B: 或 A-->>B: 等
+    if (/^\w+\s*(-?>+|--?>>+|->|\.)+\s*\w*\s*:/.test(trimmed)) {
+        return line;
+    }
+    // 其他行视为非法自由文本，转为 Note over
+    // 如果有participant，用第一个；否则用通配符
+    var target = participants.length > 0 ? participants[0] : 'arr';
+    // 转义文本中的特殊字符（Note文本中不能有未转义的引号）
+    var text = trimmed.replace(/"/g, '\\"');
+    return 'Note over ' + target + ': ' + text;
+}
+
+// 检测Mermaid图类型
+function detectMermaidDiagramType(code) {
+    var firstLine = code.trim().split('\n')[0].trim();
+    // 匹配 "graph TD"、"flowchart LR"、"sequenceDiagram" 等
+    var m = firstLine.match(/^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|stateDiagram-v2|gantt|pie|gitGraph|erDiagram|journey|mindmap|timeline|quadrantChart|requirementDiagram|C4Context|C4Container|C4Component|C4Dynamic|sankey|block|packet|architecture)\b/i);
+    if (m) return m[1].toLowerCase();
+    // 没有明确类型声明的，默认当作flowchart处理
+    return 'unknown';
 }
 
 // 修复subgraph行：移除标题中的非法 :::样式类 分隔符
@@ -1881,6 +1948,11 @@ function _drainMermaidQueue() {
             }
         }).catch(function(err) {
             console.warn('Mermaid render failed:', err.message || err);
+            // 渲染失败时，显示友好错误提示 + 原始代码，而不是空白
+            if (el.isConnected) {
+                el.classList.remove('mermaid');
+                el.innerHTML = '<div class="mermaid-error-tip" style="padding:8px 12px;border:1px dashed #e85d5d;border-radius:6px;background:rgba(232,93,93,0.08);color:#e85d5d;font-size:12px;margin-bottom:6px;">⚠ Mermaid 图表语法错误，无法渲染。请检查代码或让AI重新生成。</div><pre style="margin:0;"><code class="language-mermaid">' + escapeHtml(originalText) + '</code></pre>';
+            }
         }).then(function() {
             // 无论成功失败，清理并继续下一个
             _cleanupMermaidBodyErrors();
@@ -1889,6 +1961,10 @@ function _drainMermaidQueue() {
         });
     } catch(e) {
         console.warn('Mermaid render exception:', e.message || e);
+        if (el.isConnected) {
+            el.classList.remove('mermaid');
+            el.innerHTML = '<div class="mermaid-error-tip" style="padding:8px 12px;border:1px dashed #e85d5d;border-radius:6px;background:rgba(232,93,93,0.08);color:#e85d5d;font-size:12px;margin-bottom:6px;">⚠ Mermaid 图表语法错误，无法渲染。请检查代码或让AI重新生成。</div><pre style="margin:0;"><code class="language-mermaid">' + escapeHtml(originalText) + '</code></pre>';
+        }
         _cleanupMermaidBodyErrors();
         _mermaidRendering = false;
         _drainMermaidQueue();
