@@ -119,11 +119,62 @@ layui.use(['layer', 'form', 'element', 'jquery'], function() {
     if (typeof mermaid !== 'undefined' && mermaid.initialize) {
         mermaid.initialize({
             startOnLoad: false,
-            theme: 'neutral',
+            theme: 'default', // 彩色主题
+            themeVariables: {
+                // 统一使用浅灰色背景，与外层容器保持一致
+                background: '#f5f5f5',
+                primaryColor: '#e0f2fe',
+                primaryTextColor: '#0c4a6e',
+                primaryBorderColor: '#0284c7',
+                lineColor: '#475569',
+                secondaryColor: '#fef3c7',
+                tertiaryColor: '#f3e8ff',
+                // 浅色背景相关变量
+                mainBkg: '#f5f5f5',
+                secondBkg: '#f8fafc',
+                tertiaryBkg: '#f1f5f9',
+                // 节点背景色
+                nodeBorder: '#cbd5e1',
+                nodeTextColor: '#1e293b',
+                // 确保各种图表元素都是浅色
+                cScale0: '#e0f2fe',
+                cScale1: '#fef3c7',
+                cScale2: '#f3e8ff',
+                cScale3: '#dcfce7',
+                cScale4: '#ffe4e6',
+                cScale5: '#e0e7ff',
+                cScale6: '#ccfbf1',
+                cScale7: '#fef9c3',
+                // 标题和文字颜色
+                titleColor: '#1e293b',
+                edgeLabelBackground: '#f5f5f5',
+                // 时序图相关
+                actorBorder: '#94a3b8',
+                actorBkg: '#f8fafc',
+                actorTextColor: '#1e293b',
+                actorLineColor: '#94a3b8',
+                signalColor: '#475569',
+                signalTextColor: '#1e293b',
+                // 甘特图相关
+                section0: '#e0f2fe',
+                section1: '#fef3c7',
+                section2: '#f3e8ff',
+                section3: '#dcfce7',
+                // 饼图相关
+                pieOuterStrokeWidth: '1px',
+                pieOuterStroke: '#e2e8f0',
+                pieTitleTextSize: '16px',
+                pieTitleTextColor: '#1e293b',
+                pieSectionTextSize: '12px',
+                pieSectionTextColor: '#1e293b',
+                // 确保文本可读
+                textColor: '#1e293b',
+                fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
+            },
             // 提高复杂图表的限制，避免大图表渲染失败
             maxEdges: 500,
             maxTextSize: 50000,
-            // 流程图配置：使用更宽松的设置
+            // 流程图配置
             flowchart: {
                 useMaxWidth: true,
                 htmlLabels: true,
@@ -135,7 +186,11 @@ layui.use(['layer', 'form', 'element', 'jquery'], function() {
             },
             // 甘特图配置
             gantt: {
-                useMaxWidth: true
+                useMaxWidth: true,
+                // 增加甘特图横向空间，避免太挤
+                barHeight: 20,
+                barGap: 4,
+                sectionMargin: 20
             },
             // 安全级别
             securityLevel: 'loose'
@@ -974,6 +1029,11 @@ function sendMessage(fromButton) {
 function finishStream(interrupted) {
     isStreamActive = false;
     hideLoading();
+    // 清除流式mermaid渲染防抖定时器，确保最终渲染
+    if (_streamingMermaidTimer) {
+        clearTimeout(_streamingMermaidTimer);
+        _streamingMermaidTimer = null;
+    }
     if (currentThinkingContent || currentAnswerContent) {
         var content = currentAnswerContent;
         // 避免保存content为空的assistant消息，否则后续请求API会报400错误
@@ -1169,9 +1229,9 @@ function updateStreamingMessage(msg) {
             }
         }
     }
-    // 流式输出期间跳过mermaid渲染（避免复杂图表在DOM频繁重建时渲染失败）
-    // mermaid将在finishStream中统一渲染
-    processSpecialContent(streamEl, true);
+    // 流式输出期间实时渲染mermaid（带防抖，避免频繁渲染）
+    // mermaid代码块在流式输出中可能不完整，渲染失败会自动保留原始文本
+    _scheduleStreamingMermaidRender(streamEl);
     // 智能自动滚动：DOM 内容更新后立即同步滚动（无 rAF 延迟），
     // 使"内容增长"与"视图跟随"在同一帧完成，避免底部先被撑开再弹回的闪烁
     if (typeof ScrollFollowManager !== 'undefined') {
@@ -1182,6 +1242,23 @@ function updateStreamingMessage(msg) {
             container.scrollTop = container.scrollHeight;
         }
     }
+}
+
+// 流式输出期间mermaid实时渲染的防抖定时器
+var _streamingMermaidTimer = null;
+
+// 调度流式输出期间的mermaid渲染（防抖300ms）
+function _scheduleStreamingMermaidRender(container) {
+    if (_streamingMermaidTimer) clearTimeout(_streamingMermaidTimer);
+    _streamingMermaidTimer = setTimeout(function() {
+        _streamingMermaidTimer = null;
+        // 检查容器中是否有未渲染的mermaid元素
+        if (!container || !container.isConnected) return;
+        var unrendered = container.querySelectorAll('.mermaid:not([data-processed])');
+        if (unrendered.length === 0) return;
+        // 实时渲染（不跳过）
+        processSpecialContent(container, false);
+    }, 300);
 }
 
 // 创建assistant消息的footer（包含模型、token消耗、复制按钮）
@@ -1903,6 +1980,12 @@ function renderMermaidEl(el, originalText) {
             if (el.isConnected || el.offsetParent) {
                 el.innerHTML = result.svg;
                 el.classList.remove('mermaid');
+                // 统一背景色处理
+                var svg = el.querySelector('svg');
+                if (svg) {
+                    svg.style.background = '#f5f5f5';
+                    svg.setAttribute('style', (svg.getAttribute('style') || '') + ';background:#f5f5f5!important');
+                }
             }
             // 渲染成功后清理可能遗留的错误元素
             _cleanupMermaidBodyErrors();
@@ -1945,6 +2028,12 @@ function _drainMermaidQueue() {
             if (el.isConnected || el.offsetParent) {
                 el.innerHTML = result.svg;
                 el.classList.remove('mermaid');
+                // 统一背景色处理
+                var svg = el.querySelector('svg');
+                if (svg) {
+                    svg.style.background = '#f5f5f5';
+                    svg.setAttribute('style', (svg.getAttribute('style') || '') + ';background:#f5f5f5!important');
+                }
             }
         }).catch(function(err) {
             console.warn('Mermaid render failed:', err.message || err);
