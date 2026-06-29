@@ -1702,6 +1702,7 @@ function mermaidFsDownload(btn) {
 // 预处理Mermaid代码，修复AI生成的格式问题
 // 1. 将同一行的多个语句拆分为多行
 // 2. 为含特殊字符的节点标签添加双引号
+// 3. 修复subgraph标题中的非法样式分隔符 :::
 function normalizeMermaidCode(code) {
     if (!code) return code;
     // 统一换行符
@@ -1716,30 +1717,33 @@ function normalizeMermaidCode(code) {
             normalized.push(line);
             return;
         }
-        // 跳过图类型声明和特殊指令
-        if (trimmed.startsWith('graph ') || trimmed.startsWith('flowchart ') ||
-            trimmed.startsWith('sequenceDiagram') || trimmed.startsWith('gantt') ||
-            trimmed.startsWith('classDiagram') || trimmed.startsWith('stateDiagram') ||
-            trimmed.startsWith('pie') || trimmed.startsWith('gitGraph') ||
-            trimmed.startsWith('subgraph') || trimmed === 'end' ||
-            trimmed.startsWith('linkStyle') || trimmed.startsWith('click') ||
-            trimmed.startsWith('style ') || trimmed.startsWith('class ')) {
-            normalized.push(line);
-            return;
-        }
-        // 拆分同一行的多个语句
+        // 拆分同一行的多个语句（所有行都尝试拆分，包括subgraph行）
         var parts = splitMermaidLine(trimmed);
         parts.forEach(function(part) {
             var p = part.trim();
-            if (p) {
-                // 为含特殊字符的节点标签添加双引号
-                p = quoteMermaidLabels(p);
-                normalized.push(p);
+            if (!p) return;
+            // 处理subgraph行：移除标题中的非法 :::样式类
+            if (p.startsWith('subgraph ')) {
+                p = fixSubgraphLine(p);
             }
+            // 为含特殊字符的节点标签添加双引号
+            p = quoteMermaidLabels(p);
+            normalized.push(p);
         });
     });
 
     return normalized.join('\n');
+}
+
+// 修复subgraph行：移除标题中的非法 :::样式类 分隔符
+// subgraph 标题:::className 是非法语法，需移除 :::className
+function fixSubgraphLine(line) {
+    // subgraph id["标题"] 或 subgraph "标题" 或 subgraph 标题
+    // 移除标题末尾的 :::className（可能多个）
+    // 仅在 subgraph 关键字之后处理
+    return line.replace(/^(subgraph\s+)(.+?)(:::\w+)+(\s*)$/, function(match, prefix, title, style, tail) {
+        return prefix + title + tail;
+    });
 }
 
 // 拆分一行中包含的多个Mermaid语句
