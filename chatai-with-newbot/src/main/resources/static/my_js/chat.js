@@ -1826,25 +1826,72 @@ function _cleanupMermaidBodyErrors() {
 }
 
 // mermaid单个元素渲染（语法已验证有效后调用）
+// 注意：mermaid.render() 会在 body 创建临时 DOM 元素，并发渲染会相互干扰
+// 因此必须串行调用（通过 _mermaidRenderQueue 保证一次只渲染一个）
 function renderMermaidEl(el, originalText) {
     try {
-        var id = 'mermaid-' + Date.now() + '-' + Math.random().toString(36).substr(2,5);
+        var id = 'mmd-' + Date.now() + '-' + Math.random().toString(36).substr(2,5);
         mermaid.render(id, originalText).then(function(result) {
             // 仅在元素仍在DOM中时才插入结果（防止流式重建后插入已废弃的元素）
             if (el.isConnected || el.offsetParent) {
                 el.innerHTML = result.svg;
                 el.classList.remove('mermaid');
             }
-            // 渲染成功后再次清理可能遗留的错误元素
+            // 渲染成功后清理可能遗留的错误元素
             _cleanupMermaidBodyErrors();
         }).catch(function(err) {
             // render失败，清理错误SVG并保留原始文本
-            console.warn('Mermaid render failed:', err);
+            console.warn('Mermaid render failed:', err.message || err);
             _cleanupMermaidBodyErrors();
         });
     } catch(e) {
-        console.warn('Mermaid render exception:', e);
+        console.warn('Mermaid render exception:', e.message || e);
         _cleanupMermaidBodyErrors();
+    }
+}
+
+// mermaid 串行渲染队列：保证同一时间只有一个 mermaid.render() 在执行
+// 避免 mermaid v10 并发渲染时临时 DOM 元素被误删导致 null 引用错误
+var _mermaidRenderQueue = [];
+var _mermaidRendering = false;
+
+function _enqueueMermaidRender(el, text) {
+    _mermaidRenderQueue.push({ el: el, text: text });
+    _drainMermaidQueue();
+}
+
+function _drainMermaidQueue() {
+    if (_mermaidRendering) return;
+    var item = _mermaidRenderQueue.shift();
+    if (!item) return;
+    var el = item.el;
+    var originalText = item.text;
+    // 元素已脱离DOM则跳过
+    if (!el.isConnected) {
+        _drainMermaidQueue();
+        return;
+    }
+    _mermaidRendering = true;
+    try {
+        var id = 'mmd-' + Date.now() + '-' + Math.random().toString(36).substr(2,5);
+        mermaid.render(id, originalText).then(function(result) {
+            if (el.isConnected || el.offsetParent) {
+                el.innerHTML = result.svg;
+                el.classList.remove('mermaid');
+            }
+        }).catch(function(err) {
+            console.warn('Mermaid render failed:', err.message || err);
+        }).then(function() {
+            // 无论成功失败，清理并继续下一个
+            _cleanupMermaidBodyErrors();
+            _mermaidRendering = false;
+            _drainMermaidQueue();
+        });
+    } catch(e) {
+        console.warn('Mermaid render exception:', e.message || e);
+        _cleanupMermaidBodyErrors();
+        _mermaidRendering = false;
+        _drainMermaidQueue();
     }
 }
 
@@ -1914,7 +1961,8 @@ function processSpecialContent(container, skipMermaid) {
                     parseResult.then(function() {
                         // 双重检查：确保元素仍在DOM中
                         if (el.isConnected) {
-                            renderMermaidEl(el, normalizedText);
+                            // 使用串行队列渲染，避免并发冲突
+                            _enqueueMermaidRender(el, normalizedText);
                         }
                     }).catch(function(err) {
                         // 语法无效，尝试用原始文本再试一次
@@ -1924,7 +1972,7 @@ function processSpecialContent(container, skipMermaid) {
                             if (parseResult2 && typeof parseResult2.then === 'function') {
                                 parseResult2.then(function() {
                                     if (el.isConnected) {
-                                        renderMermaidEl(el, originalText);
+                                        _enqueueMermaidRender(el, originalText);
                                     }
                                 }).catch(function(err2) {
                                     console.warn('Mermaid parse failed (original):', err2.message);
@@ -1937,7 +1985,7 @@ function processSpecialContent(container, skipMermaid) {
                 } else {
                     // parse同步返回true/对象，语法有效
                     if (el.isConnected) {
-                        renderMermaidEl(el, normalizedText);
+                        _enqueueMermaidRender(el, normalizedText);
                     }
                 }
             } catch(e) {
@@ -1946,7 +1994,7 @@ function processSpecialContent(container, skipMermaid) {
                 try {
                     mermaid.parse(originalText);
                     if (el.isConnected) {
-                        renderMermaidEl(el, originalText);
+                        _enqueueMermaidRender(el, originalText);
                     }
                 } catch(e2) {
                     console.warn('Mermaid parse exception (original):', e2.message);
