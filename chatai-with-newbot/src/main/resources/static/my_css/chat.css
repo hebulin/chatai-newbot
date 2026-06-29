@@ -197,25 +197,26 @@ body{display:flex}
 .msg-bubble .table-wrapper::-webkit-scrollbar-track{background:transparent}
 
 /* ===== Mermaid ===== */
-.mermaid-container{margin:10px 0;background:#ffffff;border-radius:8px;overflow:hidden;max-width:100%;border:1px solid rgba(99,102,241,.15);box-shadow:0 1px 3px rgba(0,0,0,.05)}
-.mermaid-toolbar{display:flex;align-items:center;border-bottom:1px solid rgba(99,102,241,.15);background:rgba(99,102,241,.05)}
+.mermaid-container{margin:12px 0;background:#f5f5f5;border-radius:10px;overflow:hidden;max-width:100%;border:1px solid rgba(99,102,241,.12);box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.mermaid-toolbar{display:flex;align-items:center;border-bottom:1px solid rgba(99,102,241,.12);background:linear-gradient(135deg,rgba(99,102,241,.06),rgba(139,92,246,.04))}
 .mermaid-tabs{display:flex}
-.mermaid-tab{padding:6px 14px;border:none;background:none;cursor:pointer;font-size:12px;color:#64748b;transition:all .15s;border-bottom:2px solid transparent}
-.mermaid-tab.active{color:#6366f1;border-bottom-color:#6366f1;font-weight:500}
+.mermaid-tab{padding:7px 16px;border:none;background:none;cursor:pointer;font-size:12px;color:#64748b;transition:all .15s;border-bottom:2px solid transparent}
+.mermaid-tab.active{color:#6366f1;border-bottom-color:#6366f1;font-weight:600}
 .mermaid-tab:hover{color:#6366f1}
 .mermaid-toolbar-spacer{flex:1}
 .mermaid-toolbar-sep{width:1px;height:16px;background:rgba(99,102,241,.2);margin:0 6px}
-.mermaid-action{display:flex;align-items:center;gap:2px;padding:4px 8px;border:none;background:none;cursor:pointer;font-size:11px;color:#64748b;transition:all .15s;border-radius:4px;white-space:nowrap}
+.mermaid-action{display:flex;align-items:center;gap:2px;padding:5px 9px;border:none;background:none;cursor:pointer;font-size:11px;color:#64748b;transition:all .15s;border-radius:5px;white-space:nowrap}
 .mermaid-action svg{flex-shrink:0}
 .mermaid-action:hover{color:#6366f1;background:rgba(99,102,241,.1)}
-.mermaid-actions{display:flex;align-items:center;gap:2px;padding-right:4px}
+.mermaid-actions{display:flex;align-items:center;gap:2px;padding-right:6px}
 .mermaid-actions.hidden{display:none}
-.mermaid-view{padding:16px;overflow:auto;position:relative}
-.mermaid-view pre{background:#ffffff!important;margin:0!important;padding:0!important;border-radius:0!important}
-.mermaid-view pre svg{max-width:100%;transition:transform .2s ease;transform-origin:center center}
+.mermaid-view{padding:20px 16px;overflow:auto;position:relative;display:flex;justify-content:center;align-items:center;min-height:60px;background:#f5f5f5}
+.mermaid-view pre{background:#f5f5f5!important;margin:0!important;padding:0!important;border-radius:0!important;text-align:center}
+.mermaid-view pre svg{max-width:100%;transition:transform .2s ease;transform-origin:center center;display:inline-block}
 .mermaid-code{padding:0}
 .mermaid-code pre{background:#1e293b!important;border-radius:0!important;margin:0!important}
 .mermaid-code pre code{color:#ffffff!important;padding:14px!important;font-weight:500}
+.mermaid-error-tip{padding:10px 14px;border:1px dashed #e85d5d;border-radius:8px;background:rgba(232,93,93,.08);color:#e85d5d;font-size:12px;margin:8px 0}
 
 /* Mermaid Fullscreen Overlay */
 .mermaid-fullscreen-overlay{position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,.95);display:flex;flex-direction:column;align-items:center;justify-content:center;animation:mermaidFsIn .2s ease}
@@ -417,7 +418,7 @@ body{display:flex}
 [data-theme="light"] .msg-bubble .table-wrapper::-webkit-scrollbar-thumb{background:transparent;border-radius:10px;border:2px solid transparent;background-clip:content-box}
 [data-theme="light"] .msg-bubble .table-wrapper:hover::-webkit-scrollbar-thumb{background:rgba(99,102,241,.2);border:2px solid transparent;background-clip:content-box}
 [data-theme="light"] .msg-bubble .table-wrapper:hover::-webkit-scrollbar-thumb:hover{background:rgba(99,102,241,.4)}
-[data-theme="light"] .mermaid-container{background:#fff;border:1px solid rgba(99,102,241,.1)}
+[data-theme="light"] .mermaid-container{background:#f5f5f5;border:1px solid rgba(99,102,241,.1)}
 [data-theme="light"] .mermaid-toolbar{border-bottom:1px solid rgba(99,102,241,.1);background:rgba(99,102,241,.03)}
 [data-theme="light"] .mermaid-tab{color:#94a3b8}
 [data-theme="light"] .mermaid-tab.active{color:#6366f1;border-bottom-color:#6366f1}
