@@ -65,6 +65,19 @@ body{display:flex}
 .chat-date-header{font-size:11px;color:#64748b;font-weight:600;padding:8px 12px 4px;user-select:none;letter-spacing:.02em;text-transform:uppercase}
 
 .chat-list{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:0}
+
+/* ===== Chat List Loading Skeleton ===== */
+.chat-list-loading{display:flex;flex-direction:column;gap:8px;padding:4px 0}
+.chat-list-skeleton{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px}
+.chat-list-skeleton-bar{height:14px;border-radius:6px;background:rgba(99,102,241,.12);animation:chatListPulse 1.5s ease-in-out infinite}
+.chat-list-skeleton-bar.short{width:40%}
+.chat-list-skeleton-bar.medium{width:65%}
+.chat-list-skeleton-bar.long{width:80%}
+.chat-list-skeleton-dot{width:8px;height:8px;border-radius:50%;background:rgba(99,102,241,.12);animation:chatListPulse 1.5s ease-in-out infinite;flex-shrink:0}
+@keyframes chatListPulse{0%,100%{opacity:.3;background:rgba(99,102,241,.08)}50%{opacity:.8;background:rgba(99,102,241,.18)}}
+[data-theme="light"] .chat-list-skeleton-bar{background:rgba(99,102,241,.08)}
+[data-theme="light"] .chat-list-skeleton-dot{background:rgba(99,102,241,.08)}
+[data-theme="light"] @keyframes chatListPulse{0%,100%{opacity:.3;background:rgba(99,102,241,.05)}50%{opacity:.8;background:rgba(99,102,241,.12)}}
 .chat-list::-webkit-scrollbar{width:6px}
 .chat-list::-webkit-scrollbar-thumb{background:transparent;border-radius:10px;border:2px solid transparent;background-clip:content-box}
 .chat-list:hover::-webkit-scrollbar-thumb{background:rgba(99,102,241,.25);border:2px solid transparent;background-clip:content-box}
@@ -99,7 +112,9 @@ body{display:flex}
 .spacer{flex:1}
 
 /* ===== Chat Container ===== */
-.chat-container{flex:1;overflow-y:auto;overflow-x:hidden;padding:20px;scroll-behavior:smooth}
+/* 注意：不在此处设置 scroll-behavior:smooth，避免流式输出时频繁 scrollTop 导致平滑动画叠加闪烁。
+   平滑滚动仅在用户手动操作（点击回到顶部/底部按钮）时由 JS 临时启用。 */
+.chat-container{flex:1;overflow-y:auto;overflow-x:hidden;padding:20px;position:relative}
 .chat-container::-webkit-scrollbar{width:8px}
 .chat-container::-webkit-scrollbar-thumb{background:transparent;border-radius:10px;border:2px solid transparent;background-clip:content-box}
 .chat-container:hover::-webkit-scrollbar-thumb{background:rgba(99,102,241,.25);border:2px solid transparent;background-clip:content-box}
@@ -181,43 +196,8 @@ body{display:flex}
 .msg-bubble .table-wrapper:hover::-webkit-scrollbar-thumb:hover{background:rgba(99,102,241,.45)}
 .msg-bubble .table-wrapper::-webkit-scrollbar-track{background:transparent}
 
-/* ===== Mermaid ===== */
-.mermaid-container{margin:10px 0;background:#1e293b;border-radius:8px;overflow:hidden;max-width:100%;border:1px solid rgba(99,102,241,.15)}
-.mermaid-toolbar{display:flex;align-items:center;border-bottom:1px solid rgba(99,102,241,.15);background:rgba(99,102,241,.05)}
-.mermaid-tabs{display:flex}
-.mermaid-tab{padding:6px 14px;border:none;background:none;cursor:pointer;font-size:12px;color:#64748b;transition:all .15s;border-bottom:2px solid transparent}
-.mermaid-tab.active{color:#818cf8;border-bottom-color:#818cf8;font-weight:500}
-.mermaid-tab:hover{color:#818cf8}
-.mermaid-toolbar-spacer{flex:1}
-.mermaid-toolbar-sep{width:1px;height:16px;background:rgba(99,102,241,.2);margin:0 6px}
-.mermaid-action{display:flex;align-items:center;gap:2px;padding:4px 8px;border:none;background:none;cursor:pointer;font-size:11px;color:#64748b;transition:all .15s;border-radius:4px;white-space:nowrap}
-.mermaid-action svg{flex-shrink:0}
-.mermaid-action:hover{color:#818cf8;background:rgba(99,102,241,.1)}
-.mermaid-actions{display:flex;align-items:center;gap:2px;padding-right:4px}
-.mermaid-actions.hidden{display:none}
-.mermaid-view{padding:16px;overflow:auto;position:relative}
-.mermaid-view pre{background:#1e293b!important;margin:0!important;padding:0!important;border-radius:0!important}
-.mermaid-view pre svg{max-width:100%;transition:transform .2s ease;transform-origin:center center}
-.mermaid-code{padding:0}
-.mermaid-code pre{background:#0f172a!important;border-radius:0!important;margin:0!important}
-.mermaid-code pre code{color:#e2e8f0!important;padding:14px!important}
-
-/* Mermaid Fullscreen Overlay */
-.mermaid-fullscreen-overlay{position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,.95);display:flex;flex-direction:column;align-items:center;justify-content:center;animation:mermaidFsIn .2s ease}
-@keyframes mermaidFsIn{from{opacity:0}to{opacity:1}}
-.mermaid-fullscreen-close{position:absolute;top:16px;right:16px;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.2);color:#e2e8f0;width:36px;height:36px;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;font-size:18px}
-.mermaid-fullscreen-close:hover{background:rgba(99,102,241,.3);color:#fff}
-.mermaid-fullscreen-toolbar{position:absolute;top:16px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:4px;background:rgba(30,27,75,.8);border:1px solid rgba(99,102,241,.2);border-radius:8px;padding:4px 8px;backdrop-filter:blur(10px)}
-.mermaid-fullscreen-toolbar .mermaid-action{color:#94a3b8;padding:4px 10px;font-size:12px}
-.mermaid-fullscreen-toolbar .mermaid-action:hover{color:#818cf8;background:rgba(99,102,241,.15)}
-.mermaid-fullscreen-toolbar .mermaid-toolbar-sep{height:18px}
-.mermaid-fullscreen-content{flex:1;display:flex;align-items:center;justify-content:center;width:100%;padding:60px 20px 20px;overflow:auto;cursor:grab}
-.mermaid-fullscreen-content:active{cursor:grabbing}
-.mermaid-fullscreen-content svg{max-width:90%;max-height:90%;transition:transform .15s ease;transform-origin:center center;user-select:none}
-
-
 /* ===== Scroll Navigation ===== */
-.scroll-nav{position:absolute;right:20px;bottom:90px;display:flex;flex-direction:column;gap:8px;z-index:50;pointer-events:none}
+.scroll-nav{position:fixed;right:20px;bottom:80px;display:flex;flex-direction:column;gap:6px;z-index:50;pointer-events:none;transition:right .15s,bottom .15s}
 .scroll-nav-btn{width:36px;height:36px;border-radius:50%;background:rgba(30,27,75,.85);border:1px solid rgba(99,102,241,.25);color:#94a3b8;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;pointer-events:auto;backdrop-filter:blur(8px);box-shadow:0 2px 8px rgba(0,0,0,.3)}
 .scroll-nav-btn:hover{background:rgba(99,102,241,.3);color:#818cf8;border-color:rgba(99,102,241,.4);transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.4)}
 
@@ -300,6 +280,9 @@ body{display:flex}
 .input-area{padding:8px 12px 6px}
 .model-select-area{max-width:160px}
 .model-select-value{max-width:100px}
+.scroll-nav-btn{width:32px;height:32px}
+.scroll-nav-btn svg{width:16px;height:16px}
+.scroll-nav{right:12px;bottom:12px;gap:4px}
 }
 
 /* ===== Lists in messages ===== */
@@ -399,19 +382,6 @@ body{display:flex}
 [data-theme="light"] .msg-bubble .table-wrapper::-webkit-scrollbar-thumb{background:transparent;border-radius:10px;border:2px solid transparent;background-clip:content-box}
 [data-theme="light"] .msg-bubble .table-wrapper:hover::-webkit-scrollbar-thumb{background:rgba(99,102,241,.2);border:2px solid transparent;background-clip:content-box}
 [data-theme="light"] .msg-bubble .table-wrapper:hover::-webkit-scrollbar-thumb:hover{background:rgba(99,102,241,.4)}
-[data-theme="light"] .mermaid-container{background:#fff;border:1px solid rgba(99,102,241,.1)}
-[data-theme="light"] .mermaid-toolbar{border-bottom:1px solid rgba(99,102,241,.1);background:rgba(99,102,241,.03)}
-[data-theme="light"] .mermaid-tab{color:#94a3b8}
-[data-theme="light"] .mermaid-tab.active{color:#6366f1;border-bottom-color:#6366f1}
-[data-theme="light"] .mermaid-action{color:#64748b}
-[data-theme="light"] .mermaid-action:hover{color:#6366f1;background:rgba(99,102,241,.08)}
-[data-theme="light"] .mermaid-toolbar-sep{background:rgba(99,102,241,.12)}
-[data-theme="light"] .mermaid-fullscreen-overlay{background:rgba(248,250,252,.95)}
-[data-theme="light"] .mermaid-fullscreen-close{background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.15);color:#1e293b}
-[data-theme="light"] .mermaid-fullscreen-close:hover{background:rgba(99,102,241,.15);color:#6366f1}
-[data-theme="light"] .mermaid-fullscreen-toolbar{background:rgba(255,255,255,.9);border:1px solid rgba(99,102,241,.12)}
-[data-theme="light"] .mermaid-fullscreen-toolbar .mermaid-action{color:#64748b}
-[data-theme="light"] .mermaid-fullscreen-toolbar .mermaid-action:hover{color:#6366f1;background:rgba(99,102,241,.08)}
 [data-theme="light"] .input-area{background:rgba(238,242,255,.5);border-top:1px solid rgba(99,102,241,.1)}
 [data-theme="light"] .model-select-trigger{background:transparent;border:none;color:#64748b}
 [data-theme="light"] .model-select-trigger:hover{background:rgba(99,102,241,.08);color:#1e293b}
