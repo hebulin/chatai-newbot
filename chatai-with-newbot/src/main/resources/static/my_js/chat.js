@@ -1,3 +1,18 @@
+// ===== 会话列表Loading动画 =====
+function showChatListLoading() {
+    var list = document.getElementById('chatList');
+    if (!list) return;
+    list.innerHTML = '<div class="chat-list-loading">' +
+        '<div class="chat-list-skeleton"><span class="chat-list-skeleton-dot"></span><span class="chat-list-skeleton-bar long"></span></div>' +
+        '<div class="chat-list-skeleton"><span class="chat-list-skeleton-dot"></span><span class="chat-list-skeleton-bar medium"></span></div>' +
+        '<div class="chat-list-skeleton"><span class="chat-list-skeleton-dot"></span><span class="chat-list-skeleton-bar short"></span></div>' +
+        '<div class="chat-list-skeleton"><span class="chat-list-skeleton-dot"></span><span class="chat-list-skeleton-bar long"></span></div>' +
+        '<div class="chat-list-skeleton"><span class="chat-list-skeleton-dot"></span><span class="chat-list-skeleton-bar medium"></span></div>' +
+        '</div>'; }
+function hideChatListLoading() {
+    // loading会在updateChatList()中自动清除，无需额外操作
+}
+
 // ===== 安全的localStorage访问封装 =====
 var _storageAvailable = null;
 function safeStorageGet(key) {
@@ -68,6 +83,16 @@ layui.use(['layer', 'form', 'element', 'jquery'], function() {
     window._$ = $;
     window._form = form;
 
+    // 注入 MermaidRenderer 依赖(模块独立, 通过 configure 解耦)
+    if (typeof MermaidRenderer !== 'undefined' && MermaidRenderer.configure) {
+        MermaidRenderer.configure({
+            toast: showToast,
+            escapeHtml: escapeHtml,
+            safeStorageGet: safeStorageGet,
+            safeStorageSet: safeStorageSet
+        });
+    }
+
     // 初始化思考图标按钮
     var thinkIconBtn = document.getElementById('thinkIconBtn');
     if (thinkIconBtn) {
@@ -83,23 +108,25 @@ layui.use(['layer', 'form', 'element', 'jquery'], function() {
     if (!TOKEN) { window.location.href = '/login.html'; return; }
 
     // 初始化marked（安全检查：CDN可能被浏览器扩展阻止加载）
-    if (typeof marked !== 'undefined' && marked.setOptions) {
-        marked.setOptions({
-            gfm: true, breaks: true, headerIds: false, mangle: false,
-            highlight: function(code, lang) {
-                try {
-                    if (typeof hljs !== 'undefined') {
-                        if (lang && hljs.getLanguage(lang)) return hljs.highlight(code, {language: lang}).value;
-                        return hljs.highlightAuto(code).value;
-                    }
-                } catch(e) {}
-                return code;
-            }
-        });
+    if (typeof marked !== 'undefined') {
+        if (marked.use) {
+            // v5+ 使用 marked.use + custom renderer（避免废弃的 highlight 参数）
+            var hljsRenderer = {
+                code: function(code, lang) {
+                    var escaped = escapeHtml(code);
+                    var cls = lang ? ' class="language-' + lang + '"' : '';
+                    return '<pre><code' + cls + '>' + escaped + '</code></pre>';
+                }
+            };
+            marked.use({ gfm: true, breaks: true, renderer: hljsRenderer });
+            // 禁用v5+废弃参数，清除控制台警告
+            marked.setOptions({ mangle: false, headerIds: false, headerPrefix: '' });
+        } else if (marked.setOptions) {
+            // 旧版本回退
+            marked.setOptions({ gfm: true, breaks: true, mangle: false, headerIds: false, headerPrefix: '' });
+        }
     }
-    if (typeof mermaid !== 'undefined' && mermaid.initialize) {
-        mermaid.initialize({ startOnLoad: false, theme: 'default' });
-    }
+    // mermaid 初始化已迁移到 my_js/mermaid-renderer.js(独立模块)
 
     // 显示用户信息
     document.getElementById('usernameDisplay').textContent = safeStorageGet('username') || '用户';
@@ -111,6 +138,8 @@ layui.use(['layer', 'form', 'element', 'jquery'], function() {
         if (adminBtn) adminBtn.style.display = 'flex';
     }
 
+    // 显示会话列表加载动画
+    showChatListLoading();
     // 从服务端加载会话历史（多端同步）
     loadChatHistoryFromServer(function() {
         loadModels();
@@ -133,10 +162,10 @@ layui.use(['layer', 'form', 'element', 'jquery'], function() {
         document.getElementById('sidebar').classList.add('collapsed');
     }
 
-    // 滚动导航监听
+    // 滚动跟随管理器初始化（统一处理自动滚动/中断/恢复/节流/失焦/触摸）
     var chatContainer = document.getElementById('chatContainer');
-    if (chatContainer) {
-        chatContainer.addEventListener('scroll', updateScrollNav);
+    if (chatContainer && typeof ScrollFollowManager !== 'undefined') {
+        ScrollFollowManager.init(chatContainer);
     }
 
     // 点击外部关闭模型下拉框
@@ -931,6 +960,11 @@ function sendMessage(fromButton) {
 function finishStream(interrupted) {
     isStreamActive = false;
     hideLoading();
+    // 清除流式mermaid渲染防抖定时器，确保最终渲染
+    if (_streamingMermaidTimer) {
+        clearTimeout(_streamingMermaidTimer);
+        _streamingMermaidTimer = null;
+    }
     if (currentThinkingContent || currentAnswerContent) {
         var content = currentAnswerContent;
         // 避免保存content为空的assistant消息，否则后续请求API会报400错误
@@ -1004,7 +1038,7 @@ function finishStream(interrupted) {
             }
             var footer = createAssistantFooter(msg);
             streamEl.appendChild(footer);
-            // 处理特殊内容（代码高亮等）
+            // 处理特殊内容（代码高亮等），流结束后触发mermaid渲染
             processSpecialContent(streamEl);
         }
     } else {
@@ -1014,14 +1048,20 @@ function finishStream(interrupted) {
     }
     resetState();
     // 不再全量重建DOM，仅在必要时刷新（如切换会话后回来）
-    // displayMessages() 会导致闪烁，改为仅更新滚动位置
-    var container = document.getElementById('chatContainer');
-    if (container) {
-        var isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
-        if (isNearBottom) {
-            container.scrollTop = container.scrollHeight;
+    // displayMessages() 会导致闪烁，改为仅更新滚动位置（通过 ScrollFollowManager 统一处理）
+    // 流结束后同步滚动到底部，确保最终内容完全可见
+    if (typeof ScrollFollowManager !== 'undefined') {
+        ScrollFollowManager.syncScrollToBottom();
+        ScrollFollowManager.updateNavButtons();
+    } else {
+        var container = document.getElementById('chatContainer');
+        if (container) {
+            var isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+            if (isNearBottom) {
+                container.scrollTop = container.scrollHeight;
+            }
+            updateScrollNav();
         }
-        updateScrollNav();
     }
     resetSendBtn();
 }
@@ -1051,8 +1091,16 @@ function displayMessages() {
     container.innerHTML = '';
     container.appendChild(frag);
     processSpecialContent(container);
-    container.scrollTop = container.scrollHeight;
-    updateScrollNav();
+    // 切换会话时重置跟随状态并瞬间跳到底部（通过 ScrollFollowManager 统一处理）
+    if (typeof ScrollFollowManager !== 'undefined') {
+        ScrollFollowManager.reset();
+        ScrollFollowManager.scrollToBottomImmediate();
+    } else {
+        container.style.scrollBehavior = 'auto';
+        container.scrollTop = container.scrollHeight;
+        container.style.scrollBehavior = 'smooth';
+        updateScrollNav();
+    }
 }
 
 function updateStreamingMessage(msg) {
@@ -1068,7 +1116,7 @@ function updateStreamingMessage(msg) {
         var existingFooter = streamEl.querySelector('.msg-footer');
         if (existingFooter) existingFooter.remove();
         streamEl.appendChild(createStreamingFooter(msg));
-        container.appendChild(streamEl);
+        appendToChat(streamEl);
     } else {
         var bubble = streamEl.querySelector('.msg-bubble');
         if (bubble) {
@@ -1112,12 +1160,36 @@ function updateStreamingMessage(msg) {
             }
         }
     }
-    processSpecialContent(streamEl);
-    // 智能自动滚动：仅在用户处于底部附近时自动跟随，用户向上滚动时不干扰
-    var isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
-    if (isNearBottom) {
-        container.scrollTop = container.scrollHeight;
+    // 流式输出期间实时渲染mermaid（带防抖，避免频繁渲染）
+    // mermaid代码块在流式输出中可能不完整，渲染失败会自动保留原始文本
+    _scheduleStreamingMermaidRender(streamEl);
+    // 智能自动滚动：DOM 内容更新后立即同步滚动（无 rAF 延迟），
+    // 使"内容增长"与"视图跟随"在同一帧完成，避免底部先被撑开再弹回的闪烁
+    if (typeof ScrollFollowManager !== 'undefined') {
+        ScrollFollowManager.syncScrollToBottom();
+    } else {
+        var isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+        if (isNearBottom) {
+            container.scrollTop = container.scrollHeight;
+        }
     }
+}
+
+// 流式输出期间mermaid实时渲染的防抖定时器
+var _streamingMermaidTimer = null;
+
+// 调度流式输出期间的mermaid渲染（防抖300ms）
+function _scheduleStreamingMermaidRender(container) {
+    if (_streamingMermaidTimer) clearTimeout(_streamingMermaidTimer);
+    _streamingMermaidTimer = setTimeout(function() {
+        _streamingMermaidTimer = null;
+        // 检查容器中是否有未渲染的mermaid元素
+        if (!container || !container.isConnected) return;
+        var unrendered = container.querySelectorAll('.mermaid:not([data-processed])');
+        if (unrendered.length === 0) return;
+        // 实时渲染（不跳过）
+        processSpecialContent(container, false);
+    }, 300);
 }
 
 // 创建assistant消息的footer（包含模型、token消耗、复制按钮）
@@ -1297,38 +1369,12 @@ function renderMarkdown(text) {
 
     var html = (typeof marked !== 'undefined' && marked.parse) ? marked.parse(text) : escapeHtml(text).replace(/\n/g, '<br>');
 
-    // 还原mermaid - 添加代码/视图切换工具栏 + 功能按钮
+    // 还原mermaid - 调用 MermaidRenderer 模块生成卡片 HTML
     mermaidBlocks.forEach(function(code, idx) {
-        var escapedCode = escapeHtml(code);
-        html = html.replace('%%MERMAID_' + idx + '%%',
-            '<div class="mermaid-container" data-mermaid-raw="' + escapedCode.replace(/"/g, '"') + '">' +
-            '<div class="mermaid-toolbar">' +
-            '<div class="mermaid-tabs">' +
-            '<button class="mermaid-tab active" onclick="switchMermaidView(this,\'view\')">视图</button>' +
-            '<button class="mermaid-tab" onclick="switchMermaidView(this,\'code\')">代码</button>' +
-            '</div>' +
-            '<div class="mermaid-toolbar-spacer"></div>' +
-            '<div class="mermaid-actions">' +
-            '<button class="mermaid-action" onclick="mermaidZoomOut(this)" title="缩小">' +
-            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>' +
-            '</button>' +
-            '<button class="mermaid-action" onclick="mermaidZoomIn(this)" title="放大">' +
-            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>' +
-            '</button>' +
-            '<span class="mermaid-toolbar-sep"></span>' +
-            '<button class="mermaid-action" onclick="mermaidDownload(this)" title="下载">' +
-            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>' +
-            '<span>下载</span>' +
-            '</button>' +
-            '<button class="mermaid-action" onclick="mermaidFullscreen(this)" title="全屏">' +
-            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>' +
-            '<span>全屏</span>' +
-            '</button>' +
-            '</div>' +
-            '</div>' +
-            '<div class="mermaid-view"><pre class="mermaid">' + escapedCode + '</pre></div>' +
-            '<div class="mermaid-code" style="display:none"><pre><code class="language-mermaid">' + escapedCode + '</code></pre></div>' +
-            '</div>');
+        var mermaidHtml = (typeof MermaidRenderer !== 'undefined' && MermaidRenderer.renderMermaidBlockTemplate)
+            ? MermaidRenderer.renderMermaidBlockTemplate(code)
+            : '<pre class="mermaid">' + escapeHtml(code) + '</pre>';
+        html = html.replace('%%MERMAID_' + idx + '%%', mermaidHtml);
     });
 
     return html;
@@ -1350,287 +1396,15 @@ function copyMsgContent(btn) {
     }).catch(function() { showToast('复制失败'); });
 }
 
-// ===== Mermaid 视图/代码切换 =====
-function switchMermaidView(btn, mode) {
-    var container = btn.closest('.mermaid-container');
-    var toolbar = container.querySelector('.mermaid-toolbar');
-    var viewDiv = container.querySelector('.mermaid-view');
-    var codeDiv = container.querySelector('.mermaid-code');
-    var actions = container.querySelector('.mermaid-actions');
+// ===== Mermaid 相关实现已迁移到 my_js/mermaid-renderer.js =====
+// 工具栏交互: 通过事件委托, 见 MermaidRenderer.handleToolbarAction
+// 主题切换: MermaidRenderer.cycleTheme / applyTheme
+// 全屏查看: MermaidRenderer.openFullscreen
+// 代码预处理: MermaidRenderer.normalizeMermaidCode
+// 渲染队列: MermaidRenderer._renderQueue / drainQueue
+// processSpecialContent 中通过 MermaidRenderer.processContainer 调用
 
-    toolbar.querySelectorAll('.mermaid-tab').forEach(function(t) { t.classList.remove('active'); });
-    btn.classList.add('active');
-
-    if (mode === 'code') {
-        viewDiv.style.display = 'none';
-        codeDiv.style.display = 'block';
-        // 代码模式下隐藏功能按钮
-        if (actions) actions.classList.add('hidden');
-        // 确保代码块已高亮
-        codeDiv.querySelectorAll('pre code:not([data-processed])').forEach(function(block) {
-            block.dataset.processed = 'true';
-            if (typeof hljs !== 'undefined' && hljs.highlightElement) hljs.highlightElement(block);
-            var pre = block.parentElement;
-            if (!pre.querySelector('.code-header')) {
-                var lang = (block.className.match(/language-(\w+)/) || ['', 'text'])[1];
-                var header = document.createElement('div');
-                header.className = 'code-header';
-                header.innerHTML = '<span>' + lang + '</span><button class="code-copy-btn" onclick="copyCode(this)">复制代码</button>';
-                pre.insertBefore(header, pre.firstChild);
-            }
-        });
-    } else {
-        viewDiv.style.display = 'block';
-        codeDiv.style.display = 'none';
-        // 视图模式下显示功能按钮
-        if (actions) actions.classList.remove('hidden');
-    }
-}
-
-// ===== Mermaid 缩放 =====
-function mermaidZoomIn(btn) {
-    var container = btn.closest('.mermaid-container');
-    var viewDiv = container.querySelector('.mermaid-view');
-    var svg = viewDiv ? viewDiv.querySelector('svg') : null;
-    if (!svg) return;
-    var currentScale = parseFloat(svg.getAttribute('data-mermaid-scale') || '1');
-    var newScale = Math.min(currentScale + 0.25, 5);
-    svg.setAttribute('data-mermaid-scale', newScale);
-    svg.style.transform = 'scale(' + newScale + ')';
-    svg.style.transformOrigin = 'center center';
-}
-
-function mermaidZoomOut(btn) {
-    var container = btn.closest('.mermaid-container');
-    var viewDiv = container.querySelector('.mermaid-view');
-    var svg = viewDiv ? viewDiv.querySelector('svg') : null;
-    if (!svg) return;
-    var currentScale = parseFloat(svg.getAttribute('data-mermaid-scale') || '1');
-    var newScale = Math.max(currentScale - 0.25, 0.25);
-    svg.setAttribute('data-mermaid-scale', newScale);
-    svg.style.transform = 'scale(' + newScale + ')';
-    svg.style.transformOrigin = 'center center';
-}
-
-// ===== Mermaid 下载 =====
-function mermaidDownload(btn) {
-    var container = btn.closest('.mermaid-container');
-    var viewDiv = container.querySelector('.mermaid-view');
-    var svg = viewDiv ? viewDiv.querySelector('svg') : null;
-    if (!svg) { showToast('图表未渲染完成'); return; }
-    // 克隆svg，添加xmlns
-    var clone = svg.cloneNode(true);
-    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-    // 移除缩放transform，保持原始大小
-    clone.removeAttribute('data-mermaid-scale');
-    clone.style.transform = '';
-    var svgData = new XMLSerializer().serializeToString(clone);
-    var blob = new Blob([svgData], {type: 'image/svg+xml;charset=utf-8'});
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement('a');
-    a.href = url;
-    a.download = 'mermaid-diagram-' + Date.now() + '.svg';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    showToast('已下载SVG');
-}
-
-// ===== Mermaid 全屏 =====
-function mermaidFullscreen(btn) {
-    var container = btn.closest('.mermaid-container');
-    var viewDiv = container.querySelector('.mermaid-view');
-    var svg = viewDiv ? viewDiv.querySelector('svg') : null;
-    if (!svg) { showToast('图表未渲染完成'); return; }
-
-    // 创建全屏遮罩
-    var overlay = document.createElement('div');
-    overlay.className = 'mermaid-fullscreen-overlay';
-
-    // 关闭按钮
-    var closeBtn = document.createElement('button');
-    closeBtn.className = 'mermaid-fullscreen-close';
-    closeBtn.innerHTML = '✕';
-    closeBtn.onclick = function() { overlay.remove(); };
-
-    // 工具栏
-    var fsToolbar = document.createElement('div');
-    fsToolbar.className = 'mermaid-fullscreen-toolbar';
-    fsToolbar.innerHTML =
-        '<button class="mermaid-action" onclick="mermaidFsZoomOut(this)" title="缩小">' +
-        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>' +
-        '</button>' +
-        '<button class="mermaid-action" onclick="mermaidFsZoomIn(this)" title="放大">' +
-        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>' +
-        '</button>' +
-        '<button class="mermaid-action" onclick="mermaidFsZoomReset(this)" title="重置缩放">' +
-        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>' +
-        '<span>重置</span>' +
-        '</button>' +
-        '<span class="mermaid-toolbar-sep"></span>' +
-        '<button class="mermaid-action" onclick="mermaidFsDownload(this)" title="下载">' +
-        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>' +
-        '<span>下载</span>' +
-        '</button>';
-
-    // 内容区域 - 克隆SVG
-    var contentDiv = document.createElement('div');
-    contentDiv.className = 'mermaid-fullscreen-content';
-    var svgClone = svg.cloneNode(true);
-    // 重置缩放
-    svgClone.removeAttribute('data-mermaid-scale');
-    svgClone.style.transform = '';
-    svgClone.setAttribute('data-fs-scale', '1');
-    contentDiv.appendChild(svgClone);
-
-    // 初始化位置和缩放数据
-    svgClone.setAttribute('data-fs-translate-x', '0');
-    svgClone.setAttribute('data-fs-translate-y', '0');
-    svgClone.setAttribute('data-fs-scale', '1');
-
-    // 更新 SVG 变换的辅助函数
-    function updateSvgTransform(svg) {
-        var scale = parseFloat(svg.getAttribute('data-fs-scale') || '1');
-        var tx = parseFloat(svg.getAttribute('data-fs-translate-x') || '0');
-        var ty = parseFloat(svg.getAttribute('data-fs-translate-y') || '0');
-        svg.style.transform = 'translate(' + tx + 'px, ' + ty + 'px) scale(' + scale + ')';
-        svg.style.transformOrigin = 'center center';
-    }
-
-    // 鼠标滚轮缩放
-    contentDiv.addEventListener('wheel', function(e) {
-        e.preventDefault();
-        var svg = contentDiv.querySelector('svg');
-        if (!svg) return;
-        var currentScale = parseFloat(svg.getAttribute('data-fs-scale') || '1');
-        // deltaY > 0 表示向下滚动（缩小），< 0 表示向上滚动（放大）
-        var delta = e.deltaY > 0 ? -0.15 : 0.15;
-        var newScale = Math.max(0.25, Math.min(currentScale + delta, 5));
-        if (newScale === currentScale) return;
-        svg.setAttribute('data-fs-scale', newScale);
-        updateSvgTransform(svg);
-    }, { passive: false });
-
-    // 鼠标拖动
-    var isDragging = false;
-    var startX = 0;
-    var startY = 0;
-    var startTranslateX = 0;
-    var startTranslateY = 0;
-
-    contentDiv.addEventListener('mousedown', function(e) {
-        isDragging = true;
-        startX = e.clientX;
-        startY = e.clientY;
-        var svg = contentDiv.querySelector('svg');
-        if (!svg) return;
-        startTranslateX = parseFloat(svg.getAttribute('data-fs-translate-x') || '0');
-        startTranslateY = parseFloat(svg.getAttribute('data-fs-translate-y') || '0');
-        contentDiv.style.cursor = 'grabbing';
-    });
-
-    document.addEventListener('mousemove', function(e) {
-        if (!isDragging) return;
-        var svg = contentDiv.querySelector('svg');
-        if (!svg) return;
-        var dx = e.clientX - startX;
-        var dy = e.clientY - startY;
-        svg.setAttribute('data-fs-translate-x', (startTranslateX + dx).toString());
-        svg.setAttribute('data-fs-translate-y', (startTranslateY + dy).toString());
-        updateSvgTransform(svg);
-    });
-
-    document.addEventListener('mouseup', function() {
-        isDragging = false;
-        if (contentDiv) contentDiv.style.cursor = 'grab';
-    });
-
-    // 默认光标样式
-    contentDiv.style.cursor = 'grab';
-
-    overlay.appendChild(closeBtn);
-    overlay.appendChild(fsToolbar);
-    overlay.appendChild(contentDiv);
-
-    // ESC关闭
-    var escHandler = function(e) {
-        if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', escHandler); }
-    };
-    document.addEventListener('keydown', escHandler);
-
-    // 点击背景关闭
-    overlay.addEventListener('click', function(e) {
-        if (e.target === overlay) { overlay.remove(); document.removeEventListener('keydown', escHandler); }
-    });
-
-    document.body.appendChild(overlay);
-}
-
-// 更新 SVG 变换的辅助函数（全局，供工具栏按钮使用）
-function updateFsSvgTransform(svg) {
-    var scale = parseFloat(svg.getAttribute('data-fs-scale') || '1');
-    var tx = parseFloat(svg.getAttribute('data-fs-translate-x') || '0');
-    var ty = parseFloat(svg.getAttribute('data-fs-translate-y') || '0');
-    svg.style.transform = 'translate(' + tx + 'px, ' + ty + 'px) scale(' + scale + ')';
-    svg.style.transformOrigin = 'center center';
-}
-
-// 全屏模式下的缩放
-function mermaidFsZoomIn(btn) {
-    var overlay = btn.closest('.mermaid-fullscreen-overlay');
-    var svg = overlay ? overlay.querySelector('.mermaid-fullscreen-content svg') : null;
-    if (!svg) return;
-    var currentScale = parseFloat(svg.getAttribute('data-fs-scale') || '1');
-    var newScale = Math.min(currentScale + 0.25, 5);
-    svg.setAttribute('data-fs-scale', newScale);
-    updateFsSvgTransform(svg);
-}
-
-function mermaidFsZoomOut(btn) {
-    var overlay = btn.closest('.mermaid-fullscreen-overlay');
-    var svg = overlay ? overlay.querySelector('.mermaid-fullscreen-content svg') : null;
-    if (!svg) return;
-    var currentScale = parseFloat(svg.getAttribute('data-fs-scale') || '1');
-    var newScale = Math.max(currentScale - 0.25, 0.25);
-    svg.setAttribute('data-fs-scale', newScale);
-    updateFsSvgTransform(svg);
-}
-
-function mermaidFsZoomReset(btn) {
-    var overlay = btn.closest('.mermaid-fullscreen-overlay');
-    var svg = overlay ? overlay.querySelector('.mermaid-fullscreen-content svg') : null;
-    if (!svg) return;
-    svg.setAttribute('data-fs-scale', '1');
-    svg.setAttribute('data-fs-translate-x', '0');
-    svg.setAttribute('data-fs-translate-y', '0');
-    updateFsSvgTransform(svg);
-}
-
-// 全屏模式下的下载
-function mermaidFsDownload(btn) {
-    var overlay = btn.closest('.mermaid-fullscreen-overlay');
-    var svg = overlay ? overlay.querySelector('.mermaid-fullscreen-content svg') : null;
-    if (!svg) return;
-    var clone = svg.cloneNode(true);
-    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-    clone.removeAttribute('data-fs-scale');
-    clone.style.transform = '';
-    var svgData = new XMLSerializer().serializeToString(clone);
-    var blob = new Blob([svgData], {type: 'image/svg+xml;charset=utf-8'});
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement('a');
-    a.href = url;
-    a.download = 'mermaid-diagram-' + Date.now() + '.svg';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    showToast('已下载SVG');
-}
-
-// ===== 特殊内容处理 =====
-function processSpecialContent(container) {
+function processSpecialContent(container, skipMermaid) {
     // 表格包装处理 - 将table包裹在可水平滚动的.table-wrapper中
     container.querySelectorAll('.msg-bubble table').forEach(function(table) {
         if (table.parentElement.classList.contains('table-wrapper')) return;
@@ -1653,30 +1427,33 @@ function processSpecialContent(container) {
     container.querySelectorAll('pre code').forEach(function(block) {
         if (block.dataset.processed) return;
         block.dataset.processed = 'true';
+        // 跳过mermaid代码块（hljs不支持mermaid语言）
+        var lang = (block.className.match(/language-(\w+)/) || ['', ''])[1];
+        if (lang === 'mermaid') {
+            // mermaid代码块不交给hljs处理，但仍添加header
+            if (!block.parentElement.querySelector('.code-header')) {
+                var header = document.createElement('div');
+                header.className = 'code-header';
+                header.innerHTML = '<span>mermaid</span><button class="code-copy-btn" onclick="copyCode(this)">复制代码</button>';
+                block.parentElement.insertBefore(header, block.parentElement.firstChild);
+            }
+            return;
+        }
         if (typeof hljs !== 'undefined' && hljs.highlightElement) {
             hljs.highlightElement(block);
         }
         var pre = block.parentElement;
         if (pre.querySelector('.code-header')) return;
-        var lang = (block.className.match(/language-(\w+)/) || ['', 'text'])[1];
+        if (!lang) lang = 'text';
         var header = document.createElement('div');
         header.className = 'code-header';
         header.innerHTML = '<span>' + lang + '</span><button class="code-copy-btn" onclick="copyCode(this)">复制代码</button>';
         pre.insertBefore(header, pre.firstChild);
     });
 
-    // Mermaid渲染（仅在mermaid库可用时执行）
-    if (typeof mermaid !== 'undefined' && mermaid.render) {
-        container.querySelectorAll('.mermaid:not([data-processed])').forEach(function(el) {
-            el.dataset.processed = 'true';
-            try {
-                var id = 'mermaid-' + Date.now() + '-' + Math.random().toString(36).substr(2,5);
-                mermaid.render(id, el.textContent).then(function(result) {
-                    el.innerHTML = result.svg;
-                    el.classList.remove('mermaid');
-                }).catch(function() {});
-            } catch(e) {}
-        });
+    // Mermaid渲染委托给 MermaidRenderer 模块（独立 my_js/mermaid-renderer.js）
+    if (typeof MermaidRenderer !== 'undefined' && MermaidRenderer.processContainer) {
+        MermaidRenderer.processContainer(container, skipMermaid);
     }
 
     // AI生成的图片增强：添加预览/放大/下载功能
@@ -1738,8 +1515,13 @@ function showLoading() {
     loading.id = 'loading-indicator';
     loading.className = 'msg-wrapper assistant';
     loading.innerHTML = '<div class="msg-row"><div class="msg-avatar ai-av"><img class="avatar-icon" src="' + getAvatarIconSrc('AIBot') + '" style="width:100%;height:100%;border-radius:10px;object-fit:cover" /></div><div class="loading-dots"><span></span><span></span><span></span></div></div>';
-    container.appendChild(loading);
-    container.scrollTop = container.scrollHeight;
+    appendToChat(loading);
+    // 用户发送消息后，强制跟随并滚到底部（用户操作优先级最高）
+    if (typeof ScrollFollowManager !== 'undefined') {
+        ScrollFollowManager.scrollToBottomImmediate();
+    } else {
+        container.scrollTop = container.scrollHeight;
+    }
 }
 
 function hideLoading() {
@@ -1770,6 +1552,8 @@ function toggleSidebar() {
     } else {
         sidebar.classList.toggle('collapsed');
     }
+    // 侧边栏切换动画结束后重新定位scroll-nav
+    setTimeout(updateScrollNav, 350);
 }
 
 function toggleOverlay(show) {
@@ -1794,24 +1578,53 @@ function handleResize() {
         sidebar.classList.remove('open');
         toggleOverlay(false);
     }
+    updateScrollNav(); // 窗口大小变化时重新定位滚动导航按钮
 }
 
 // ===== 滚动导航 =====
-function scrollToTop() {
+function appendToChat(el) {
     var container = document.getElementById('chatContainer');
-    if (container) container.scrollTo({ top: 0, behavior: 'smooth' });
+    container.appendChild(el);
+}
+function scrollToTop() {
+    // 用户主动操作：回到顶部 → 中断自动跟随
+    if (typeof ScrollFollowManager !== 'undefined') {
+        ScrollFollowManager.userScrollToTop();
+    } else {
+        var container = document.getElementById('chatContainer');
+        if (container) container.scrollTo({ top: 0, behavior: 'smooth' });
+    }
 }
 
 function scrollToBottom() {
-    var container = document.getElementById('chatContainer');
-    if (container) container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+    // 用户主动操作：回到底部/跳至最新 → 恢复自动跟随
+    if (typeof ScrollFollowManager !== 'undefined') {
+        ScrollFollowManager.userScrollToBottom();
+    } else {
+        var container = document.getElementById('chatContainer');
+        if (container) container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+    }
 }
 
 function updateScrollNav() {
+    // 委托给 ScrollFollowManager 统一更新导航按钮显隐与定位
+    if (typeof ScrollFollowManager !== 'undefined') {
+        ScrollFollowManager.updateNavButtons();
+        return;
+    }
     var container = document.getElementById('chatContainer');
     var topBtn = document.getElementById('scrollToTopBtn');
     var bottomBtn = document.getElementById('scrollToBottomBtn');
+    var scrollNav = document.getElementById('scrollNav');
     if (!container || !topBtn || !bottomBtn) return;
+
+    // 动态定位scroll-nav到chat-container右下角（fixed定位）
+    if (scrollNav) {
+        var rect = container.getBoundingClientRect();
+        scrollNav.style.position = 'fixed';
+        scrollNav.style.right = (window.innerWidth - rect.right + 16) + 'px';
+        scrollNav.style.bottom = (window.innerHeight - rect.bottom + 12) + 'px';
+    }
 
     var scrollTop = container.scrollTop;
     var scrollHeight = container.scrollHeight;
