@@ -452,3 +452,65 @@
 [data-theme="light"] .mermaid-container .mermaid-view {
   background: #f5f5f7 !important;
 }
+
+/* =====================================================================
+   流式生成中的 mermaid 块
+   - AI 边输出 mermaid 代码, 页面边尝试渲染图表
+   - 工具栏只显示类型标签 + "流式生成中" 动效提示
+   - 代码还未闭合时, pre.mermaid 显示代码文本(限制最大高度避免撑大视图)
+   ===================================================================== */
+.mermaid-streaming-tip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  margin-left: 4px;
+  font-size: 10px;
+  color: #818cf8;
+  background: rgba(99, 102, 241, 0.08);
+  border-radius: 5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.streaming-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: #818cf8;
+  border-radius: 50%;
+  animation: streaming-pulse 1.2s infinite ease-in-out;
+  flex-shrink: 0;
+}
+
+@keyframes streaming-pulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.85); }
+  50%      { opacity: 1;   transform: scale(1.15); }
+}
+
+[data-theme="light"] .mermaid-streaming-tip {
+  color: #6366f1;
+  background: rgba(99, 102, 241, 0.1);
+}
+
+[data-theme="light"] .streaming-dot {
+  background: #6366f1;
+}
+
+/* 流式状态: 限制代码文本的最大高度, 避免未渲染的长代码撑大视图 */
+.mermaid-container.streaming .mermaid-view pre.mermaid {
+  max-height: 360px;
+  overflow: auto;
+  text-align: left;
+  padding: 12px 14px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #475569;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+[data-theme="light"] .mermaid-container.streaming .mermaid-view pre.mermaid {
+  color: #64748b;
+}

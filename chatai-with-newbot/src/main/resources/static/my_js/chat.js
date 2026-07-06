@@ -1359,6 +1359,20 @@ function renderMsgContent(msg) {
 
 function renderMarkdown(text) {
     if (!text) return '';
+    // ===== 处理流式输出中的mermaid块（未闭合的```mermaid）=====
+    // 检测最后一个未闭合的 ```mermaid 块，让页面在代码输出过程中就能边渲染边显示图表
+    // 注意：必须先处理流式块，避免被下面已闭合mermaid的regex误处理
+    var streamingMermaidBlocks = [];
+    text = text.replace(/(```mermaid\n[\s\S]*?)(```|$)/g, function(match, code, end) {
+        if (end === '```') {
+            // 已闭合，留给下面已闭合的mermaid处理逻辑
+            return match;
+        }
+        // 未闭合（流式输出中），提取出来用流式模板渲染
+        streamingMermaidBlocks.push(code);
+        return '%%STREAMING_MERMAID_' + (streamingMermaidBlocks.length - 1) + '%%';
+    });
+
     // 处理mermaid代码块 - 先替换为占位符
     var mermaidBlocks = [];
     text = text.replace(/```mermaid\n([\s\S]*?)```/g, function(match, code) {
@@ -1375,6 +1389,14 @@ function renderMarkdown(text) {
             ? MermaidRenderer.renderMermaidBlockTemplate(code)
             : '<pre class="mermaid">' + escapeHtml(code) + '</pre>';
         html = html.replace('%%MERMAID_' + idx + '%%', mermaidHtml);
+    });
+
+    // 还原流式mermaid - 调用 MermaidRenderer 模块生成流式卡片 HTML（带"流式生成中"提示）
+    streamingMermaidBlocks.forEach(function(code, idx) {
+        var streamingHtml = (typeof MermaidRenderer !== 'undefined' && MermaidRenderer.renderStreamingMermaidBlockTemplate)
+            ? MermaidRenderer.renderStreamingMermaidBlockTemplate(code)
+            : '<pre class="mermaid">' + escapeHtml(code) + '</pre>';
+        html = html.replace('%%STREAMING_MERMAID_' + idx + '%%', streamingHtml);
     });
 
     return html;
