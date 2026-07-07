@@ -33,6 +33,7 @@
             <ul class="layui-tab-title">
                 <li class="layui-this">快速接入</li>
                 <li>模型管理</li>
+                <li>厂商管理</li>
                 <li>用户管理</li>
                 <li>数据统计</li>
             </ul>
@@ -113,6 +114,37 @@
                     <table class="layui-table data-table" id="modelTable" lay-skin="nob">
                         <thead><tr><th>名称</th><th>厂商</th><th>模型</th><th>思考</th><th>多模态</th><th>状态</th><th>可见性</th><th>操作</th></tr></thead>
                         <tbody id="modelTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 厂商管理 -->
+            <div class="layui-tab-item">
+                <div class="section-header">
+                    <h2>厂商管理</h2>
+                    <span class="section-tip">预置厂商仅可修改显示名，ID/协议/默认URL不可改；自定义厂商可修改显示名（同步至所有关联模型）</span>
+                </div>
+                <div class="card">
+                    <div class="stats-search-bar">
+                        <div class="search-field">
+                            <label class="search-label">名称</label>
+                            <input type="text" id="pfName" class="stats-search-input" placeholder="模糊查询，忽略大小写" oninput="applyProviderFilter()" autocomplete="off" />
+                        </div>
+                        <div class="search-field">
+                            <label class="search-label">类型</label>
+                            <select id="pfType" class="stats-search-select" onchange="applyProviderFilter()">
+                                <option value="">全部</option>
+                                <option value="preset">预置</option>
+                                <option value="custom">自定义</option>
+                            </select>
+                        </div>
+                        <div class="search-actions">
+                            <button class="cancel-btn" onclick="resetProviderFilter()">重置</button>
+                        </div>
+                    </div>
+                    <table class="layui-table data-table" id="providerTable" lay-skin="nob">
+                        <thead><tr><th>厂商</th><th>类型</th><th>厂商ID</th><th>模型数</th><th>预设名称</th><th>显示名称</th><th>图标</th><th>操作</th></tr></thead>
+                        <tbody id="providerTableBody"></tbody>
                     </table>
                 </div>
             </div>

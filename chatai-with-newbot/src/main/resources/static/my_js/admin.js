@@ -6,6 +6,7 @@ function getDialogArea(maxWidth) {
 
 /* Admin JS - Layui Refactored */
 var providers = [], allModels = [], allUsers = [];
+var allProvidersFull = []; // 厂商管理 Tab 使用：预置 + 自定义
 var quickAddProviderId = null;
 var filterUsernames = [], filterModelNames = [];
 var usagePage = 1, usageSize = 10, statsPage = 1, statsSize = 10;
@@ -82,8 +83,9 @@ layui.use(['table', 'form', 'layer', 'laypage', 'element', 'jquery'], function()
         var idx = data.index;
         if (idx === 0) { loadProviders(); loadModels(); }
         else if (idx === 1) { loadModels(); }
-        else if (idx === 2) { loadUsers(); }
-        else if (idx === 3) { loadFilterOptions(); switchDataSubTab(dataSubTab); }
+        else if (idx === 2) { loadProviderMgmt(); }
+        else if (idx === 3) { loadUsers(); }
+        else if (idx === 4) { loadFilterOptions(); switchDataSubTab(dataSubTab); }
     });
 
     loadProviders(); loadModels();
@@ -93,7 +95,23 @@ layui.use(['table', 'form', 'layer', 'laypage', 'element', 'jquery'], function()
 // ===== Data Loading =====
 function loadProviders() {
     api('/api/admin/providers').then(function(data) {
-        if (data && data.success) { providers = data.data || []; renderProviderGrid(); }
+        if (data && data.success) {
+            allProvidersFull = data.data || [];
+            // 仅预置厂商用于"快速接入"卡片
+            providers = allProvidersFull.filter(function(p) { return p.type !== 'custom'; });
+            renderProviderGrid();
+        }
+    });
+}
+// 厂商管理 Tab 数据加载
+function loadProviderMgmt() {
+    api('/api/admin/providers').then(function(data) {
+        if (data && data.success) {
+            allProvidersFull = data.data || [];
+            // 同步刷新预置厂商列表（供其他 Tab 使用）
+            providers = allProvidersFull.filter(function(p) { return p.type !== 'custom'; });
+            applyProviderFilter();
+        }
     });
 }
 function loadModels() {
@@ -426,6 +444,180 @@ function deleteModel(id) {
             if (data && data.success) { window._layer.close(idx); window._layer.msg('已删除',{icon:1}); loadModels(); }
             else window._layer.msg(data.message||'删除失败',{icon:2});
         });
+    });
+}
+
+
+// ===== 厂商管理 =====
+function applyProviderFilter() {
+    var $ = window._$;
+    var nameKw = ($('#pfName').val() || '').trim().toLowerCase();
+    var typeKw = $('#pfType').val() || '';
+    var filtered = allProvidersFull.filter(function(p) {
+        if (typeKw && p.type !== typeKw) return false;
+        if (nameKw) {
+            var hay = ((p.name || '') + ' ' + (p.id || '')).toLowerCase();
+            if (hay.indexOf(nameKw) < 0) return false;
+        }
+        return true;
+    });
+    renderProviderTable(filtered);
+}
+
+function resetProviderFilter() {
+    var $ = window._$;
+    $('#pfName').val('');
+    $('#pfType').val('');
+    applyProviderFilter();
+}
+
+function renderProviderTable(providersList) {
+    var $ = window._$, tbody = $('#providerTableBody');
+    tbody.empty();
+    if (!providersList || providersList.length === 0) {
+        tbody.html('<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:40px;">暂无厂商数据</td></tr>');
+        return;
+    }
+    // 按 providerId / 自定义厂商(按 providerName) 统计实际模型数
+    var modelCountByProvider = {};
+    allModels.forEach(function(m) {
+        if (m.providerId === '__custom__') {
+            var key = '__custom__::' + (m.providerName || '');
+            modelCountByProvider[key] = (modelCountByProvider[key] || 0) + 1;
+        } else {
+            modelCountByProvider[m.providerId] = (modelCountByProvider[m.providerId] || 0) + 1;
+        }
+    });
+    providersList.forEach(function(p) {
+        var isCustom = p.type === 'custom';
+        var providerId = p.id || '';
+        var modelCount;
+        if (isCustom) {
+            modelCount = modelCountByProvider['__custom__::' + (p.name || '')] || 0;
+        } else {
+            modelCount = modelCountByProvider[providerId] || 0;
+        }
+        var currentName = p.name || '';
+        // 预设名称（来自 providers.json）；自定义厂商无原始名称，显示 -
+        var presetName = isCustom ? '-' : (p.defaultName || p.name || '');
+        // 当前图标：预置厂商来自 providers.json（不可改），自定义厂商来自 ModelConfig.providerIcon
+        var currentIcon = p.icon || '';
+        var iconCell = currentIcon
+            ? '<span style="font-size:18px">' + esc(currentIcon) + '</span>'
+            : '<span style="color:#64748b">未设置</span>';
+        var typeBadge = isCustom
+            ? '<span class="status-badge vis-admin">自定义</span>'
+            : '<span class="status-badge status-enabled">预置</span>';
+        var encodedId = encodeURIComponent(providerId);
+        var actions = '<div class="action-btns">'
+            + '<button class="action-btn edit-btn" onclick="showRenameProvider(\'' + encodedId + '\',' + (isCustom ? 'true' : 'false') + ',\'' + esc(currentName).replace(/'/g, "\\'") + '\',\'' + esc(currentIcon).replace(/'/g, "\\'") + '\')" title="修改名称/图标"><i class="layui-icon layui-icon-edit"></i></button>'
+            + '</div>';
+        var tr = '<tr>'
+            + '<td><div class="model-name-cell">' + getProviderIconHtml(providerId === '__custom__' ? '' : providerId, 20) + '<span>' + esc(currentName) + '</span></div></td>'
+            + '<td>' + typeBadge + '</td>'
+            + '<td><span class="model-id-text">' + esc(providerId) + '</span></td>'
+            + '<td>' + modelCount + '</td>'
+            + '<td style="color:#94a3b8">' + esc(presetName) + '</td>'
+            + '<td style="font-weight:500">' + esc(currentName) + '</td>'
+            + '<td>' + iconCell + '</td>'
+            + '<td>' + actions + '</td>'
+            + '</tr>';
+        tbody.append(tr);
+    });
+}
+
+function showRenameProvider(encodedId, isCustom, currentName, currentIcon) {
+    var layer = window._layer, form = window._form;
+    var providerId = decodeURIComponent(encodedId);
+    var title = isCustom ? '修改自定义厂商' : '修改预置厂商';
+    var html = '<div class="layui-form" lay-filter="renameProviderForm" style="padding:20px 20px 0;">';
+    html += '<div class="form-group"><label class="form-label">厂商ID</label><div class="form-value"><input type="text" class="layui-input" value="' + esc(providerId) + '" readonly style="opacity:0.6"/></div></div>';
+    if (!isCustom) {
+        html += '<div class="form-group"><label class="form-label">预设名称（来自 providers.json）</label><div class="form-value" style="color:#94a3b8">' + esc(currentName) + '</div></div>';
+    }
+    html += '<div class="form-group"><label class="form-label">显示名称</label><div class="form-value"><input type="text" id="rpName" class="layui-input" value="' + esc(currentName) + '" maxlength="100" placeholder="请输入新的显示名"/></div></div>';
+    if (isCustom) {
+        // 仅自定义厂商支持修改图标（预置厂商的图标来自 providers.json，不可改）
+        html += '<div class="form-group"><label class="form-label">模型图标</label><div class="form-value">';
+        html += renderIconPicker(currentIcon || '');
+        html += '</div></div>';
+    } else {
+        // 预置厂商：只读展示当前图标（来自 providers.json）
+        var readOnlyIconHtml = currentIcon
+            ? '<span style="font-size:22px;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:6px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);">' + esc(currentIcon) + '</span>'
+            : '<span style="color:#64748b">未设置</span>';
+        html += '<div class="form-group"><label class="form-label">模型图标</label><div class="form-value">' + readOnlyIconHtml + '<span style="font-size:12px;color:#64748b;margin-left:8px;">预置厂商的图标不可修改</span></div></div>';
+    }
+    // 自定义厂商需要保存原名（用于精确定位要修改的模型）
+    if (isCustom) {
+        html += '<input type="hidden" id="rpOldName" value="' + esc(currentName) + '"/>';
+    }
+    html += '<div class="form-tip" style="font-size:12px;color:#94a3b8;margin:4px 0 12px;">' + (isCustom ? '修改后将同步更新所有该自定义厂商下的模型（仅匹配当前原名）' : '修改后预置厂商的显示名将立即更新，并同步至所有关联模型（ID/协议/默认URL等不可改）') + '</div>';
+    html += '<div style="text-align:right;padding:10px 0;">';
+    html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
+    html += '<button type="button" class="layui-btn" onclick="submitRenameProvider(\'' + encodedId + '\',' + (isCustom ? 'true' : 'false') + ')">保存</button>';
+    html += '</div></div>';
+    layer.open({ type: 1, title: title, area: getDialogArea(520), content: html,
+        success: function(layero) {
+            form.render(null, 'renameProviderForm');
+            // 绑定图标选择事件（使用 window._$ 避免 $ 未定义）
+            var $ = window._$;
+            if ($) {
+                layero.find('.icon-picker-item').on('click', function() {
+                    layero.find('.icon-picker-item').removeClass('selected');
+                    $(this).addClass('selected');
+                    var v = $(this).attr('data-icon') || '';
+                    layero.find('#rpIcon').val(v);
+                });
+            }
+        }
+    });
+}
+
+// 预设图标列表（12 个简单 emoji）
+var PRESET_ICONS = ['🔮','🟣','🌙','🟢','⚡','🫘','⭐','🚀','🤖','💎','🎨','🛠️'];
+
+function renderIconPicker(currentIcon) {
+    var html = '<div class="icon-picker">';
+    PRESET_ICONS.forEach(function(ic) {
+        var selected = (ic === currentIcon) ? ' selected' : '';
+        html += '<span class="icon-picker-item' + selected + '" data-icon="' + esc(ic) + '" title="' + esc(ic) + '">' + ic + '</span>';
+    });
+    html += '<input type="text" id="rpIcon" class="layui-input icon-picker-input" value="' + esc(currentIcon || '') + '" maxlength="4" placeholder="自定义 emoji" />';
+    html += '</div>';
+    return html;
+}
+
+function submitRenameProvider(encodedId, isCustom) {
+    var $ = window._$ || window.jQuery, layer = window._layer;
+    var providerId = decodeURIComponent(encodedId);
+    var newName = $('#rpName').val().trim();
+    if (!newName) { layer.msg('请输入新的显示名', {icon: 0}); return; }
+    if (newName.length > 100) { layer.msg('名称过长（最多100字符）', {icon: 0}); return; }
+    var payload = { name: newName };
+    if (isCustom) {
+        // 仅自定义厂商支持修改图标
+        var newIcon = ($('#rpIcon').val() || '').trim();
+        if (newIcon.length > 4) { layer.msg('图标过长（最多4字符）', {icon: 0}); return; }
+        payload.icon = newIcon;
+        // 自定义厂商需要 oldName 来精确定位（可能有多个不同的自定义名）
+        var oldName = $('#rpOldName').val() || '';
+        if (!oldName) { layer.msg('原名称丢失，请重新打开弹窗', {icon: 2}); return; }
+        payload.oldName = oldName;
+    }
+    api('/api/admin/providers/' + encodedId, {
+        method: 'PATCH',
+        body: JSON.stringify(payload)
+    }).then(function(data) {
+        if (data && data.success) {
+            layer.closeAll();
+            layer.msg(data.message || '已更新', {icon: 1});
+            // 刷新厂商管理 + 模型管理（让模型表里的"厂商"列同步）
+            loadProviderMgmt();
+            loadModels();
+        } else {
+            layer.msg(data.message || '更新失败', {icon: 2});
+        }
     });
 }
 
