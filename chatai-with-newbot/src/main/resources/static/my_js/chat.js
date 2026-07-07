@@ -296,6 +296,12 @@ function renderModelSelector(modelsData) {
         var iconHtml = '';
         if (iconPath) {
             iconHtml = '<img src="' + iconPath + '" class="model-group-icon" />';
+        } else {
+            // 没有 SVG 图标时，使用后端 ModelConfig.providerIcon（emoji）
+            var emojiIcon = group.models[0] && group.models[0].providerIcon;
+            if (emojiIcon) {
+                iconHtml = '<span class="model-group-emoji" style="font-size:14px;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;">' + escapeHtml(emojiIcon) + '</span>';
+            }
         }
         groupHeader.innerHTML = iconHtml + '<span>' + escapeHtml(group.name) + '</span>';
         dropdown.appendChild(groupHeader);
@@ -312,6 +318,9 @@ function renderModelSelector(modelsData) {
             var itemIconHtml = '';
             if (itemIconPath) {
                 itemIconHtml = '<img src="' + itemIconPath + '" class="model-item-icon" />';
+            } else if (m.providerIcon) {
+                // 没有 SVG 图标时，使用 model.providerIcon（emoji），与厂商分组标题一致
+                itemIconHtml = '<span class="model-item-emoji" style="font-size:13px;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;flex-shrink:0;">' + escapeHtml(m.providerIcon) + '</span>';
             }
             item.innerHTML = itemIconHtml + '<span class="model-item-name">' + escapeHtml(m.displayName) + '</span>';
             item.onclick = function() {
@@ -350,6 +359,8 @@ function updateModelSelectDisplay(model) {
     var iconHtml = '';
     if (iconPath) {
         iconHtml = '<img src="' + iconPath + '" class="model-select-icon" />';
+    } else if (model.providerIcon) {
+        iconHtml = '<span class="model-select-emoji" style="font-size:14px;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;">' + escapeHtml(model.providerIcon) + '</span>';
     }
     valueEl.innerHTML = iconHtml + '<span>' + escapeHtml(model.displayName) + '</span>';
 }

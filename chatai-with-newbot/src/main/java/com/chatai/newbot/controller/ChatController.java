@@ -121,13 +121,28 @@ public class ChatController {
             ProviderModel pm = (provider.getModels() == null) ? null :
                     provider.getModels().stream().filter(m -> m.getId().equals(model.getModelId())).findFirst().orElse(null);
             if (pm == null) continue;
+            boolean needUpdate = false;
             if (model.isSupportsMultimodal() != pm.isSupportsMultimodal()) {
                 model.setSupportsMultimodal(pm.isSupportsMultimodal());
-                storageService.updateModelConfig(model);
-                updated = true;
+                needUpdate = true;
             }
             if (model.isSupportsThinking() != pm.isSupportsThinking()) {
                 model.setSupportsThinking(pm.isSupportsThinking());
+                needUpdate = true;
+            }
+            // 同步显示名覆盖
+            String displayName = storageService.getProviderDisplayName(model.getProviderId());
+            if (displayName != null && !displayName.equals(model.getProviderName())) {
+                model.setProviderName(displayName);
+                needUpdate = true;
+            }
+            // 同步厂商图标（来自 providers.json）
+            Provider rawProvider = storageService.getProvider(model.getProviderId());
+            if (rawProvider != null && rawProvider.getIcon() != null && !rawProvider.getIcon().equals(model.getProviderIcon())) {
+                model.setProviderIcon(rawProvider.getIcon());
+                needUpdate = true;
+            }
+            if (needUpdate) {
                 storageService.updateModelConfig(model);
                 updated = true;
             }
