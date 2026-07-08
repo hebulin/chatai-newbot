@@ -43,6 +43,21 @@ public class AuthInterceptor implements HandlerInterceptor {
             return false;
         }
 
+        // IP 校验：登录时已将 IP 绑定到 token，若当前请求 IP 与登录 IP 不一致，则要求重新登录
+        String loginIp = storageService.getTokenIp(token);
+        if (loginIp != null && !loginIp.isEmpty()) {
+            String currentIp = IpUtils.getClientIp(request);
+            if (currentIp != null && !currentIp.isEmpty() && !loginIp.equals(currentIp)) {
+                // IP 变更：注销该 token，前端据 X-Auth-Reason 提示并跳转登录
+                storageService.removeToken(token);
+                response.setStatus(401);
+                response.setHeader("X-Auth-Reason", "ip_changed");
+                response.setContentType("application/json;charset=UTF-8");
+                response.getWriter().write("{\"error\":\"登录IP已变更，请重新登录\"}");
+                return false;
+            }
+        }
+
         request.setAttribute("currentUser", user);
         return true;
     }

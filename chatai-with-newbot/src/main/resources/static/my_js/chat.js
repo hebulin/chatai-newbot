@@ -180,6 +180,16 @@ layui.use(['layer', 'form', 'element', 'jquery'], function() {
 // ===== 认证相关 =====
 function authHeaders() { return { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' }; }
 
+// 根据 401 响应头判断未授权原因：IP 变更或登录过期
+function authFailMsg(r) {
+    try {
+        if (r && r.headers && r.headers.get('X-Auth-Reason') === 'ip_changed') {
+            return '登录IP已变更，请重新登录';
+        }
+    } catch (e) {}
+    return '登录已过期，请重新登录';
+}
+
 function logout() {
     if (window._layer) {
         window._layer.confirm('确定要退出当前账号吗？', {
@@ -228,7 +238,7 @@ function loadModels() {
             safeStorageRemove('token');
             safeStorageRemove('username');
             safeStorageRemove('role');
-            showToast('登录已过期，请重新登录');
+            showToast(authFailMsg(r));
             setTimeout(function() { window.location.href = '/login.html'; }, 1500);
             return;
         }
@@ -667,7 +677,7 @@ function loadChatHistoryFromServer(callback) {
             safeStorageRemove('token');
             safeStorageRemove('username');
             safeStorageRemove('role');
-            showToast('登录已过期，请重新登录');
+            showToast(authFailMsg(r));
             setTimeout(function() { window.location.href = '/login.html'; }, 1500);
             return null;
         }
@@ -728,7 +738,7 @@ function syncChatsToServer() {
                 safeStorageRemove('token');
                 safeStorageRemove('username');
                 safeStorageRemove('role');
-                showToast('登录已过期，请重新登录');
+                showToast(authFailMsg(r));
                 setTimeout(function() { window.location.href = '/login.html'; }, 1500);
                 return null;
             }
@@ -860,7 +870,7 @@ function sendMessage(fromButton) {
             safeStorageRemove('token');
             safeStorageRemove('username');
             safeStorageRemove('role');
-            showToast('登录已过期，请重新登录');
+            showToast(authFailMsg(resp));
             setTimeout(function() { window.location.href = '/login.html'; }, 1500);
             return;
         }
@@ -2100,7 +2110,7 @@ function submitChangePassword() {
         body: JSON.stringify({ oldPassword: oldPwd, newPassword: newPwd, confirmPassword: confirmPwd })
     }).then(function(r) {
         if (r.status === 401) {
-            showToast('登录已过期，请重新登录');
+            showToast(authFailMsg(r));
             setTimeout(function() { doLogout(); }, 1000);
             return null;
         }

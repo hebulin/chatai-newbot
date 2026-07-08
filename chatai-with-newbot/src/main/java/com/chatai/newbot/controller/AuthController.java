@@ -42,7 +42,7 @@ public class AuthController {
         String ip = getClientIp(request);
         String browser = getClientBrowser(request);
         storageService.updateLoginInfo(user.getId(), ip, browser);
-        String token = storageService.createToken(user.getId());
+        String token = storageService.createToken(user.getId(), ip);
 
         result.put("success", true);
         result.put("token", token);
@@ -95,7 +95,7 @@ public class AuthController {
             return result;
         }
 
-        String token = storageService.createToken(user.getId());
+        String token = storageService.createToken(user.getId(), ip);
         result.put("success", true);
         result.put("token", token);
         result.put("username", user.getUsername());
@@ -184,17 +184,7 @@ public class AuthController {
     }
 
     private String getClientIp(HttpServletRequest request) {
-        String ip = request.getHeader("X-Forwarded-For");
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getHeader("X-Real-IP");
-        }
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getRemoteAddr();
-        }
-        if (ip != null && ip.contains(",")) {
-            ip = ip.split(",")[0].trim();
-        }
-        return ip;
+        return com.chatai.newbot.config.IpUtils.getClientIp(request);
     }
 
     private String getClientBrowser(HttpServletRequest request) {
