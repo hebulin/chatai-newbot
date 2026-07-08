@@ -7,6 +7,7 @@ function getDialogArea(maxWidth) {
 /* Admin JS - Layui Refactored */
 var providers = [], allModels = [], allUsers = [];
 var allProvidersFull = []; // 厂商管理 Tab 使用：预置 + 自定义
+var defaultModelId = null; // 全局默认模型ID（新会话自动选中）
 var quickAddProviderId = null;
 var filterUsernames = [], filterModelNames = [];
 var usagePage = 1, usageSize = 10, statsPage = 1, statsSize = 10;
@@ -161,6 +162,7 @@ function loadModels() {
     api('/api/admin/models').then(function(data) {
         if (data && data.success) {
             allModels = data.data || [];
+            defaultModelId = data.defaultModelId || null;
             populateModelFilterOptions();
             applyModelFilter();
             renderProviderGrid();
@@ -378,12 +380,18 @@ function renderModelTable(models) {
             : '<span class="status-badge vis-admin">仅管理员</span>';
         var thinkBadge = m.supportsThinking ? '<span class="think-badge">支持</span>' : '<span style="color:#64748b">不支持</span>';
         var mmBadge = m.supportsMultimodal ? '<span class="think-badge" style="background:rgba(99,102,241,.15);color:#818cf8">支持</span>' : '<span style="color:#64748b">不支持</span>';
+        var isDefault = (m.id === defaultModelId);
+        var defaultBadge = isDefault ? ' <span style="font-size:11px;padding:1px 6px;border-radius:4px;background:rgba(245,158,11,.18);color:#f59e0b;font-weight:500;flex-shrink:0;">默认</span>' : '';
+        var defaultBtn = isDefault
+            ? '<button class="action-btn" onclick="clearDefaultModel()" title="取消默认" style="color:#f59e0b"><i class="layui-icon layui-icon-star-fill"></i></button>'
+            : '<button class="action-btn" onclick="setDefaultModel(\'' + esc(m.id) + '\')" title="设为默认"><i class="layui-icon layui-icon-star"></i></button>';
         var actions = '<div class="action-btns">';
+        actions += defaultBtn;
         actions += '<button class="action-btn edit-btn" onclick="editModel(\'' + esc(m.id) + '\')"><i class="layui-icon layui-icon-edit"></i></button>';
         actions += '<button class="action-btn del-btn" onclick="deleteModel(\'' + esc(m.id) + '\')"><i class="layui-icon layui-icon-delete"></i></button>';
         actions += '</div>';
         var tr = '<tr>'
-            + '<td><div class="model-name-cell">' + getModelProviderIconHtml(m, 20) + '<span>' + esc(m.displayName || m.modelId) + '</span></div></td>'
+            + '<td><div class="model-name-cell">' + getModelProviderIconHtml(m, 20) + '<span>' + esc(m.displayName || m.modelId) + '</span>' + defaultBadge + '</div></td>'
             + '<td>' + esc(m.providerName || m.providerId) + '</td>'
             + '<td><span class="model-id-text">' + esc(m.modelId) + '</span></td>'
             + '<td>' + thinkBadge + '</td>'
@@ -477,6 +485,22 @@ function deleteModel(id) {
             if (data && data.success) { window._layer.close(idx); window._layer.msg('已删除',{icon:1}); loadModels(); }
             else window._layer.msg(data.message||'删除失败',{icon:2});
         });
+    });
+}
+
+// 设置全局默认模型（全局唯一）
+function setDefaultModel(id) {
+    api('/api/admin/models/default', { method:'PUT', body: JSON.stringify({ modelId: id }) }).then(function(data) {
+        if (data && data.success) { window._layer.msg(data.message || '已设为默认模型', {icon:1}); loadModels(); }
+        else window._layer.msg(data.message || '设置失败', {icon:2});
+    });
+}
+
+// 取消全局默认模型
+function clearDefaultModel() {
+    api('/api/admin/models/default', { method:'DELETE' }).then(function(data) {
+        if (data && data.success) { window._layer.msg(data.message || '已取消默认模型', {icon:1}); loadModels(); }
+        else window._layer.msg(data.message || '操作失败', {icon:2});
     });
 }
 

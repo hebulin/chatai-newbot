@@ -49,6 +49,7 @@ public class AdminController {
                 .collect(Collectors.toList());
         result.put("success", true);
         result.put("data", safeModels);
+        result.put("defaultModelId", storageService.getDefaultModelId());
         return result;
     }
 
@@ -100,6 +101,53 @@ public class AdminController {
         boolean deleted = storageService.deleteModelConfig(id);
         result.put("success", deleted);
         if (!deleted) result.put("message", "模型不存在");
+        return result;
+    }
+
+    /**
+     * 设置全局默认模型（全局唯一，新会话自动选中）。请求体: {"modelId": "xxx"}
+     */
+    @PutMapping("/models/default")
+    public Map<String, Object> setDefaultModel(@RequestBody Map<String, String> body,
+                                               HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        String modelId = body == null ? null : body.get("modelId");
+        if (modelId == null || modelId.trim().isEmpty()) {
+            result.put("success", false);
+            result.put("message", "请指定模型");
+            return result;
+        }
+        ModelConfig m = storageService.getModelConfigById(modelId);
+        if (m == null) {
+            result.put("success", false);
+            result.put("message", "模型不存在");
+            return result;
+        }
+        storageService.setDefaultModelId(modelId);
+        result.put("success", true);
+        result.put("message", "已设为默认模型：" + (m.getDisplayName() != null ? m.getDisplayName() : m.getModelId()));
+        return result;
+    }
+
+    /**
+     * 取消全局默认模型
+     */
+    @DeleteMapping("/models/default")
+    public Map<String, Object> clearDefaultModel(HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        storageService.clearDefaultModelId();
+        result.put("success", true);
+        result.put("message", "已取消默认模型");
         return result;
     }
 

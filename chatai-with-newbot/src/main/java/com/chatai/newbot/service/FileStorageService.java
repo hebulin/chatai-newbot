@@ -42,6 +42,7 @@ public class FileStorageService {
     private Map<String, Map<String, Integer>> ipRegisterMap = new ConcurrentHashMap<>(); // date -> {ip -> count}
     private Map<String, String> activeTokens = new ConcurrentHashMap<>(); // token -> userId
     private Map<String, String> tokenIps = new ConcurrentHashMap<>();   // token -> 登录时绑定的IP（用于后续请求IP校验）
+    private volatile String defaultModelId = null; // 全局默认模型（新会话自动选中），持久化到 default_model.json
 
     // 内置admin密码
     private static final String ADMIN_USERNAME = "admin";
@@ -74,6 +75,7 @@ public class FileStorageService {
             log.info("已加载 {} 天的使用日志，共 {} 条", usageLogsByDay.size(), getAllUsageLogs().size());
             loadIpRegisterMap();
             log.info("已加载 IP 注册计数");
+            loadDefaultModel();
 
             // 确保admin用户存在
             ensureAdminUser();
@@ -311,8 +313,51 @@ public class FileStorageService {
 
     public boolean deleteModelConfig(String id) {
         boolean removed = modelConfigs.removeIf(m -> m.getId().equals(id));
-        if (removed) saveModelConfigs();
+        if (removed) {
+            // 删除的是默认模型则清空默认设置
+            if (id != null && id.equals(defaultModelId)) {
+                clearDefaultModelId();
+            }
+            saveModelConfigs();
+        }
         return removed;
+    }
+
+    // ========== 默认模型（全局，新会话自动选中） ==========
+
+    private void loadDefaultModel() {
+        File file = dataDir.resolve("default_model.json").toFile();
+        if (file.exists()) {
+            try {
+                Map<String, Object> loaded = objectMapper.readValue(file, new TypeReference<Map<String, Object>>() {});
+                if (loaded != null) {
+                    Object v = loaded.get("defaultModelId");
+                    defaultModelId = (v == null || v.toString().isEmpty()) ? null : v.toString();
+                }
+            } catch (Exception e) {
+                log.error("加载默认模型失败", e);
+            }
+        }
+    }
+
+    private void saveDefaultModel() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("defaultModelId", defaultModelId);
+        saveToFile("default_model.json", data);
+    }
+
+    public String getDefaultModelId() {
+        return defaultModelId;
+    }
+
+    public synchronized void setDefaultModelId(String modelId) {
+        this.defaultModelId = (modelId == null || modelId.isEmpty()) ? null : modelId;
+        saveDefaultModel();
+    }
+
+    public synchronized void clearDefaultModelId() {
+        this.defaultModelId = null;
+        saveDefaultModel();
     }
 
     // ========== 厂商相关 ==========

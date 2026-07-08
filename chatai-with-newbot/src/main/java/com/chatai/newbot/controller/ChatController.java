@@ -104,11 +104,13 @@ public class ChatController {
 
         result.put("success", true);
         result.put("data", modelList);
+        result.put("defaultModelId", storageService.getDefaultModelId());
         return result;
     }
 
     /**
-     * 从 providers.json 自动同步已存储模型的多模态/思考支持状态，修复旧数据
+     * 同步已存储模型的厂商显示名/图标（预置厂商）。
+     * 注意：supportsThinking / supportsMultimodal 不再自动覆盖，由管理员在"模型管理"中手动维护。
      */
     private void syncModelCapabilities(List<ModelConfig> models) {
         List<Provider> providers = storageService.getAllProviders();
@@ -122,14 +124,6 @@ public class ChatController {
                     provider.getModels().stream().filter(m -> m.getId().equals(model.getModelId())).findFirst().orElse(null);
             if (pm == null) continue;
             boolean needUpdate = false;
-            if (model.isSupportsMultimodal() != pm.isSupportsMultimodal()) {
-                model.setSupportsMultimodal(pm.isSupportsMultimodal());
-                needUpdate = true;
-            }
-            if (model.isSupportsThinking() != pm.isSupportsThinking()) {
-                model.setSupportsThinking(pm.isSupportsThinking());
-                needUpdate = true;
-            }
             // 同步显示名覆盖
             String displayName = storageService.getProviderDisplayName(model.getProviderId());
             if (displayName != null && !displayName.equals(model.getProviderName())) {
@@ -147,7 +141,7 @@ public class ChatController {
                 updated = true;
             }
         }
-        if (updated) log.info("已自动同步模型能力状态（多模态/思考支持）");
+        if (updated) log.info("已自动同步模型厂商名/图标");
     }
 
     // ========== 会话历史同步（多端统一） ==========
