@@ -41,6 +41,7 @@ var chats = {};
 var models = [];
 var currentModelId = '';
 var currentModelName = '';
+var defaultModelId = null; // 全局默认模型ID（由后台配置，新会话自动选中）
 var isDeepThinking = false;
 var isStreamActive = false;
 var currentController = null;
@@ -247,22 +248,40 @@ function loadModels() {
     .then(function(data) {
         if (!data || !data.success) return;
         models = data.data;
-        if (models.length > 0) {
-            currentModelId = models[0].id;
-            currentModelName = models[0].displayName;
-            updateModelSelectDisplay(models[0]);
+        defaultModelId = data.defaultModelId || null;
+        // 初始模型：优先默认模型（需在当前用户可见列表中），否则取第一个
+        var initial = (models && models.length > 0) ? (findModelById(defaultModelId) || models[0]) : null;
+        if (initial) {
+            currentModelId = initial.id;
+            currentModelName = initial.displayName;
+            updateModelSelectDisplay(initial);
             // 存储当前模型的多模态支持状态
-            window._currentModelSupportsMultimodal = models[0].supportsMultimodal || false;
+            window._currentModelSupportsMultimodal = initial.supportsMultimodal || false;
         }
         renderModelSelector(models);
         // 初始化深度思考状态（在renderModelSelector之后，确保DOM已就绪）
-        if (models.length > 0) {
+        if (initial) {
             isDeepThinking = false; // 默认关闭深度思考
             var thinkIconBtn = document.getElementById('thinkIconBtn');
             if (thinkIconBtn) thinkIconBtn.classList.toggle('active', false);
-            updateThinkToggle(models[0], false);
+            updateThinkToggle(initial, false);
         }
     }).catch(function(e) { console.error('加载模型失败:', e); });
+}
+
+// 按 ID 查找当前可见模型
+function findModelById(id) {
+    if (!id || !models) return null;
+    for (var i = 0; i < models.length; i++) {
+        if (models[i].id === id) return models[i];
+    }
+    return null;
+}
+
+// 切换到默认模型（新会话调用）；默认模型不可用时保持当前选择
+function applyDefaultModel() {
+    var dm = findModelById(defaultModelId);
+    if (dm) selectModel(dm);
 }
 
 // 根据模型displayName推断providerId
@@ -462,6 +481,8 @@ function newChat() {
     updateChatList();
     displayMessages();
     resetState();
+    // 新会话自动切换到默认模型
+    applyDefaultModel();
 }
 
 function switchChat(id) {
