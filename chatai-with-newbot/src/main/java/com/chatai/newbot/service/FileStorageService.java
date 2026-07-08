@@ -41,6 +41,7 @@ public class FileStorageService {
     private Map<String, List<UsageLog>> usageLogsByDay = new ConcurrentHashMap<>();
     private Map<String, Map<String, Integer>> ipRegisterMap = new ConcurrentHashMap<>(); // date -> {ip -> count}
     private Map<String, String> activeTokens = new ConcurrentHashMap<>(); // token -> userId
+    private Map<String, String> tokenIps = new ConcurrentHashMap<>();   // token -> 登录时绑定的IP（用于后续请求IP校验）
 
     // 内置admin密码
     private static final String ADMIN_USERNAME = "admin";
@@ -159,9 +160,12 @@ public class FileStorageService {
                 });
     }
 
-    public String createToken(String userId) {
+    public String createToken(String userId, String ip) {
         String token = UUID.randomUUID().toString().replace("-", "");
         activeTokens.put(token, userId);
+        if (ip != null && !ip.isEmpty()) {
+            tokenIps.put(token, ip);
+        }
         return token;
     }
 
@@ -172,9 +176,16 @@ public class FileStorageService {
         return users.stream().filter(u -> u.getId().equals(userId)).findFirst().orElse(null);
     }
 
+    /** 获取 token 登录时绑定的 IP（未绑定则返回 null） */
+    public String getTokenIp(String token) {
+        if (token == null) return null;
+        return tokenIps.get(token);
+    }
+
     public void removeToken(String token) {
         if (token != null) {
             activeTokens.remove(token);
+            tokenIps.remove(token);
         }
     }
 

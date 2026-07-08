@@ -10,6 +10,7 @@ var allProvidersFull = []; // 厂商管理 Tab 使用：预置 + 自定义
 var quickAddProviderId = null;
 var filterUsernames = [], filterModelNames = [];
 var usagePage = 1, usageSize = 10, statsPage = 1, statsSize = 10;
+var _authRedirecting = false; // 防止多个 401 并发时重复弹窗/跳转
 var dataSubTab = 'usage';
 
 var providerIconMap = {
@@ -96,7 +97,20 @@ function api(url, opts) {
     opts = opts || {};
     opts.headers = Object.assign({}, headers(), opts.headers || {});
     return fetch(url, opts).then(function(r) {
-        if (r.status === 401 || r.status === 403) { localStorage.removeItem('token'); window.location.href = '/login.html'; throw new Error('Auth failed'); }
+        if (r.status === 401 || r.status === 403) {
+            if (!_authRedirecting) {
+                _authRedirecting = true;
+                var msg = (r.headers && r.headers.get('X-Auth-Reason') === 'ip_changed') ? '登录IP已变更，请重新登录' : '登录已过期，请重新登录';
+                localStorage.removeItem('token');
+                if (window._layer && window._layer.msg) {
+                    window._layer.msg(msg, { icon: 2, time: 1800 }, function () { window.location.href = '/login.html'; });
+                } else {
+                    alert(msg);
+                    window.location.href = '/login.html';
+                }
+            }
+            throw new Error('Auth failed');
+        }
         return r.json();
     });
 }
