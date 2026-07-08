@@ -36,10 +36,39 @@ function getProviderIconHtml(pid, size) {
 }
 function getProviderSmallIconHtml(pid) { return getProviderIconHtml(pid, 20); }
 
+// 厂商/模型图标：预设厂商及其模型用预设 SVG 图标；自定义厂商及其模型用可设置的 emoji 图标，未设置则显示空占位
+function getEntityIconHtml(providerId, icon, size) {
+    size = size || 20;
+    if (providerId && providerId !== '__custom__') {
+        return getProviderIconHtml(providerId, size);
+    }
+    var ic = icon || '';
+    if (ic) {
+        return '<span style="font-size:' + size + 'px;line-height:1;display:inline-flex;align-items:center;justify-content:center;width:' + size + 'px;height:' + size + 'px;flex-shrink:0;">' + esc(ic) + '</span>';
+    }
+    return '<span style="display:inline-block;width:' + size + 'px;height:' + size + 'px;flex-shrink:0;"></span>';
+}
+function getModelProviderIconHtml(model, size) {
+    return getEntityIconHtml(model && model.providerId, model && model.providerIcon, size);
+}
+
 function getUsageModelIconHtml(modelName) {
     if (!modelName) return '';
+    // 优先按 displayName 匹配当前已配置模型，使用其厂商图标（自定义模型也能显示设置的 emoji 图标）
+    var model = null;
+    if (allModels && allModels.length) {
+        model = allModels.find(function(m) { return (m.displayName || '') === modelName; });
+    }
+    if (model) {
+        return getEntityIconHtml(model.providerId, model.providerIcon, 18);
+    }
+    // 回退1：按模型名推断预设厂商（显示预设 SVG 图标）
     var pid = inferProviderId(modelName);
-    return getProviderIconHtml(pid, 18);
+    if (pid) {
+        return getProviderIconHtml(pid, 18);
+    }
+    // 回退2：无法识别（如已删除的自定义模型）：显示空占位，不再显示首字母色块
+    return '<span style="display:inline-block;width:18px;height:18px;flex-shrink:0;"></span>';
 }
 
 function inferProviderId(modelName) {
@@ -247,14 +276,16 @@ function renderProviderGrid() {
     providers.forEach(function(p) {
         var pModels = p.models || [];
         var existingCount = allModels.filter(function(m) { return m.providerId === p.id; }).length;
-        var totalModels = pModels.length;
+        // totalModels 优先用预设模型列表长度，缺失时回退到后端 modelCount
+        var totalModels = pModels.length || p.modelCount || 0;
         var isActive = quickAddProviderId === p.id;
+        var allAdded = totalModels > 0 && existingCount >= totalModels;
         html += '<div class="provider-card' + (isActive ? ' active' : '') + '" onclick="onProviderCardClick(\'' + esc(p.id) + '\')">';
         html += '<div class="provider-card-icon">' + getProviderIconHtml(p.id, 40) + '</div>';
         html += '<div class="provider-card-info"><div class="provider-card-name">' + esc(p.name) + '</div>';
         html += '<div class="provider-card-count">已接入 ' + existingCount + ' / ' + totalModels + ' 个模型</div></div>';
         html += '<div class="provider-card-action">';
-        if (existingCount < totalModels) html += '<button class="provider-card-btn" onclick="event.stopPropagation();showQuickAdd(\'' + esc(p.id) + '\')">一键接入</button>';
+        if (!allAdded) html += '<button class="provider-card-btn" onclick="event.stopPropagation();showQuickAdd(\'' + esc(p.id) + '\')">一键接入</button>';
         else html += '<span class="provider-card-done">✓ 已全部接入</span>';
         html += '</div></div>';
     });
@@ -338,7 +369,7 @@ function renderModelTable(models) {
         actions += '<button class="action-btn del-btn" onclick="deleteModel(\'' + esc(m.id) + '\')"><i class="layui-icon layui-icon-delete"></i></button>';
         actions += '</div>';
         var tr = '<tr>'
-            + '<td><div class="model-name-cell">' + getProviderSmallIconHtml(m.providerId) + '<span>' + esc(m.displayName || m.modelId) + '</span></div></td>'
+            + '<td><div class="model-name-cell">' + getModelProviderIconHtml(m, 20) + '<span>' + esc(m.displayName || m.modelId) + '</span></div></td>'
             + '<td>' + esc(m.providerName || m.providerId) + '</td>'
             + '<td><span class="model-id-text">' + esc(m.modelId) + '</span></td>'
             + '<td>' + thinkBadge + '</td>'
@@ -381,24 +412,20 @@ function editModel(id) {
     var layer = window._layer, form = window._form;
     var model = allModels.find(function(m) { return m.id === id; });
     if (!model) return;
-    // 从模型自身数据读取能力（而非从 providers.json 查找，确保一致性）
+    // 从模型自身数据读取能力（管理员可手动设置）
     var isPresetThinking = model.supportsThinking || false;
     var isPresetMm = model.supportsMultimodal || false;
     var html = '<div class="layui-form" lay-filter="editModelForm" style="padding:20px 20px 0;">';
-    html += '<div class="form-group"><label class="form-label">厂商</label><div class="form-value">' + getProviderSmallIconHtml(model.providerId) + esc(model.providerName || model.providerId) + '</div></div>';
+    html += '<div class="form-group"><label class="form-label">厂商</label><div class="form-value">' + getModelProviderIconHtml(model, 20) + esc(model.providerName || model.providerId) + '</div></div>';
     html += '<div class="form-group"><label class="form-label">显示名</label><div class="form-value"><input type="text" id="emDisplayName" class="layui-input" value="' + esc(model.displayName||'') + '"/></div></div>';
     html += '<div class="form-group"><label class="form-label">模型ID</label><div class="form-value"><input type="text" id="emModelId" class="layui-input" value="' + esc(model.modelId||'') + '" readonly style="opacity:0.6"/></div></div>';
     html += '<div class="form-group"><label class="form-label">API 地址</label><div class="form-value"><input type="text" id="emApiUrl" class="layui-input" value="' + esc(model.apiUrl||'') + '"/></div></div>';
     html += '<div class="form-group"><label class="form-label">API Key</label><div class="form-value"><input type="text" id="emApiKey" class="layui-input" value="' + esc(model.apiKey||'') + '" placeholder="不修改则留空"/></div></div>';
     html += '<div class="form-group"><label class="form-label">状态</label><div class="form-value"><input type="checkbox" id="emEnabled" lay-skin="switch" lay-text="启用|禁用"' + (model.enabled?' checked':'') + '></div></div>';
     html += '<div class="form-group"><label class="form-label">可见性</label><div class="form-value"><input type="checkbox" id="emVisibleToAll" lay-skin="switch" lay-text="所有人|仅管理员"' + (model.visibleToAll?' checked':'') + '></div></div>';
-    // 能力提示（只读展示，不可设置）
-    var capHtml = '<div class="form-group"><label class="form-label">能力</label><div class="form-value" style="display:flex;gap:8px;flex-wrap:wrap;">';
-    capHtml += '<span style="font-size:13px;padding:4px 12px;border-radius:6px;' + (isPresetThinking ? 'background:rgba(16,185,129,.15);color:#10b981' : 'background:rgba(100,116,139,.1);color:#64748b') + '">思考模式：' + (isPresetThinking ? '支持' : '不支持') + '</span>';
-    capHtml += '<span style="font-size:13px;padding:4px 12px;border-radius:6px;' + (isPresetMm ? 'background:rgba(99,102,241,.15);color:#818cf8' : 'background:rgba(100,116,139,.1);color:#64748b') + '">多模态：' + (isPresetMm ? '支持' : '不支持') + '</span>';
-    capHtml += '<input type="hidden" id="emSupportsThinking" value="' + (isPresetThinking ? '1' : '0') + '">';
-    capHtml += '</div></div>';
-    html += capHtml;
+    // 能力开关（可手动设置）
+    html += '<div class="form-group"><label class="form-label">思考模式</label><div class="form-value"><input type="checkbox" id="emSupportsThinking" lay-skin="switch" lay-text="支持|不支持"' + (isPresetThinking?' checked':'') + '></div></div>';
+    html += '<div class="form-group"><label class="form-label">多模态</label><div class="form-value"><input type="checkbox" id="emSupportsMultimodal" lay-skin="switch" lay-text="支持|不支持"' + (isPresetMm?' checked':'') + '></div></div>';
     html += '<div style="text-align:right;padding:10px 0;">';
     html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
     html += '<button type="button" class="layui-btn" onclick="saveModel(\'' + esc(id) + '\')">保存</button>';
@@ -412,21 +439,13 @@ function saveModel(id) {
     var $ = window._$, layer = window._layer;
     var model = allModels.find(function(m) { return m.id === id; });
     if (!model) return;
-    var emThinkingEl = $('#emSupportsThinking');
-    var supportsThinking;
-    if (emThinkingEl.attr('type') === 'hidden') {
-        supportsThinking = emThinkingEl.val() === '1';
-    } else {
-        supportsThinking = emThinkingEl.is(':checked');
-    }
     var payload = Object.assign({}, model, {
         displayName: $('#emDisplayName').val().trim(),
         apiUrl: $('#emApiUrl').val().trim(),
         enabled: $('#emEnabled').is(':checked'),
         visibleToAll: $('#emVisibleToAll').is(':checked'),
-        supportsThinking: supportsThinking,
-        // 同步多模态支持状态：优先从 providers.json 获取，确保数据一致
-        supportsMultimodal: isPresetMultimodalModel(model.providerId, model.modelId) || model.supportsMultimodal || false
+        supportsThinking: $('#emSupportsThinking').is(':checked'),
+        supportsMultimodal: $('#emSupportsMultimodal').is(':checked')
     });
     var ak = $('#emApiKey').val().trim();
     if (ak) payload.apiKey = ak;
@@ -513,7 +532,7 @@ function renderProviderTable(providersList) {
             + '<button class="action-btn edit-btn" onclick="showRenameProvider(\'' + encodedId + '\',' + (isCustom ? 'true' : 'false') + ',\'' + esc(currentName).replace(/'/g, "\\'") + '\',\'' + esc(currentIcon).replace(/'/g, "\\'") + '\')" title="修改名称/图标"><i class="layui-icon layui-icon-edit"></i></button>'
             + '</div>';
         var tr = '<tr>'
-            + '<td><div class="model-name-cell">' + getProviderIconHtml(providerId === '__custom__' ? '' : providerId, 20) + '<span>' + esc(currentName) + '</span></div></td>'
+            + '<td><div class="model-name-cell">' + getEntityIconHtml(providerId, currentIcon, 20) + '<span>' + esc(currentName) + '</span></div></td>'
             + '<td>' + typeBadge + '</td>'
             + '<td><span class="model-id-text">' + esc(providerId) + '</span></td>'
             + '<td>' + modelCount + '</td>'
@@ -656,6 +675,7 @@ function showAddModel() {
     html += '<div class="form-group"><label class="form-label">API Key</label><div class="form-value"><input type="text" id="amApiKey" class="layui-input" placeholder="sk-..."/></div></div>';
     html += '<div class="form-group"><label class="form-label">可见性</label><div class="form-value"><input type="checkbox" id="amVisibleToAll" lay-skin="switch" lay-text="所有人|仅管理员" checked></div></div>';
     html += '<div class="form-group"><label class="form-label">思考模式</label><div class="form-value" id="amThinkingValue"><input type="checkbox" id="amSupportsThinking" lay-skin="switch" lay-text="支持|不支持"></div></div>';
+    html += '<div class="form-group"><label class="form-label">多模态</label><div class="form-value" id="amMultimodalValue"><input type="checkbox" id="amSupportsMultimodal" lay-skin="switch" lay-text="支持|不支持"></div></div>';
     html += '</div>';
     html += '<div style="text-align:right;padding:10px 0;">';
     html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
@@ -692,8 +712,9 @@ function onAddModelProviderChange() {
         $('#amCustomFields').show();
         // 清空自定义厂商的预填URL
         $('#amApiUrl').val('');
-        // 重置思考模式为开关
+        // 重置思考模式/多模态为开关
         $('#amThinkingValue').html('<input type="checkbox" id="amSupportsThinking" lay-skin="switch" lay-text="支持|不支持">');
+        $('#amMultimodalValue').html('<input type="checkbox" id="amSupportsMultimodal" lay-skin="switch" lay-text="支持|不支持">');
         // 只渲染checkbox，避免重新渲染select导致下拉框损坏
         form.render('checkbox', 'addModelForm');
     } else {
@@ -789,8 +810,9 @@ function showAddModelCustomModelFields(provider) {
     if (provider) {
         $('#amApiUrl').val(provider.defaultApiUrl || '');
     }
-    // 重置思考模式为开关
+    // 重置思考模式/多模态为开关
     $('#amThinkingValue').html('<input type="checkbox" id="amSupportsThinking" lay-skin="switch" lay-text="支持|不支持">');
+    $('#amMultimodalValue').html('<input type="checkbox" id="amSupportsMultimodal" lay-skin="switch" lay-text="支持|不支持">');
     // 只渲染checkbox，避免重新渲染select导致下拉框损坏
     form.render('checkbox', 'addModelForm');
 }
@@ -812,6 +834,8 @@ function submitAddModel() {
         if (!apiKey) { layer.msg('请输入 API Key', {icon:0}); return; }
         var amThinkingEl = $('#amSupportsThinking');
         var supportsThinking = amThinkingEl.length ? amThinkingEl.is(':checked') : false;
+        var amMmEl = $('#amSupportsMultimodal');
+        var supportsMultimodal = amMmEl.length ? amMmEl.is(':checked') : false;
         payload = {
             providerId: '__custom__',
             modelId: modelId,
@@ -821,6 +845,7 @@ function submitAddModel() {
             apiKey: apiKey,
             visibleToAll: $('#amVisibleToAll').is(':checked'),
             supportsThinking: supportsThinking,
+            supportsMultimodal: supportsMultimodal,
             enabled: true
         };
     } else {
@@ -835,6 +860,8 @@ function submitAddModel() {
             if (!apiKey) { layer.msg('请输入 API Key', {icon:0}); return; }
             var amThinkingEl = $('#amSupportsThinking');
             var supportsThinking = amThinkingEl.length ? amThinkingEl.is(':checked') : false;
+            var amMmEl = $('#amSupportsMultimodal');
+            var supportsMultimodal = amMmEl.length ? amMmEl.is(':checked') : false;
             payload = {
                 providerId: providerId,
                 modelId: modelId,
@@ -845,6 +872,7 @@ function submitAddModel() {
                 apiKey: apiKey,
                 visibleToAll: $('#amVisibleToAll').is(':checked'),
                 supportsThinking: supportsThinking,
+                supportsMultimodal: supportsMultimodal,
                 enabled: true
             };
             if (provider) {
@@ -1015,7 +1043,7 @@ function showPerms(userId) {
     allModels.forEach(function(m) {
         var checked = allowedIds.indexOf(m.id) >= 0;
         modelCheckboxes += '<div class="model-checkbox-item"><input type="checkbox" name="permModelIds" value="' + m.id + '" lay-skin="primary"' + (checked?' checked':'') + '>';
-        modelCheckboxes += '<label>' + getProviderSmallIconHtml(m.providerId) + esc(m.displayName||m.modelId) + '</label></div>';
+        modelCheckboxes += '<label>' + getModelProviderIconHtml(m, 18) + esc(m.displayName||m.modelId) + '</label></div>';
     });
     if (!modelCheckboxes) { layer.msg('暂无模型', {icon:0}); return; }
     var html = '<div class="layui-form" lay-filter="permsForm" style="padding:20px 20px 0;">';
