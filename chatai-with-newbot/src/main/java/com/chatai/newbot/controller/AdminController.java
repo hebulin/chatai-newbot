@@ -41,7 +41,7 @@ public class AdminController {
             return result;
         }
         List<ModelConfig> models = storageService.getAllModelConfigs();
-        // 自动同步多模态/思考支持状态：从 providers.json 更新已存储模型的能力标记
+        // 同步厂商显示名/图标（预置厂商）；思考/多模态能力由管理员手动维护，不自动覆盖
         syncModelCapabilities(models);
         // 脱敏 API Key，防止泄露（创建安全副本，不污染原始数据）
         List<ModelConfig> safeModels = models.stream()
@@ -125,6 +125,8 @@ public class AdminController {
             m.put("icon", p.getIcon());
             m.put("type", "preset");
             m.put("modelCount", p.getModels() == null ? 0 : p.getModels().size());
+            // 预置模型列表：供前端"快速接入"勾选、"添加模型"预设下拉、计算"已全部接入"状态
+            m.put("models", p.getModels() == null ? Collections.emptyList() : p.getModels());
             presetList.add(m);
         }
         // 自定义厂商（按 providerName 聚合，来源：ModelConfig）
@@ -600,28 +602,13 @@ public class AdminController {
     }
 
     /**
-     * 从 providers.json 自动同步已存储模型的多模态/思考支持状态，修复旧数据
+     * 同步已存储模型的厂商显示名/图标（预置厂商）。
+     * 注意：supportsThinking / supportsMultimodal 不再自动覆盖，由管理员在"模型管理"中通过开关手动设置。
      */
     private void syncModelCapabilities(List<ModelConfig> models) {
-        List<Provider> providers = storageService.getAllProviders();
         boolean updated = false;
         for (ModelConfig model : models) {
-            Provider provider = providers.stream()
-                    .filter(p -> p.getId().equals(model.getProviderId()))
-                    .findFirst().orElse(null);
-            if (provider == null) continue;
-            ProviderModel pm = (provider.getModels() == null) ? null :
-                    provider.getModels().stream().filter(m -> m.getId().equals(model.getModelId())).findFirst().orElse(null);
-            if (pm == null) continue;
             boolean needUpdate = false;
-            if (model.isSupportsMultimodal() != pm.isSupportsMultimodal()) {
-                model.setSupportsMultimodal(pm.isSupportsMultimodal());
-                needUpdate = true;
-            }
-            if (model.isSupportsThinking() != pm.isSupportsThinking()) {
-                model.setSupportsThinking(pm.isSupportsThinking());
-                needUpdate = true;
-            }
             // 同步厂商显示名（如有覆盖）
             String displayName = storageService.getProviderDisplayName(model.getProviderId());
             if (displayName != null && !displayName.equals(model.getProviderName())) {
@@ -639,7 +626,7 @@ public class AdminController {
                 updated = true;
             }
         }
-        if (updated) log.info("已自动同步模型能力/厂商名/图标");
+        if (updated) log.info("已自动同步模型厂商名/图标");
     }
 
     /**
