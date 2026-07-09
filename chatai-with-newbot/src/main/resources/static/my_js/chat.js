@@ -41,6 +41,7 @@ var chats = {};
 var models = [];
 var currentModelId = '';
 var currentModelName = '';
+var defaultModelId = null; // 全局默认模型ID（由后台配置，新会话自动选中）
 var isDeepThinking = false;
 var isStreamActive = false;
 var currentController = null;
@@ -180,6 +181,16 @@ layui.use(['layer', 'form', 'element', 'jquery'], function() {
 // ===== 认证相关 =====
 function authHeaders() { return { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' }; }
 
+// 根据 401 响应头判断未授权原因：IP 变更或登录过期
+function authFailMsg(r) {
+    try {
+        if (r && r.headers && r.headers.get('X-Auth-Reason') === 'ip_changed') {
+            return '登录IP已变更，请重新登录';
+        }
+    } catch (e) {}
+    return '登录已过期，请重新登录';
+}
+
 function logout() {
     if (window._layer) {
         window._layer.confirm('确定要退出当前账号吗？', {
@@ -228,7 +239,7 @@ function loadModels() {
             safeStorageRemove('token');
             safeStorageRemove('username');
             safeStorageRemove('role');
-            showToast('登录已过期，请重新登录');
+            showToast(authFailMsg(r));
             setTimeout(function() { window.location.href = '/login.html'; }, 1500);
             return;
         }
@@ -237,22 +248,40 @@ function loadModels() {
     .then(function(data) {
         if (!data || !data.success) return;
         models = data.data;
-        if (models.length > 0) {
-            currentModelId = models[0].id;
-            currentModelName = models[0].displayName;
-            updateModelSelectDisplay(models[0]);
+        defaultModelId = data.defaultModelId || null;
+        // 初始模型：优先默认模型（需在当前用户可见列表中），否则取第一个
+        var initial = (models && models.length > 0) ? (findModelById(defaultModelId) || models[0]) : null;
+        if (initial) {
+            currentModelId = initial.id;
+            currentModelName = initial.displayName;
+            updateModelSelectDisplay(initial);
             // 存储当前模型的多模态支持状态
-            window._currentModelSupportsMultimodal = models[0].supportsMultimodal || false;
+            window._currentModelSupportsMultimodal = initial.supportsMultimodal || false;
         }
         renderModelSelector(models);
         // 初始化深度思考状态（在renderModelSelector之后，确保DOM已就绪）
-        if (models.length > 0) {
+        if (initial) {
             isDeepThinking = false; // 默认关闭深度思考
             var thinkIconBtn = document.getElementById('thinkIconBtn');
             if (thinkIconBtn) thinkIconBtn.classList.toggle('active', false);
-            updateThinkToggle(models[0], false);
+            updateThinkToggle(initial, false);
         }
     }).catch(function(e) { console.error('加载模型失败:', e); });
+}
+
+// 按 ID 查找当前可见模型
+function findModelById(id) {
+    if (!id || !models) return null;
+    for (var i = 0; i < models.length; i++) {
+        if (models[i].id === id) return models[i];
+    }
+    return null;
+}
+
+// 切换到默认模型（新会话调用）；默认模型不可用时保持当前选择
+function applyDefaultModel() {
+    var dm = findModelById(defaultModelId);
+    if (dm) selectModel(dm);
 }
 
 // 根据模型displayName推断providerId
@@ -296,6 +325,12 @@ function renderModelSelector(modelsData) {
         var iconHtml = '';
         if (iconPath) {
             iconHtml = '<img src="' + iconPath + '" class="model-group-icon" />';
+        } else {
+            // 没有 SVG 图标时，使用后端 ModelConfig.providerIcon（emoji）
+            var emojiIcon = group.models[0] && group.models[0].providerIcon;
+            if (emojiIcon) {
+                iconHtml = '<span class="model-group-emoji" style="font-size:14px;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;">' + escapeHtml(emojiIcon) + '</span>';
+            }
         }
         groupHeader.innerHTML = iconHtml + '<span>' + escapeHtml(group.name) + '</span>';
         dropdown.appendChild(groupHeader);
@@ -312,6 +347,9 @@ function renderModelSelector(modelsData) {
             var itemIconHtml = '';
             if (itemIconPath) {
                 itemIconHtml = '<img src="' + itemIconPath + '" class="model-item-icon" />';
+            } else if (m.providerIcon) {
+                // 没有 SVG 图标时，使用 model.providerIcon（emoji），与厂商分组标题一致
+                itemIconHtml = '<span class="model-item-emoji" style="font-size:13px;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;flex-shrink:0;">' + escapeHtml(m.providerIcon) + '</span>';
             }
             item.innerHTML = itemIconHtml + '<span class="model-item-name">' + escapeHtml(m.displayName) + '</span>';
             item.onclick = function() {
@@ -350,6 +388,8 @@ function updateModelSelectDisplay(model) {
     var iconHtml = '';
     if (iconPath) {
         iconHtml = '<img src="' + iconPath + '" class="model-select-icon" />';
+    } else if (model.providerIcon) {
+        iconHtml = '<span class="model-select-emoji" style="font-size:14px;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;">' + escapeHtml(model.providerIcon) + '</span>';
     }
     valueEl.innerHTML = iconHtml + '<span>' + escapeHtml(model.displayName) + '</span>';
 }
@@ -441,6 +481,8 @@ function newChat() {
     updateChatList();
     displayMessages();
     resetState();
+    // 新会话自动切换到默认模型
+    applyDefaultModel();
 }
 
 function switchChat(id) {
@@ -656,7 +698,7 @@ function loadChatHistoryFromServer(callback) {
             safeStorageRemove('token');
             safeStorageRemove('username');
             safeStorageRemove('role');
-            showToast('登录已过期，请重新登录');
+            showToast(authFailMsg(r));
             setTimeout(function() { window.location.href = '/login.html'; }, 1500);
             return null;
         }
@@ -717,7 +759,7 @@ function syncChatsToServer() {
                 safeStorageRemove('token');
                 safeStorageRemove('username');
                 safeStorageRemove('role');
-                showToast('登录已过期，请重新登录');
+                showToast(authFailMsg(r));
                 setTimeout(function() { window.location.href = '/login.html'; }, 1500);
                 return null;
             }
@@ -849,7 +891,7 @@ function sendMessage(fromButton) {
             safeStorageRemove('token');
             safeStorageRemove('username');
             safeStorageRemove('role');
-            showToast('登录已过期，请重新登录');
+            showToast(authFailMsg(resp));
             setTimeout(function() { window.location.href = '/login.html'; }, 1500);
             return;
         }
@@ -1359,6 +1401,20 @@ function renderMsgContent(msg) {
 
 function renderMarkdown(text) {
     if (!text) return '';
+    // ===== 处理流式输出中的mermaid块（未闭合的```mermaid）=====
+    // 检测最后一个未闭合的 ```mermaid 块，让页面在代码输出过程中就能边渲染边显示图表
+    // 注意：必须先处理流式块，避免被下面已闭合mermaid的regex误处理
+    var streamingMermaidBlocks = [];
+    text = text.replace(/(```mermaid\n[\s\S]*?)(```|$)/g, function(match, code, end) {
+        if (end === '```') {
+            // 已闭合，留给下面已闭合的mermaid处理逻辑
+            return match;
+        }
+        // 未闭合（流式输出中），提取出来用流式模板渲染
+        streamingMermaidBlocks.push(code);
+        return '%%STREAMING_MERMAID_' + (streamingMermaidBlocks.length - 1) + '%%';
+    });
+
     // 处理mermaid代码块 - 先替换为占位符
     var mermaidBlocks = [];
     text = text.replace(/```mermaid\n([\s\S]*?)```/g, function(match, code) {
@@ -1375,6 +1431,14 @@ function renderMarkdown(text) {
             ? MermaidRenderer.renderMermaidBlockTemplate(code)
             : '<pre class="mermaid">' + escapeHtml(code) + '</pre>';
         html = html.replace('%%MERMAID_' + idx + '%%', mermaidHtml);
+    });
+
+    // 还原流式mermaid - 调用 MermaidRenderer 模块生成流式卡片 HTML（带"流式生成中"提示）
+    streamingMermaidBlocks.forEach(function(code, idx) {
+        var streamingHtml = (typeof MermaidRenderer !== 'undefined' && MermaidRenderer.renderStreamingMermaidBlockTemplate)
+            ? MermaidRenderer.renderStreamingMermaidBlockTemplate(code)
+            : '<pre class="mermaid">' + escapeHtml(code) + '</pre>';
+        html = html.replace('%%STREAMING_MERMAID_' + idx + '%%', streamingHtml);
     });
 
     return html;
@@ -2067,7 +2131,7 @@ function submitChangePassword() {
         body: JSON.stringify({ oldPassword: oldPwd, newPassword: newPwd, confirmPassword: confirmPwd })
     }).then(function(r) {
         if (r.status === 401) {
-            showToast('登录已过期，请重新登录');
+            showToast(authFailMsg(r));
             setTimeout(function() { doLogout(); }, 1000);
             return null;
         }

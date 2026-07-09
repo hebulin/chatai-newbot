@@ -244,6 +244,10 @@
     }).catch(function (err) {
       console.warn('[MermaidRenderer] render failed:', err && err.message || err);
       if (el.isConnected) {
+        // 流式输出中的 mermaid 块: 渲染失败时保留原始代码文本,
+        // 不要显示错误提示, 等待更多代码补全后再尝试渲染
+        var streamingContainer = el.closest('.mermaid-container.streaming');
+        if (streamingContainer) return;
         el.classList.remove('mermaid');
         el.innerHTML =
           '<div class="mermaid-error-tip"><strong>⚠ Mermaid 图表语法错误</strong>,无法渲染。请检查代码或让 AI 重新生成。</div>' +
@@ -353,6 +357,34 @@
           '<div class="mermaid-view"><pre class="mermaid">' + escaped + '</pre></div>' +
         '</div>' +
         '<div class="mermaid-code" style="display:none"><pre><code class="language-mermaid">' + escaped + '</code></pre></div>' +
+      '</div>'
+    );
+  }
+
+  // ===== 生成流式输出中 mermaid 块的卡片 HTML =====
+  // 与 renderMermaidBlockTemplate 类似, 但标记为流式状态:
+  //   - 工具栏只显示类型标签 + "流式生成中" 动效提示
+  //   - 不显示完整工具栏按钮(复制/下载/全屏/主题等), 等待代码完整后再显示
+  //   - 不显示代码视图(代码本身还在持续输出, 切到代码视图体验不佳)
+  //   - pre.mermaid 内的内容由 processContainer 在每次流式更新时尝试渲染
+  function renderStreamingMermaidBlockTemplate(code) {
+    var escaped = escapeHtml(code);
+    var typeKey = detectDiagramType(code);
+    var typeLabel = typeKey.replace(/diagram$/i, '').toUpperCase();
+    return (
+      '<div class="mermaid-container streaming" data-mermaid-raw="' + escaped.replace(/"/g, '&quot;') + '" data-streaming="true">' +
+        '<div class="mermaid-toolbar">' +
+          '<div class="mermaid-toolbar-left">' +
+            '<span class="mermaid-type-tag" title="' + typeKey + '">' + getDiagramIcon(typeKey) + ' ' + typeLabel + '</span>' +
+            '<span class="mermaid-streaming-tip" title="图表正在边输出边渲染">' +
+              '<span class="streaming-dot"></span>' +
+              '<span>流式生成中</span>' +
+            '</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="mermaid-scroll-wrapper">' +
+          '<div class="mermaid-view"><pre class="mermaid">' + escaped + '</pre></div>' +
+        '</div>' +
       '</div>'
     );
   }
@@ -707,6 +739,7 @@
     },
     init: ensureInitialized,
     renderMermaidBlockTemplate: renderMermaidBlockTemplate,
+    renderStreamingMermaidBlockTemplate: renderStreamingMermaidBlockTemplate,
     processContainer: processContainer,
     getTheme: getCurrentTheme,
     setTheme: setCurrentTheme,
