@@ -41,7 +41,7 @@ public class AdminController {
             return result;
         }
         List<ModelConfig> models = storageService.getAllModelConfigs();
-        // 自动同步多模态/思考支持状态：从 providers.json 更新已存储模型的能力标记
+        // 同步厂商显示名/图标（预置厂商）；思考/多模态能力由管理员手动维护，不自动覆盖
         syncModelCapabilities(models);
         // 脱敏 API Key，防止泄露（创建安全副本，不污染原始数据）
         List<ModelConfig> safeModels = models.stream()
@@ -49,6 +49,7 @@ public class AdminController {
                 .collect(Collectors.toList());
         result.put("success", true);
         result.put("data", safeModels);
+        result.put("defaultModelId", storageService.getDefaultModelId());
         return result;
     }
 
@@ -103,6 +104,53 @@ public class AdminController {
         return result;
     }
 
+    /**
+     * 设置全局默认模型（全局唯一，新会话自动选中）。请求体: {"modelId": "xxx"}
+     */
+    @PutMapping("/models/default")
+    public Map<String, Object> setDefaultModel(@RequestBody Map<String, String> body,
+                                               HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        String modelId = body == null ? null : body.get("modelId");
+        if (modelId == null || modelId.trim().isEmpty()) {
+            result.put("success", false);
+            result.put("message", "请指定模型");
+            return result;
+        }
+        ModelConfig m = storageService.getModelConfigById(modelId);
+        if (m == null) {
+            result.put("success", false);
+            result.put("message", "模型不存在");
+            return result;
+        }
+        storageService.setDefaultModelId(modelId);
+        result.put("success", true);
+        result.put("message", "已设为默认模型：" + (m.getDisplayName() != null ? m.getDisplayName() : m.getModelId()));
+        return result;
+    }
+
+    /**
+     * 取消全局默认模型
+     */
+    @DeleteMapping("/models/default")
+    public Map<String, Object> clearDefaultModel(HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        storageService.clearDefaultModelId();
+        result.put("success", true);
+        result.put("message", "已取消默认模型");
+        return result;
+    }
+
     // ========== 厂商信息 =========
     @GetMapping("/providers")
     public Map<String, Object> listProviders(HttpServletRequest request, HttpServletResponse response) {
@@ -112,8 +160,95 @@ public class AdminController {
             result.put("message", "无权限");
             return result;
         }
+        // 预置厂商（已应用显示名覆盖；图标直接来自 providers.json），附带原始 defaultName
+        List<Provider> presetProviders = storageService.getAllProviders();
+        List<Map<String, Object>> presetList = new ArrayList<>();
+        for (Provider p : presetProviders) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", p.getId());
+            m.put("name", p.getName());
+            // 原始名称（用于前端展示"预设名称"列）
+            Provider raw = storageService.getProvider(p.getId());
+            m.put("defaultName", raw != null ? raw.getName() : p.getName());
+            m.put("icon", p.getIcon());
+            m.put("type", "preset");
+            m.put("modelCount", p.getModels() == null ? 0 : p.getModels().size());
+            // 预置模型列表：供前端"快速接入"勾选、"添加模型"预设下拉、计算"已全部接入"状态
+            m.put("models", p.getModels() == null ? Collections.emptyList() : p.getModels());
+            presetList.add(m);
+        }
+        // 自定义厂商（按 providerName 聚合，来源：ModelConfig）
+        List<Map<String, Object>> customProviders = storageService.listCustomProviders();
+        // 合并
+        List<Object> merged = new ArrayList<>();
+        merged.addAll(presetList);
+        merged.addAll(customProviders);
         result.put("success", true);
-        result.put("data", storageService.getAllProviders());
+        result.put("data", merged);
+        result.put("presetCount", presetList.size());
+        result.put("customCount", customProviders.size());
+        return result;
+    }
+
+    /**
+     * 修改厂商显示名/图标
+     * - 预置厂商(providerId ∈ providers.json): 仅修改显示名/图标, ID/协议/默认URL等不可改
+     * - 自定义厂商(providerId="__custom__"): 仅修改 providerName=oldName 的 ModelConfig
+     * 请求体: { "name": "新的显示名", "icon": "🔮", "oldName": "原显示名(自定义厂商必填)" }
+     *         icon 可省略/为空 表示不改图标
+     */
+    @PatchMapping("/providers/{providerId}")
+    public Map<String, Object> renameProvider(@PathVariable String providerId,
+                                              @RequestBody Map<String, Object> body,
+                                              HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        String newName = (String) body.get("name");
+        String newIcon = (String) body.get("icon");
+        String oldName = (String) body.get("oldName");
+        if (newName == null || newName.trim().isEmpty()) {
+            result.put("success", false);
+            result.put("message", "厂商名称不能为空");
+            return result;
+        }
+        if (newName.trim().length() > 100) {
+            result.put("success", false);
+            result.put("message", "厂商名称过长（最多100字符）");
+            return result;
+        }
+        if (newIcon != null && newIcon.length() > 4) {
+            result.put("success", false);
+            result.put("message", "图标过长（最多4字符）");
+            return result;
+        }
+        // providerId 解码（自定义厂商的 id 可能包含中文）
+        String decodedId;
+        try {
+            decodedId = java.net.URLDecoder.decode(providerId, "UTF-8");
+        } catch (Exception e) {
+            decodedId = providerId;
+        }
+        // 自定义厂商时 oldName 是必填的（用于精确定位要修改的模型）
+        if (decodedId.startsWith("__custom__") && (oldName == null || oldName.trim().isEmpty())) {
+            result.put("success", false);
+            result.put("message", "自定义厂商必须提供原名称 oldName");
+            return result;
+        }
+        try {
+            int updated = storageService.renameProvider(decodedId, newName.trim(), newIcon, oldName);
+            log.info("管理员修改厂商: providerId={}, oldName={}, newName={}, newIcon={}, 同步模型数={}",
+                    decodedId, oldName, newName.trim(), newIcon, updated);
+            result.put("success", true);
+            result.put("message", "已更新，影响 " + updated + " 个模型");
+            result.put("updatedModels", updated);
+        } catch (IllegalArgumentException e) {
+            result.put("success", false);
+            result.put("message", e.getMessage());
+        }
         return result;
     }
 
@@ -179,7 +314,8 @@ public class AdminController {
             }
             ModelConfig config = new ModelConfig();
             config.setProviderId(providerId);
-            config.setProviderName(provider.getName());
+            // 使用显示名覆盖（图标来自 providers.json）
+            config.setProviderName(storageService.getProviderDisplayName(providerId));
             config.setProviderIcon(provider.getIcon());
             config.setModelId(pm.getId());
             config.setDisplayName(pm.getName());
@@ -514,31 +650,31 @@ public class AdminController {
     }
 
     /**
-     * 从 providers.json 自动同步已存储模型的多模态/思考支持状态，修复旧数据
+     * 同步已存储模型的厂商显示名/图标（预置厂商）。
+     * 注意：supportsThinking / supportsMultimodal 不再自动覆盖，由管理员在"模型管理"中通过开关手动设置。
      */
     private void syncModelCapabilities(List<ModelConfig> models) {
-        List<Provider> providers = storageService.getAllProviders();
         boolean updated = false;
         for (ModelConfig model : models) {
-            Provider provider = providers.stream()
-                    .filter(p -> p.getId().equals(model.getProviderId()))
-                    .findFirst().orElse(null);
-            if (provider == null) continue;
-            ProviderModel pm = (provider.getModels() == null) ? null :
-                    provider.getModels().stream().filter(m -> m.getId().equals(model.getModelId())).findFirst().orElse(null);
-            if (pm == null) continue;
-            if (model.isSupportsMultimodal() != pm.isSupportsMultimodal()) {
-                model.setSupportsMultimodal(pm.isSupportsMultimodal());
-                storageService.updateModelConfig(model);
-                updated = true;
+            boolean needUpdate = false;
+            // 同步厂商显示名（如有覆盖）
+            String displayName = storageService.getProviderDisplayName(model.getProviderId());
+            if (displayName != null && !displayName.equals(model.getProviderName())) {
+                model.setProviderName(displayName);
+                needUpdate = true;
             }
-            if (model.isSupportsThinking() != pm.isSupportsThinking()) {
-                model.setSupportsThinking(pm.isSupportsThinking());
+            // 同步厂商图标（来自 providers.json，预置厂商不可改）
+            Provider rawProvider = storageService.getProvider(model.getProviderId());
+            if (rawProvider != null && rawProvider.getIcon() != null && !rawProvider.getIcon().equals(model.getProviderIcon())) {
+                model.setProviderIcon(rawProvider.getIcon());
+                needUpdate = true;
+            }
+            if (needUpdate) {
                 storageService.updateModelConfig(model);
                 updated = true;
             }
         }
-        if (updated) log.info("已自动同步模型能力状态（多模态/思考支持）");
+        if (updated) log.info("已自动同步模型厂商名/图标");
     }
 
     /**
