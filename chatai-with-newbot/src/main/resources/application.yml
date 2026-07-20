@@ -1,4 +1,4 @@
-spring:
+﻿spring:
   thymeleaf:
     cache: false
     check-template: true
@@ -6,10 +6,10 @@ spring:
     content-type: text/html
     enabled: true
     encoding: UTF-8
-    mode: HTML5
+    mode: HTML
     prefix: classpath:/templates/
     suffix: .html
-  webflux:
+  codec:
     max-in-memory-size: 16MB
   mvc:
     static-path-pattern: /**
@@ -52,3 +52,5 @@ qwen-plus-latest:
     api-key: ${ali.tongyi.common.api-key}
     app-id: xxxx
     api-url: ${ali.tongyi.common.api-url}
+
+

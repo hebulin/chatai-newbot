@@ -1,4 +1,4 @@
-name: Build and Deploy chatai-with-newbot
+﻿name: Build and Deploy chatai-with-newbot
 
 on:
   push:
@@ -19,11 +19,11 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v4
 
-      - name: Set up JDK 8
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '8'
+          java-version: '21'
           cache: maven
 
       - name: Build Spring Boot JAR
@@ -79,3 +79,4 @@ jobs:
           script: |
             RELEASE_NAME="chatai-with-newbot-${{ github.sha }}.jar"
             bash /opt/chatai-with-newbot/deploy.sh ${RELEASE_NAME}
+

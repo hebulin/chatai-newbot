@@ -1,4 +1,4 @@
-package com.chatai.newbot.service;
+﻿package com.chatai.newbot.service;
 
 import com.chatai.newbot.model.*;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -9,7 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import javax.annotation.PostConstruct;
+import jakarta.annotation.PostConstruct;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -735,3 +735,4 @@ public class FileStorageService {
         return LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
     }
 }
+
