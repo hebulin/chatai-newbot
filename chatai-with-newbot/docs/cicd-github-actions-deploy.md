@@ -1,4 +1,4 @@
-﻿# Windows 本地项目通过 GitHub Actions 自动部署 Spring Boot 到 Linux 服务器
+# Windows 本地项目通过 GitHub Actions 自动部署 Spring Boot 到 Linux 服务器
 
 > 本文记录一次完整的 CI/CD 搭建过程：Windows 本地开发 Spring Boot 项目，代码推送到 GitHub 指定分支后，由 GitHub Actions 自动构建 JAR，并通过 SSH 部署到 Linux 服务器的 systemd 服务。
 

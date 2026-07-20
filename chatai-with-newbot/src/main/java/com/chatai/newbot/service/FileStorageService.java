@@ -1,4 +1,4 @@
-﻿package com.chatai.newbot.service;
+package com.chatai.newbot.service;
 
 import com.chatai.newbot.model.*;
 import com.fasterxml.jackson.core.type.TypeReference;

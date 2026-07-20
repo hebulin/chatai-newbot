@@ -1,4 +1,4 @@
-﻿package com.chatai.newbot.config;
+package com.chatai.newbot.config;
 
 import com.chatai.newbot.model.User;
 import com.chatai.newbot.service.FileStorageService;
