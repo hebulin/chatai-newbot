@@ -1,4 +1,4 @@
-﻿package com.chatai.newbot.config;
+package com.chatai.newbot.config;
 
 import jakarta.servlet.http.HttpServletRequest;
 

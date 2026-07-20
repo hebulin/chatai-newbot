@@ -1,4 +1,4 @@
-﻿package com.chatai.newbot.controller;
+package com.chatai.newbot.controller;
 
 import com.chatai.newbot.model.*;
 import com.chatai.newbot.service.ChatHistoryService;

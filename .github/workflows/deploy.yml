@@ -1,4 +1,4 @@
-﻿name: Build and Deploy chatai-with-newbot
+name: Build and Deploy chatai-with-newbot
 
 on:
   push:

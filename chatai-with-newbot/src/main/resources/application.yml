@@ -1,4 +1,4 @@
-﻿spring:
+spring:
   thymeleaf:
     cache: false
     check-template: true
