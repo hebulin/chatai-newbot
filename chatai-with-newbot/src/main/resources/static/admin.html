@@ -6,7 +6,7 @@
     <title>AI Chat - 管理后台</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/layui/css/layui.css">
     <link rel="stylesheet" href="my_css/admin.css">
 </head>
@@ -65,47 +65,89 @@
                         </div>
                         <div class="search-field">
                             <label class="search-label">厂商</label>
-                            <select id="mfProvider" class="stats-search-select" onchange="applyModelFilter()">
-                                <option value="">全部厂商</option>
-                            </select>
+                            <div class="custom-select-area" id="mfProviderArea">
+                                <div class="custom-select-trigger" onclick="toggleCustomDropdown('mfProviderArea', event)">
+                                    <span class="custom-select-value" id="mfProviderValue">全部厂商</span>
+                                    <i class="layui-icon layui-icon-down custom-select-arrow"></i>
+                                </div>
+                                <div class="custom-select-dropdown" id="mfProviderDropdown">
+                                    <div class="custom-select-option" data-value="" onclick="selectCustomOption('mfProviderArea','mfProviderDropdown','mfProviderValue','','全部厂商',applyModelFilter,event)">全部厂商</div>
+                                </div>
+                            </div>
+                            <input type="hidden" id="mfProvider" value="">
                         </div>
                         <div class="search-field">
                             <label class="search-label">模型</label>
-                            <select id="mfModelId" class="stats-search-select" onchange="applyModelFilter()">
-                                <option value="">全部模型</option>
-                            </select>
+                            <div class="custom-select-area" id="mfModelIdArea">
+                                <div class="custom-select-trigger" onclick="toggleCustomDropdown('mfModelIdArea', event)">
+                                    <span class="custom-select-value" id="mfModelIdValue">全部模型</span>
+                                    <i class="layui-icon layui-icon-down custom-select-arrow"></i>
+                                </div>
+                                <div class="custom-select-dropdown" id="mfModelIdDropdown">
+                                    <div class="custom-select-option" data-value="" onclick="selectCustomOption('mfModelIdArea','mfModelIdDropdown','mfModelIdValue','','全部模型',applyModelFilter,event)">全部模型</div>
+                                </div>
+                            </div>
+                            <input type="hidden" id="mfModelId" value="">
                         </div>
                         <div class="search-field">
                             <label class="search-label">思考</label>
-                            <select id="mfThinking" class="stats-search-select" onchange="applyModelFilter()">
-                                <option value="">全部</option>
-                                <option value="1">支持</option>
-                                <option value="0">不支持</option>
-                            </select>
+                            <div class="custom-select-area" id="mfThinkingArea">
+                                <div class="custom-select-trigger" onclick="toggleCustomDropdown('mfThinkingArea', event)">
+                                    <span class="custom-select-value" id="mfThinkingValue">全部</span>
+                                    <i class="layui-icon layui-icon-down custom-select-arrow"></i>
+                                </div>
+                                <div class="custom-select-dropdown" id="mfThinkingDropdown">
+                                    <div class="custom-select-option" data-value="" onclick="selectCustomOption('mfThinkingArea','mfThinkingDropdown','mfThinkingValue','','全部',applyModelFilter,event)">全部</div>
+                                    <div class="custom-select-option" data-value="1" onclick="selectCustomOption('mfThinkingArea','mfThinkingDropdown','mfThinkingValue','1','支持',applyModelFilter,event)">支持</div>
+                                    <div class="custom-select-option" data-value="0" onclick="selectCustomOption('mfThinkingArea','mfThinkingDropdown','mfThinkingValue','0','不支持',applyModelFilter,event)">不支持</div>
+                                </div>
+                            </div>
+                            <input type="hidden" id="mfThinking" value="">
                         </div>
                         <div class="search-field">
                             <label class="search-label">多模态</label>
-                            <select id="mfMm" class="stats-search-select" onchange="applyModelFilter()">
-                                <option value="">全部</option>
-                                <option value="1">支持</option>
-                                <option value="0">不支持</option>
-                            </select>
+                            <div class="custom-select-area" id="mfMmArea">
+                                <div class="custom-select-trigger" onclick="toggleCustomDropdown('mfMmArea', event)">
+                                    <span class="custom-select-value" id="mfMmValue">全部</span>
+                                    <i class="layui-icon layui-icon-down custom-select-arrow"></i>
+                                </div>
+                                <div class="custom-select-dropdown" id="mfMmDropdown">
+                                    <div class="custom-select-option" data-value="" onclick="selectCustomOption('mfMmArea','mfMmDropdown','mfMmValue','','全部',applyModelFilter,event)">全部</div>
+                                    <div class="custom-select-option" data-value="1" onclick="selectCustomOption('mfMmArea','mfMmDropdown','mfMmValue','1','支持',applyModelFilter,event)">支持</div>
+                                    <div class="custom-select-option" data-value="0" onclick="selectCustomOption('mfMmArea','mfMmDropdown','mfMmValue','0','不支持',applyModelFilter,event)">不支持</div>
+                                </div>
+                            </div>
+                            <input type="hidden" id="mfMm" value="">
                         </div>
                         <div class="search-field">
                             <label class="search-label">状态</label>
-                            <select id="mfEnabled" class="stats-search-select" onchange="applyModelFilter()">
-                                <option value="">全部</option>
-                                <option value="1">已启用</option>
-                                <option value="0">已禁用</option>
-                            </select>
+                            <div class="custom-select-area" id="mfEnabledArea">
+                                <div class="custom-select-trigger" onclick="toggleCustomDropdown('mfEnabledArea', event)">
+                                    <span class="custom-select-value" id="mfEnabledValue">全部</span>
+                                    <i class="layui-icon layui-icon-down custom-select-arrow"></i>
+                                </div>
+                                <div class="custom-select-dropdown" id="mfEnabledDropdown">
+                                    <div class="custom-select-option" data-value="" onclick="selectCustomOption('mfEnabledArea','mfEnabledDropdown','mfEnabledValue','','全部',applyModelFilter,event)">全部</div>
+                                    <div class="custom-select-option" data-value="1" onclick="selectCustomOption('mfEnabledArea','mfEnabledDropdown','mfEnabledValue','1','已启用',applyModelFilter,event)">已启用</div>
+                                    <div class="custom-select-option" data-value="0" onclick="selectCustomOption('mfEnabledArea','mfEnabledDropdown','mfEnabledValue','0','已禁用',applyModelFilter,event)">已禁用</div>
+                                </div>
+                            </div>
+                            <input type="hidden" id="mfEnabled" value="">
                         </div>
                         <div class="search-field">
                             <label class="search-label">可见性</label>
-                            <select id="mfVisible" class="stats-search-select" onchange="applyModelFilter()">
-                                <option value="">全部</option>
-                                <option value="1">所有人</option>
-                                <option value="0">仅管理员</option>
-                            </select>
+                            <div class="custom-select-area" id="mfVisibleArea">
+                                <div class="custom-select-trigger" onclick="toggleCustomDropdown('mfVisibleArea', event)">
+                                    <span class="custom-select-value" id="mfVisibleValue">全部</span>
+                                    <i class="layui-icon layui-icon-down custom-select-arrow"></i>
+                                </div>
+                                <div class="custom-select-dropdown" id="mfVisibleDropdown">
+                                    <div class="custom-select-option" data-value="" onclick="selectCustomOption('mfVisibleArea','mfVisibleDropdown','mfVisibleValue','','全部',applyModelFilter,event)">全部</div>
+                                    <div class="custom-select-option" data-value="1" onclick="selectCustomOption('mfVisibleArea','mfVisibleDropdown','mfVisibleValue','1','所有人',applyModelFilter,event)">所有人</div>
+                                    <div class="custom-select-option" data-value="0" onclick="selectCustomOption('mfVisibleArea','mfVisibleDropdown','mfVisibleValue','0','仅管理员',applyModelFilter,event)">仅管理员</div>
+                                </div>
+                            </div>
+                            <input type="hidden" id="mfVisible" value="">
                         </div>
                         <div class="search-actions">
                             <button class="cancel-btn" onclick="resetModelFilter()">重置</button>
@@ -132,11 +174,18 @@
                         </div>
                         <div class="search-field">
                             <label class="search-label">类型</label>
-                            <select id="pfType" class="stats-search-select" onchange="applyProviderFilter()">
-                                <option value="">全部</option>
-                                <option value="preset">预置</option>
-                                <option value="custom">自定义</option>
-                            </select>
+                            <div class="custom-select-area" id="pfTypeArea">
+                                <div class="custom-select-trigger" onclick="toggleCustomDropdown('pfTypeArea', event)">
+                                    <span class="custom-select-value" id="pfTypeValue">全部</span>
+                                    <i class="layui-icon layui-icon-down custom-select-arrow"></i>
+                                </div>
+                                <div class="custom-select-dropdown" id="pfTypeDropdown">
+                                    <div class="custom-select-option" data-value="" onclick="selectCustomOption('pfTypeArea','pfTypeDropdown','pfTypeValue','','全部',applyProviderFilter,event)">全部</div>
+                                    <div class="custom-select-option" data-value="preset" onclick="selectCustomOption('pfTypeArea','pfTypeDropdown','pfTypeValue','preset','预置',applyProviderFilter,event)">预置</div>
+                                    <div class="custom-select-option" data-value="custom" onclick="selectCustomOption('pfTypeArea','pfTypeDropdown','pfTypeValue','custom','自定义',applyProviderFilter,event)">自定义</div>
+                                </div>
+                            </div>
+                            <input type="hidden" id="pfType" value="">
                         </div>
                         <div class="search-actions">
                             <button class="cancel-btn" onclick="resetProviderFilter()">重置</button>
@@ -158,7 +207,7 @@
                     <div class="stats-search-bar">
                         <div class="search-field">
                             <label class="search-label">用户名</label>
-                            <input type="text" id="ufUsername" class="stats-search-input" placeholder="模糊查询，忽略大小写" oninput="applyUserFilter()" autocomplete="off" />
+                            <input type="search" id="ufUsername" name="q_user" class="stats-search-input" placeholder="模糊查询，忽略大小写" oninput="applyUserFilter()" autocomplete="off" autocorrect="off" autocapitalize="off" data-lpignore="true" data-form-type="other" data-1p-ignore="true" spellcheck="false" readonly onfocus="this.removeAttribute('readonly')" />
                         </div>
                         <div class="search-actions">
                             <button class="cancel-btn" onclick="resetUserFilter()">重置</button>
@@ -192,21 +241,28 @@
                         <div class="stats-search-bar">
                             <div class="search-field">
                                 <label class="search-label">用户</label>
-                                <select id="usageSearchUser" class="stats-search-select">
-                                    <option value="">全部用户</option>
-                                </select>
-                            </div>
-                            <div class="search-field">
-                                <label class="search-label">模型</label>
-                                <div class="custom-select-area" id="usageModelSelectArea">
-                                    <div class="custom-select-trigger" id="usageModelSelectTrigger" onclick="toggleCustomDropdown('usageModelSelectArea')">
-                                        <span class="custom-select-value" id="usageModelSelectValue">全部模型</span>
+                                <div class="custom-select-area" id="usageSearchUserArea">
+                                    <div class="custom-select-trigger" onclick="toggleCustomDropdown('usageSearchUserArea', event)">
+                                        <span class="custom-select-value" id="usageSearchUserValue">全部用户</span>
                                         <i class="layui-icon layui-icon-down custom-select-arrow"></i>
                                     </div>
-                                    <div class="custom-select-dropdown" id="usageModelSelectDropdown"></div>
+                                    <div class="custom-select-dropdown" id="usageSearchUserDropdown">
+                                        <div class="custom-select-option" data-value="" onclick="selectCustomOption('usageSearchUserArea','usageSearchUserDropdown','usageSearchUserValue','','全部用户',event)">全部用户</div>
+                                    </div>
                                 </div>
-                                <input type="hidden" id="usageSearchModel" value="">
+                                <input type="hidden" id="usageSearchUser" value="">
                             </div>
+                            <div class="search-field">
+                                    <label class="search-label">模型</label>
+                                    <div class="custom-select-area" id="usageModelSelectArea">
+                                        <div class="custom-select-trigger" id="usageModelSelectTrigger" onclick="toggleCustomDropdown('usageModelSelectArea', event)">
+                                            <span class="custom-select-value" id="usageModelSelectValue">全部模型</span>
+                                            <i class="layui-icon layui-icon-down custom-select-arrow"></i>
+                                        </div>
+                                        <div class="custom-select-dropdown" id="usageModelSelectDropdown"></div>
+                                    </div>
+                                    <input type="hidden" id="usageSearchModel" value="">
+                                </div>
                             <div class="search-field">
                                 <label class="search-label">日期</label>
                                 <input type="date" id="usageSearchDate" class="stats-search-input">
@@ -234,21 +290,28 @@
                         <div class="stats-search-bar">
                             <div class="search-field">
                                 <label class="search-label">用户</label>
-                                <select id="statsSearchUser" class="stats-search-select">
-                                    <option value="">全部用户</option>
-                                </select>
-                            </div>
-                            <div class="search-field">
-                                <label class="search-label">模型</label>
-                                <div class="custom-select-area" id="statsModelSelectArea">
-                                    <div class="custom-select-trigger" id="statsModelSelectTrigger" onclick="toggleCustomDropdown('statsModelSelectArea')">
-                                        <span class="custom-select-value" id="statsModelSelectValue">全部模型</span>
+                                <div class="custom-select-area" id="statsSearchUserArea">
+                                    <div class="custom-select-trigger" onclick="toggleCustomDropdown('statsSearchUserArea', event)">
+                                        <span class="custom-select-value" id="statsSearchUserValue">全部用户</span>
                                         <i class="layui-icon layui-icon-down custom-select-arrow"></i>
                                     </div>
-                                    <div class="custom-select-dropdown" id="statsModelSelectDropdown"></div>
+                                    <div class="custom-select-dropdown" id="statsSearchUserDropdown">
+                                        <div class="custom-select-option" data-value="" onclick="selectCustomOption('statsSearchUserArea','statsSearchUserDropdown','statsSearchUserValue','','全部用户',event)">全部用户</div>
+                                    </div>
                                 </div>
-                                <input type="hidden" id="statsSearchModel" value="">
+                                <input type="hidden" id="statsSearchUser" value="">
                             </div>
+                            <div class="search-field">
+                                    <label class="search-label">模型</label>
+                                    <div class="custom-select-area" id="statsModelSelectArea">
+                                        <div class="custom-select-trigger" id="statsModelSelectTrigger" onclick="toggleCustomDropdown('statsModelSelectArea', event)">
+                                            <span class="custom-select-value" id="statsModelSelectValue">全部模型</span>
+                                            <i class="layui-icon layui-icon-down custom-select-arrow"></i>
+                                        </div>
+                                        <div class="custom-select-dropdown" id="statsModelSelectDropdown"></div>
+                                    </div>
+                                    <input type="hidden" id="statsSearchModel" value="">
+                                </div>
                             <div class="search-field">
                                 <label class="search-label">日期</label>
                                 <input type="date" id="statsSearchDate" class="stats-search-input">
@@ -260,13 +323,34 @@
                                 <button class="cancel-btn" onclick="resetUsageStats()">重置</button>
                             </div>
                         </div>
-                        <div class="table-scroll-wrapper">
-                            <table class="layui-table data-table" id="statsTable" lay-skin="nob">
-                                <thead><tr><th>用户</th><th>日期</th><th>模型</th><th>调用次数</th><th>输入Token</th><th>输出Token</th><th>思考Token</th><th>缓存Token</th><th>思考模式次数</th></tr></thead>
-                                <tbody id="statsTableBody"></tbody>
-                            </table>
+                        <!-- 用户统计内嵌三级小tab -->
+                        <div class="stats-mini-tab-nav">
+                            <div class="stats-mini-tab-item active" onclick="switchStatsMiniTab('list', this)">结果列表</div>
+                            <div class="stats-mini-tab-item" onclick="switchStatsMiniTab('line', this)">曲线图</div>
+                            <div class="stats-mini-tab-item" onclick="switchStatsMiniTab('bar', this)">柱状图</div>
                         </div>
-                        <div id="statsPagination"></div>
+                        <!-- 结果列表视图 -->
+                        <div class="stats-mini-tab-content active" id="stats-mini-list">
+                            <div class="table-scroll-wrapper">
+                                <table class="layui-table data-table" id="statsTable" lay-skin="nob">
+                                    <thead><tr><th>用户</th><th>日期</th><th>模型</th><th>调用次数</th><th>输入Token</th><th>输出Token</th><th>思考Token</th><th>缓存Token</th><th>思考模式次数</th></tr></thead>
+                                    <tbody id="statsTableBody"></tbody>
+                                </table>
+                            </div>
+                            <div id="statsPagination"></div>
+                        </div>
+                        <!-- 曲线图视图 -->
+                        <div class="stats-mini-tab-content" id="stats-mini-line">
+                            <div id="statsLineChart" class="stats-chart-canvas">
+                                <div class="chart-empty-tip">请先选择查询条件并点击搜索</div>
+                            </div>
+                        </div>
+                        <!-- 柱状图视图 -->
+                        <div class="stats-mini-tab-content" id="stats-mini-bar">
+                            <div id="statsBarChart" class="stats-chart-canvas">
+                                <div class="chart-empty-tip">请先选择查询条件并点击搜索</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -286,6 +370,7 @@ document.addEventListener('click', function(e) {
             var dropdown = area.querySelector('.custom-select-dropdown');
             if (trigger) trigger.classList.remove('active');
             if (dropdown) dropdown.classList.remove('active');
+            area.classList.remove('active');
         }
     });
 });

@@ -3,7 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Chat Platform</title>
+    <title>Atelier · 工作台</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <!-- Layui -->
     <link rel="stylesheet" href="/layui/css/layui.css">
     <!-- Highlight.js + Marked.js + Mermaid.js (本地资源，避免CDN被浏览器Tracking Prevention阻止) -->
@@ -18,124 +22,152 @@
     <link rel="stylesheet" href="my_css/mermaid.css">
 </head>
 <body>
+<!-- 纸张纹理 -->
+<div class="paper-grain" aria-hidden="true"></div>
+
+<!-- 顶栏 — 极简磁吸式 -->
+<header class="atelier-top">
+    <div class="top-left">
+        <button class="icon-btn toggle-sidebar-btn" onclick="toggleSidebar()" aria-label="侧栏">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="3" y1="7" x2="21" y2="7"/><line x1="3" y1="13" x2="21" y2="13"/><line x1="3" y1="19" x2="14" y2="19"/></svg>
+        </button>
+        <div class="brand">
+            <img id="brandIcon" class="brand-icon" src="/icons/AIBot_ss.svg" alt="AI" />
+            <div class="brand-text">
+                <span class="brand-name">Atelier</span>
+                <span class="brand-sub" id="chatTitle">新会话 · NEW</span>
+            </div>
+        </div>
+    </div>
+    <div class="top-right">
+        <button class="theme-toggle-btn" id="themeToggleBtn" onclick="toggleTheme()" title="切换主题" aria-label="主题">
+            <span class="toggle-track">
+                <span class="toggle-knob"></span>
+            </span>
+        </button>
+    </div>
+</header>
+
 <!-- 侧边栏 -->
-<div class="sidebar" id="sidebar">
+<aside class="sidebar" id="sidebar">
+    <button class="sidebar-edge-toggle" id="sidebarEdgeToggle" onclick="toggleSidebar()" aria-label="折叠/展开侧边栏" title="折叠/展开">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+    </button>
     <div class="sidebar-content">
         <div class="sidebar-header">
-            <div class="brand">
-                <img id="brandIcon" class="brand-icon" src="/icons/AIBot_ss.svg" alt="AI" />
-                <span>AI Chat</span>
-            </div>
-            <button class="icon-btn close-sidebar-btn" onclick="toggleSidebar()" title="关闭">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            <span class="sb-eyebrow">CHATS · 会话</span>
+            <button class="icon-btn close-sidebar-btn" onclick="toggleSidebar()" title="关闭" aria-label="关闭">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
         </div>
-        <button class="layui-btn layui-btn-fluid new-chat-btn" onclick="newChat()">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> 新建会话
+
+        <button class="new-chat-btn" onclick="newChat()">
+            <span class="nc-plus">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </span>
+            <span class="nc-label">新建会话 · NEW CHAT</span>
+            <span class="nc-shortcut">⌘N</span>
         </button>
+
         <div class="chat-search-box" id="chatSearchBox">
-            <svg class="chat-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <svg class="chat-search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             <input type="text" id="chatSearchInput" class="chat-search-input" placeholder="搜索会话..." oninput="filterChatList(this.value)" autocomplete="off" name="chat_search_q" data-lpignore="true" data-form-type="other" />
-            <button class="chat-search-clear" id="chatSearchClear" onclick="clearChatSearch()" style="display:none">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            <button class="chat-search-clear" id="chatSearchClear" onclick="clearChatSearch()" aria-label="清空" style="display:none">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
         </div>
+
         <div class="chat-list" id="chatList"></div>
+
         <div class="sidebar-footer">
             <div class="user-info" id="userInfo" onclick="toggleUserMenu(event)" title="点击展开菜单">
                 <div class="user-avatar-wrap" id="userAvatarWrap">
-                    <img id="sidebarUserAvatar" class="avatar-icon" src="/icons/user.svg" style="width:16px;height:16px;border-radius:50%" />
+                    <img id="sidebarUserAvatar" class="avatar-icon" src="/icons/user.svg" style="width:14px;height:14px;border-radius:50%" />
                 </div>
-                <span id="usernameDisplay">用户</span>
+                <span id="usernameDisplay">访客</span>
                 <span class="user-info-spacer"></span>
                 <span class="user-info-more" title="更多">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
                 </span>
                 <!-- 用户头像点击菜单 -->
                 <div class="user-menu" id="userMenu" style="display:none">
                     <div class="user-menu-item" onclick="openSettingsModal()">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                         <span>个人设置</span>
                     </div>
                     <div class="user-menu-item" onclick="openAboutModal()">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
                         <span>关于</span>
                     </div>
                     <div class="user-menu-divider"></div>
                     <div class="user-menu-item" onclick="exportChats()">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                         <span>导出会话</span>
                     </div>
                     <div class="user-menu-item" id="adminMenuItem" onclick="goAdmin()" style="display:none">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd"><path d="M12 8.4A3.6 3.6 0 1 0 12 15.6 3.6 3.6 0 1 0 12 8.4Z M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58Z"/></svg>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd"><path d="M12 8.4A3.6 3.6 0 1 0 12 15.6 3.6 3.6 0 1 0 12 8.4Z M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58Z"/></svg>
                         <span>后台管理</span>
                     </div>
                     <div class="user-menu-divider"></div>
                     <div class="user-menu-item user-menu-item-danger" onclick="logout()">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
                         <span>退出登录</span>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-</div>
+</aside>
 
 <!-- 主内容 -->
-<div class="main-content">
-    <div class="top-bar">
-        <button class="icon-btn toggle-sidebar-btn" onclick="toggleSidebar()">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-        </button>
-        <div class="chat-title" id="chatTitle">新会话</div>
-        <div class="spacer"></div>
-        <button class="theme-toggle-btn" id="themeToggleBtn" onclick="toggleTheme()" title="切换浅色主题">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-        </button>
-    </div>
-
+<main class="main-content">
     <div class="chat-container" id="chatContainer">
     </div>
 
-    <!-- 滚动导航按钮（fixed定位，悬浮在聊天区域右下角） -->
+    <!-- 滚动导航 -->
     <div class="scroll-nav" id="scrollNav">
-        <button class="scroll-nav-btn" id="scrollToTopBtn" onclick="scrollToTop()" title="回到顶部" style="display:none">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg>
-        </button>
-        <button class="scroll-nav-btn" id="scrollToBottomBtn" onclick="scrollToBottom()" title="回到底部" style="display:none">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        <button class="scroll-nav-btn" id="scrollToBottomBtn" onclick="scrollToBottom()" title="回到底部" style="display:none" aria-label="底部">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="6 9 12 15 18 9"/></svg>
         </button>
     </div>
 
+    <!-- 输入区 -->
     <div class="input-area">
-        <!-- 图片预览区域（粘贴图片后显示缩略图） -->
         <div class="image-preview-area" id="imagePreviewArea" style="display:none"></div>
-        <!-- 粘贴不支持多模态时的警告 -->
         <div class="paste-warning" id="pasteWarning" style="display:none"></div>
+
         <div class="input-row">
             <div class="input-textarea-wrap">
-                <textarea id="userInput" placeholder="输入消息，Enter发送，Shift+Enter换行..." rows="1"></textarea>
+                <div class="textarea-meta">
+                    <span class="meta-tag" id="metaTag">USER · INPUT</span>
+                </div>
+                <textarea id="userInput" placeholder="写下你正在想的事 · Press Enter to send" rows="1"></textarea>
+
                 <!-- 输入框内工具栏 -->
                 <div class="input-inner-toolbar">
                     <div class="think-icon-btn" id="thinkIconBtn" style="display:none" title="深度思考">
-                        <img id="thinkIconImg" src="/icons/icon_深度思考.svg" style="width:18px;height:18px;" />
+                        <img id="thinkIconImg" src="/icons/icon_深度思考.svg" style="width:14px;height:14px;" />
                     </div>
                     <div class="model-select-area" id="modelSelectArea">
                         <div class="model-select-trigger" id="modelSelectTrigger" onclick="toggleModelDropdown()">
                             <span class="model-select-value" id="modelSelectValue">选择模型</span>
-                            <svg class="model-select-arrow" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                            <svg class="model-select-arrow" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="6 9 12 15 18 9"/></svg>
                         </div>
                         <div class="model-select-dropdown" id="modelSelectDropdown"></div>
                     </div>
-                    <button class="send-btn" id="sendButton" onclick="sendMessage(true)" title="发送">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                    <button class="send-btn" id="sendButton" onclick="sendMessage(true)" title="发送" aria-label="发送">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
                     </button>
                 </div>
             </div>
         </div>
-        <div class="input-footer">内容由 AI 生成，请仔细甄别</div>
+        <div class="input-footer">
+            <span class="foot-l">⌘/Ctrl+Enter · 新行</span>
+            <span class="foot-c">内容由 AI 生成 · 请仔细甄别</span>
+            <span class="foot-r app-version">v—</span>
+        </div>
     </div>
-</div>
+</main>
 
 <script src="my_js/theme.js"></script>
 <script src="my_js/version.js"></script>
@@ -144,5 +176,14 @@
 <!-- Mermaid 渲染模块（独立模块，DeepSeek 风格） -->
 <script src="my_js/mermaid-renderer.js"></script>
 <script src="my_js/chat.js"></script>
+<script>
+    // 启动入场：遮罩 + reveal
+    (function(){
+        // 隐藏 layui 表单残留
+        document.addEventListener('DOMContentLoaded', function(){
+            document.querySelectorAll('.layui-form-item').forEach(function(el){ el.style.display = 'none'; });
+        });
+    })();
+</script>
 </body>
 </html>
