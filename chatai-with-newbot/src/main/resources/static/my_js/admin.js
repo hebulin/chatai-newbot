@@ -185,32 +185,26 @@ function populateModelFilterOptions() {
         var pname = m.providerName || pid;
         if (!providerMap[pid]) providerMap[pid] = pname;
     });
-    var providerSel = $('#mfProvider');
-    if (providerSel.length) {
-        var prevP = providerSel.val();
-        providerSel.empty();
-        providerSel.append('<option value="">全部厂商</option>');
-        Object.keys(providerMap).sort().forEach(function(pid) {
-            providerSel.append('<option value="' + esc(pid) + '">' + esc(providerMap[pid]) + '</option>');
-        });
-        if (prevP) providerSel.val(prevP);
-    }
-    // 模型ID下拉：使用模型 modelId 列表
-    var modelSel = $('#mfModelId');
-    if (modelSel.length) {
-        var prevM = modelSel.val();
-        modelSel.empty();
-        modelSel.append('<option value="">全部模型</option>');
-        var seen = {};
-        allModels.forEach(function(m) {
-            var mid = m.modelId || '';
-            if (mid && !seen[mid]) {
-                seen[mid] = true;
-                modelSel.append('<option value="' + esc(mid) + '">' + esc(mid) + '</option>');
-            }
-        });
-        if (prevM) modelSel.val(prevM);
-    }
+    // 填充厂商自定义下拉选
+    var providerOptions = Object.keys(providerMap).sort().map(function(pid) {
+        return { value: pid, text: providerMap[pid] };
+    });
+    populateCustomSelectOptions('mfProviderArea', 'mfProviderDropdown', 'mfProviderValue', 'mfProvider', providerOptions, '全部厂商', applyModelFilter, function(value, text) {
+        // 厂商图标
+        return getEntityIconHtml(value, null, 18);
+    });
+
+    // 填充模型ID自定义下拉选
+    var modelOptions = [];
+    var seen = {};
+    allModels.forEach(function(m) {
+        var mid = m.modelId || '';
+        if (mid && !seen[mid]) {
+            seen[mid] = true;
+            modelOptions.push({ value: mid, text: mid });
+        }
+    });
+    populateCustomSelectOptions('mfModelIdArea', 'mfModelIdDropdown', 'mfModelIdValue', 'mfModelId', modelOptions, '全部模型', applyModelFilter, getUsageModelIconHtml);
 }
 
 function applyModelFilter() {
@@ -254,13 +248,28 @@ function applyModelFilter() {
 function resetModelFilter() {
     var $ = window._$;
     $('#mfName').val('');
-    $('#mfProvider').val('');
-    $('#mfModelId').val('');
-    $('#mfThinking').val('');
-    $('#mfMm').val('');
-    $('#mfEnabled').val('');
-    $('#mfVisible').val('');
+    // 重置自定义下拉选
+    resetCustomSelect('mfProviderArea', 'mfProviderValue', 'mfProvider', '全部厂商');
+    resetCustomSelect('mfModelIdArea', 'mfModelIdValue', 'mfModelId', '全部模型');
+    resetCustomSelect('mfThinkingArea', 'mfThinkingValue', 'mfThinking', '全部');
+    resetCustomSelect('mfMmArea', 'mfMmValue', 'mfMm', '全部');
+    resetCustomSelect('mfEnabledArea', 'mfEnabledValue', 'mfEnabled', '全部');
+    resetCustomSelect('mfVisibleArea', 'mfVisibleValue', 'mfVisible', '全部');
     applyModelFilter();
+}
+
+// 重置自定义下拉选
+function resetCustomSelect(areaId, valueId, hiddenId, defaultText) {
+    var $ = window._$;
+    var valueSpan = $('#' + valueId);
+    var hiddenInput = $('#' + hiddenId);
+    var area = $('#' + areaId);
+    var dropdown = area.find('.custom-select-dropdown');
+    
+    valueSpan.text(defaultText);
+    hiddenInput.val('');
+    dropdown.find('.custom-select-option').removeClass('selected');
+    dropdown.find('.custom-select-option[data-value=""]').addClass('selected');
 }
 
 // ===== User Filter =====
@@ -336,7 +345,7 @@ function showQuickAdd(providerId) {
     html += '<div class="form-group"><label class="form-label">厂商</label><div class="form-value">' + getProviderSmallIconHtml(providerId) + esc(provider.name) + '</div></div>';
     html += '<div class="form-group"><label class="form-label">API Key</label><div class="form-value"><input type="text" id="qaApiKey" class="layui-input" placeholder="sk-..." /></div></div>';
     html += '<div class="form-group"><label class="form-label">选择模型</label><div class="form-value model-checkbox-group">' + modelCheckboxes + '</div></div>';
-    html += '<div class="form-group"><label class="form-label">可见性</label><div class="form-value"><input type="checkbox" id="qaVisibleToAll" lay-skin="switch" lay-text="所有人|仅管理员" checked></div></div>';
+    html += '<div class="form-group"><div class="form-value" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">可见性</span><input type="checkbox" id="qaVisibleToAll" lay-skin="switch" checked></div></div>';
     html += '<div style="text-align:right;padding:10px 0;">';
     html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
     html += '<button type="button" class="layui-btn" onclick="submitQuickAdd()">确认接入</button>';
@@ -443,11 +452,11 @@ function editModel(id) {
     html += '<div class="form-group"><label class="form-label">模型ID</label><div class="form-value"><input type="text" id="emModelId" class="layui-input" value="' + esc(model.modelId||'') + '" readonly style="opacity:0.6"/></div></div>';
     html += '<div class="form-group"><label class="form-label">API 地址</label><div class="form-value"><input type="text" id="emApiUrl" class="layui-input" value="' + esc(model.apiUrl||'') + '"/></div></div>';
     html += '<div class="form-group"><label class="form-label">API Key</label><div class="form-value"><input type="text" id="emApiKey" class="layui-input" value="' + esc(model.apiKey||'') + '" placeholder="不修改则留空"/></div></div>';
-    html += '<div class="form-group"><label class="form-label">状态</label><div class="form-value"><input type="checkbox" id="emEnabled" lay-skin="switch" lay-text="启用|禁用"' + (model.enabled?' checked':'') + '></div></div>';
-    html += '<div class="form-group"><label class="form-label">可见性</label><div class="form-value"><input type="checkbox" id="emVisibleToAll" lay-skin="switch" lay-text="所有人|仅管理员"' + (model.visibleToAll?' checked':'') + '></div></div>';
+    html += '<div class="form-group"><div class="form-value" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">状态</span><input type="checkbox" id="emEnabled" lay-skin="switch"' + (model.enabled?' checked':'') + '></div></div>';
+    html += '<div class="form-group"><div class="form-value" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">可见性</span><input type="checkbox" id="emVisibleToAll" lay-skin="switch"' + (model.visibleToAll?' checked':'') + '></div></div>';
     // 能力开关（可手动设置）
-    html += '<div class="form-group"><label class="form-label">思考模式</label><div class="form-value"><input type="checkbox" id="emSupportsThinking" lay-skin="switch" lay-text="支持|不支持"' + (isPresetThinking?' checked':'') + '></div></div>';
-    html += '<div class="form-group"><label class="form-label">多模态</label><div class="form-value"><input type="checkbox" id="emSupportsMultimodal" lay-skin="switch" lay-text="支持|不支持"' + (isPresetMm?' checked':'') + '></div></div>';
+    html += '<div class="form-group"><div class="form-value" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">思考模式</span><input type="checkbox" id="emSupportsThinking" lay-skin="switch"' + (isPresetThinking?' checked':'') + '></div></div>';
+    html += '<div class="form-group"><div class="form-value" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">多模态</span><input type="checkbox" id="emSupportsMultimodal" lay-skin="switch"' + (isPresetMm?' checked':'') + '></div></div>';
     html += '<div style="text-align:right;padding:10px 0;">';
     html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
     html += '<button type="button" class="layui-btn" onclick="saveModel(\'' + esc(id) + '\')">保存</button>';
@@ -524,7 +533,7 @@ function applyProviderFilter() {
 function resetProviderFilter() {
     var $ = window._$;
     $('#pfName').val('');
-    $('#pfType').val('');
+    resetCustomSelect('pfTypeArea', 'pfTypeValue', 'pfType', '全部');
     applyProviderFilter();
 }
 
@@ -702,7 +711,7 @@ function showAddModel() {
     html += '<div class="form-group"><label class="form-label">模型ID</label><div class="form-value"><input type="text" id="amPresetModelId" class="layui-input" placeholder="模型标识" readonly style="opacity:0.6"/></div></div>';
     html += '<div class="form-group"><label class="form-label">API 地址</label><div class="form-value"><input type="text" id="amPresetApiUrl" class="layui-input" placeholder="API地址"/></div></div>';
     html += '<div class="form-group"><label class="form-label">API Key</label><div class="form-value"><input type="text" id="amPresetApiKey" class="layui-input" placeholder="sk-..."/></div></div>';
-    html += '<div class="form-group"><label class="form-label">可见性</label><div class="form-value"><input type="checkbox" id="amPresetVisibleToAll" lay-skin="switch" lay-text="所有人|仅管理员" checked></div></div>';
+    html += '<div class="form-group"><div class="form-value" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">可见性</span><input type="checkbox" id="amPresetVisibleToAll" lay-skin="switch" checked></div></div>';
     html += '<div id="amPresetThinkingInfo"></div>';
     html += '</div>';
     // 自定义模型字段区域（选择内置厂商+自定义模型 或 选择自定义厂商时显示）
@@ -711,9 +720,9 @@ function showAddModel() {
     html += '<div class="form-group"><label class="form-label">模型ID</label><div class="form-value"><input type="text" id="amModelId" class="layui-input" placeholder="如 gpt-4o"/></div></div>';
     html += '<div class="form-group"><label class="form-label">API 地址</label><div class="form-value"><input type="text" id="amApiUrl" class="layui-input" placeholder="API地址"/></div></div>';
     html += '<div class="form-group"><label class="form-label">API Key</label><div class="form-value"><input type="text" id="amApiKey" class="layui-input" placeholder="sk-..."/></div></div>';
-    html += '<div class="form-group"><label class="form-label">可见性</label><div class="form-value"><input type="checkbox" id="amVisibleToAll" lay-skin="switch" lay-text="所有人|仅管理员" checked></div></div>';
-    html += '<div class="form-group"><label class="form-label">思考模式</label><div class="form-value" id="amThinkingValue"><input type="checkbox" id="amSupportsThinking" lay-skin="switch" lay-text="支持|不支持"></div></div>';
-    html += '<div class="form-group"><label class="form-label">多模态</label><div class="form-value" id="amMultimodalValue"><input type="checkbox" id="amSupportsMultimodal" lay-skin="switch" lay-text="支持|不支持"></div></div>';
+    html += '<div class="form-group"><div class="form-value" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">可见性</span><input type="checkbox" id="amVisibleToAll" lay-skin="switch" checked></div></div>';
+    html += '<div class="form-group"><div class="form-value" id="amThinkingValue" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">思考模式</span><input type="checkbox" id="amSupportsThinking" lay-skin="switch"></div></div>';
+    html += '<div class="form-group"><div class="form-value" id="amMultimodalValue" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">多模态</span><input type="checkbox" id="amSupportsMultimodal" lay-skin="switch"></div></div>';
     html += '</div>';
     html += '<div style="text-align:right;padding:10px 0;">';
     html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
@@ -751,8 +760,8 @@ function onAddModelProviderChange() {
         // 清空自定义厂商的预填URL
         $('#amApiUrl').val('');
         // 重置思考模式/多模态为开关
-        $('#amThinkingValue').html('<input type="checkbox" id="amSupportsThinking" lay-skin="switch" lay-text="支持|不支持">');
-        $('#amMultimodalValue').html('<input type="checkbox" id="amSupportsMultimodal" lay-skin="switch" lay-text="支持|不支持">');
+        $('#amThinkingValue').html('<span style="min-width:60px;">思考模式</span><input type="checkbox" id="amSupportsThinking" lay-skin="switch">');
+        $('#amMultimodalValue').html('<span style="min-width:60px;">多模态</span><input type="checkbox" id="amSupportsMultimodal" lay-skin="switch">');
         // 只渲染checkbox，避免重新渲染select导致下拉框损坏
         form.render('checkbox', 'addModelForm');
     } else {
@@ -849,8 +858,8 @@ function showAddModelCustomModelFields(provider) {
         $('#amApiUrl').val(provider.defaultApiUrl || '');
     }
     // 重置思考模式/多模态为开关
-    $('#amThinkingValue').html('<input type="checkbox" id="amSupportsThinking" lay-skin="switch" lay-text="支持|不支持">');
-    $('#amMultimodalValue').html('<input type="checkbox" id="amSupportsMultimodal" lay-skin="switch" lay-text="支持|不支持">');
+    $('#amThinkingValue').html('<span style="min-width:60px;">思考模式</span><input type="checkbox" id="amSupportsThinking" lay-skin="switch">');
+    $('#amMultimodalValue').html('<span style="min-width:60px;">多模态</span><input type="checkbox" id="amSupportsMultimodal" lay-skin="switch">');
     // 只渲染checkbox，避免重新渲染select导致下拉框损坏
     form.render('checkbox', 'addModelForm');
 }
@@ -1023,7 +1032,7 @@ function editUser(id) {
     var user = allUsers.find(function(u) { return u.id === id; });
     if (!user) return;
     var html = '<div class="layui-form" lay-filter="editUserForm" style="padding:20px 20px 0;">';
-    html += '<div class="form-group"><label class="form-label">用户名</label><div class="form-value"><input type="text" id="euUsername" class="layui-input" value="' + esc(user.username) + '" readonly style="opacity:0.6"/></div></div>';
+    html += '<div class="form-group"><label class="form-label">用户名</label><div class="form-value"><input type="text" id="euUsername" name="euName_' + Date.now() + '" class="layui-input" value="' + esc(user.username) + '" readonly style="opacity:0.6" autocomplete="off" data-lpignore="true" data-form-type="other" /></div></div>';
     html += '<div class="form-group"><label class="form-label">新密码</label><div class="form-value"><input type="password" id="euPassword" class="layui-input" placeholder="不修改则留空"/></div></div>';
     if (user.username === 'admin') {
         html += '<div class="form-group"><label class="form-label">角色</label><div class="form-value" style="color:#818cf8;font-weight:500;">管理员（内置用户不可修改）</div></div>';
@@ -1143,13 +1152,13 @@ function loadFilterOptions() {
 
 function renderUserFilter() {
     var $ = window._$;
-    ['usageSearchUser', 'statsSearchUser'].forEach(function(id) {
-        var sel = $('#' + id);
-        sel.empty();
-        sel.append('<option value="">全部用户</option>');
-        filterUsernames.forEach(function(u) { sel.append('<option value="' + esc(u) + '">' + esc(u) + '</option>'); });
+    var userOptions = filterUsernames.map(function(u) {
+        return { value: u, text: u };
     });
-    if (window._form) window._form.render('select');
+    // 填充 usageSearchUser 自定义下拉选
+    populateCustomSelectOptions('usageSearchUserArea', 'usageSearchUserDropdown', 'usageSearchUserValue', 'usageSearchUser', userOptions, '全部用户');
+    // 填充 statsSearchUser 自定义下拉选
+    populateCustomSelectOptions('statsSearchUserArea', 'statsSearchUserDropdown', 'statsSearchUserValue', 'statsSearchUser', userOptions, '全部用户');
 }
 
 function loadUsage() {
@@ -1253,22 +1262,185 @@ function renderPagination(elemId, total, current, size, callback) {
 }
 
 function searchUsage() { usagePage = 1; loadUsage(); }
-function searchUsageStats() { statsPage = 1; loadUsageStats(); }
+function searchUsageStats() {
+    statsPage = 1;
+    loadUsageStats();
+    loadUsageStatsCharts();
+}
+
+/* ============================================
+   用户统计 - 内嵌小tab切换 & 图表渲染
+   ============================================ */
+var statsChartData = [];
+
+function switchStatsMiniTab(tab, el) {
+    var nav = el.parentElement;
+    nav.querySelectorAll('.stats-mini-tab-item').forEach(function(n) { n.classList.remove('active'); });
+    el.classList.add('active');
+    var parent = document.getElementById('data-sub-stats');
+    parent.querySelectorAll('.stats-mini-tab-content').forEach(function(c) { c.classList.remove('active'); });
+    if (tab === 'list') document.getElementById('stats-mini-list').classList.add('active');
+    else if (tab === 'line') {
+        document.getElementById('stats-mini-line').classList.add('active');
+        renderStatsLineChart();
+    } else if (tab === 'bar') {
+        document.getElementById('stats-mini-bar').classList.add('active');
+        renderStatsBarChart();
+    }
+}
+
+function loadUsageStatsCharts() {
+    var username = $('#statsSearchUser').val() || '';
+    var modelName = $('#statsSearchModel').val() || '';
+    var date = $('#statsSearchDate').val() || '';
+    var url = '/api/admin/usage/stats?page=1&size=500';
+    if (username) url += '&username=' + encodeURIComponent(username);
+    if (modelName) url += '&modelName=' + encodeURIComponent(modelName);
+    if (date) url += '&date=' + encodeURIComponent(date);
+    api(url).then(function(data) {
+        if (data && data.success) {
+            statsChartData = data.data || [];
+            // 如果图表视图已激活则重新渲染
+            var line = document.getElementById('stats-mini-line');
+            var bar = document.getElementById('stats-mini-bar');
+            if (line && line.classList.contains('active')) renderStatsLineChart();
+            if (bar && bar.classList.contains('active')) renderStatsBarChart();
+        }
+    });
+}
+
+function renderStatsLineChart() {
+    var container = document.getElementById('statsLineChart');
+    if (!container) return;
+    if (!statsChartData || statsChartData.length === 0) {
+        container.innerHTML = '<div class="chart-empty-tip">暂无统计数据</div>';
+        return;
+    }
+    // 按日期聚合"调用次数"
+    var byDate = {};
+    statsChartData.forEach(function(r) {
+        var d = r.date || '-';
+        byDate[d] = (byDate[d] || 0) + (r.count || 0);
+    });
+    var dates = Object.keys(byDate).sort();
+    var values = dates.map(function(d) { return byDate[d]; });
+    container.innerHTML = buildLineChartSvg(dates, values, '调用次数');
+}
+
+function renderStatsBarChart() {
+    var container = document.getElementById('statsBarChart');
+    if (!container) return;
+    if (!statsChartData || statsChartData.length === 0) {
+        container.innerHTML = '<div class="chart-empty-tip">暂无统计数据</div>';
+        return;
+    }
+    // 按模型聚合"输入Token+输出Token"
+    var byModel = {};
+    statsChartData.forEach(function(r) {
+        var m = r.modelName || '-';
+        byModel[m] = (byModel[m] || 0) + (r.promptTokens || 0) + (r.completionTokens || 0);
+    });
+    var models = Object.keys(byModel).sort(function(a, b) { return byModel[b] - byModel[a]; }).slice(0, 10);
+    var values = models.map(function(m) { return byModel[m]; });
+    container.innerHTML = buildBarChartSvg(models, values, 'Token总量');
+}
+
+function buildLineChartSvg(labels, values, valueName) {
+    var w = 720, h = 320;
+    var padL = 50, padR = 20, padT = 30, padB = 50;
+    var chartW = w - padL - padR;
+    var chartH = h - padT - padB;
+    var maxV = Math.max.apply(null, values) || 1;
+    var niceMax = Math.ceil(maxV * 1.15);
+    var points = values.map(function(v, i) {
+        var x = padL + (labels.length === 1 ? chartW / 2 : (i / (labels.length - 1)) * chartW);
+        var y = padT + chartH - (v / niceMax) * chartH;
+        return { x: x, y: y, v: v, label: labels[i] };
+    });
+    var yTicks = 4;
+    var svg = '<svg viewBox="0 0 ' + w + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">';
+    for (var i = 0; i <= yTicks; i++) {
+        var yv = niceMax * i / yTicks;
+        var yy = padT + chartH - (i / yTicks) * chartH;
+        svg += '<line class="chart-axis" x1="' + padL + '" y1="' + yy + '" x2="' + (w - padR) + '" y2="' + yy + '" stroke-opacity="0.15"/>';
+        svg += '<text class="chart-label" x="' + (padL - 8) + '" y="' + (yy + 4) + '" text-anchor="end">' + fmtTokenShort(yv) + '</text>';
+    }
+    // 折线
+    if (points.length > 1) {
+        var path = 'M ' + points.map(function(p) { return p.x + ' ' + p.y; }).join(' L ');
+        svg += '<path d="' + path + '" fill="none" stroke="var(--primary)" stroke-width="2"/>';
+        // 填充区域
+        var areaPath = path + ' L ' + points[points.length-1].x + ' ' + (padT + chartH) + ' L ' + points[0].x + ' ' + (padT + chartH) + ' Z';
+        svg += '<path d="' + areaPath + '" fill="var(--primary)" fill-opacity="0.1" stroke="none"/>';
+    }
+    // 圆点 + 标签
+    points.forEach(function(p) {
+        svg += '<circle cx="' + p.x + '" cy="' + p.y + '" r="4" fill="var(--primary)"/>';
+        svg += '<text class="chart-value-label" x="' + p.x + '" y="' + (p.y - 10) + '">' + fmtTokenShort(p.v) + '</text>';
+    });
+    // X轴标签 - 自动旋转避免重叠
+    var maxLabel = 8;
+    var skipStep = labels.length > maxLabel ? Math.ceil(labels.length / maxLabel) : 1;
+    points.forEach(function(p, i) {
+        if (i % skipStep !== 0 && i !== points.length - 1) return;
+        svg += '<text class="chart-label" x="' + p.x + '" y="' + (padT + chartH + 16) + '" text-anchor="middle">' + esc(p.label.substring(5)) + '</text>';
+    });
+    svg += '<text class="chart-label" x="' + padL + '" y="' + (h - 10) + '">日期（月-日） · 纵轴：' + valueName + '</text>';
+    svg += '</svg>';
+    return svg;
+}
+
+function buildBarChartSvg(labels, values, valueName) {
+    var w = 720, h = 320;
+    var padL = 60, padR = 20, padT = 30, padB = 80;
+    var chartW = w - padL - padR;
+    var chartH = h - padT - padB;
+    var maxV = Math.max.apply(null, values) || 1;
+    var niceMax = Math.ceil(maxV * 1.15);
+    var barW = Math.min(40, chartW / labels.length * 0.6);
+    var step = chartW / labels.length;
+    var svg = '<svg viewBox="0 0 ' + w + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">';
+    var yTicks = 4;
+    for (var i = 0; i <= yTicks; i++) {
+        var yv = niceMax * i / yTicks;
+        var yy = padT + chartH - (i / yTicks) * chartH;
+        svg += '<line class="chart-axis" x1="' + padL + '" y1="' + yy + '" x2="' + (w - padR) + '" y2="' + yy + '" stroke-opacity="0.15"/>';
+        svg += '<text class="chart-label" x="' + (padL - 8) + '" y="' + (yy + 4) + '" text-anchor="end">' + fmtTokenShort(yv) + '</text>';
+    }
+    values.forEach(function(v, i) {
+        var x = padL + i * step + (step - barW) / 2;
+        var bh = (v / niceMax) * chartH;
+        var y = padT + chartH - bh;
+        svg += '<rect class="chart-bar" x="' + x + '" y="' + y + '" width="' + barW + '" height="' + bh + '" rx="3"/>';
+        svg += '<text class="chart-value-label" x="' + (x + barW / 2) + '" y="' + (y - 4) + '">' + fmtTokenShort(v) + '</text>';
+        var lbl = labels[i] || '';
+        if (lbl.length > 12) lbl = lbl.substring(0, 11) + '…';
+        svg += '<text class="chart-label" x="' + (x + barW / 2) + '" y="' + (padT + chartH + 14) + '" text-anchor="end" transform="rotate(-30 ' + (x + barW / 2) + ' ' + (padT + chartH + 14) + ')">' + esc(lbl) + '</text>';
+    });
+    svg += '<text class="chart-label" x="' + padL + '" y="' + (h - 8) + '">模型 · 纵轴：' + valueName + '</text>';
+    svg += '</svg>';
+    return svg;
+}
+
+function fmtTokenShort(n) {
+    if (n == null) return '0';
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+    return String(n);
+}
 function resetUsage() {
     var $ = window._$;
-    $('#usageSearchUser').val('');
+    resetCustomSelect('usageSearchUserArea', 'usageSearchUserValue', 'usageSearchUser', '全部用户');
     $('#usageSearchModel').val('');
     $('#usageSearchDate').val('');
     // 重置自定义下拉框显示文本
     $('#usageModelSelectValue').text('全部模型');
-    // 重置layui渲染的select
-    if (window._form) window._form.render('select');
     usagePage = 1;
     loadUsage();
 }
 function resetUsageStats() {
     var $ = window._$;
-    $('#statsSearchUser').val('');
+    resetCustomSelect('statsSearchUserArea', 'statsSearchUserValue', 'statsSearchUser', '全部用户');
     $('#statsSearchModel').val('');
     $('#statsSearchDate').val('');
     // 重置自定义下拉框显示文本
@@ -1300,22 +1472,108 @@ function selectModelFilter(areaId, hiddenId, value, label) {
     $('#' + hiddenId).val(value);
     var area = $('#' + areaId);
     area.find('.custom-select-value').text(label || '全部模型');
+    // 同步更新 selected 状态 - 通过遍历而非选择器
+    area.find('.custom-select-option').removeClass('selected');
+    area.find('.custom-select-option').each(function() {
+        if ($(this).attr('data-value') === value) {
+            $(this).addClass('selected');
+        }
+    });
     area.find('.custom-select-dropdown').removeClass('active');
     area.find('.custom-select-trigger').removeClass('active');
+    area.removeClass('active');
 }
 
-function toggleCustomDropdown(areaId) {
+function toggleCustomDropdown(areaId, e) {
+    if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
     var $ = window._$;
     var area = $('#' + areaId);
+    if (!area.length) return;
     var dropdown = area.find('.custom-select-dropdown');
     var trigger = area.find('.custom-select-trigger');
     var isOpen = dropdown.hasClass('active');
     // Close all dropdowns first
     $('.custom-select-dropdown').removeClass('active');
     $('.custom-select-trigger').removeClass('active');
+    $('.custom-select-area').removeClass('active');
     if (!isOpen) {
         dropdown.addClass('active');
         trigger.addClass('active');
+        area.addClass('active'); // 关键：给 area 也添加 active，触发 .custom-select-area.active .custom-select-dropdown { display: block }
+    }
+}
+
+// 通用自定义下拉选选项选择函数
+function selectCustomOption(areaId, dropdownId, valueId, value, text, callback, e) {
+    if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
+    var $ = window._$;
+    var area = $('#' + areaId);
+    var dropdown = $('#' + dropdownId);
+    var valueSpan = $('#' + valueId);
+    var hiddenInput = area.siblings('input[type="hidden"]').first();
+
+    // 更新显示文本
+    valueSpan.text(text);
+
+    // 更新隐藏 input 的值
+    if (hiddenInput.length) {
+        hiddenInput.val(value);
+    }
+
+    // 更新选中状态 - 通过遍历而非选择器，避免特殊字符转义问题
+    dropdown.find('.custom-select-option').removeClass('selected');
+    dropdown.find('.custom-select-option').each(function() {
+        if ($(this).attr('data-value') === value) {
+            $(this).addClass('selected');
+        }
+    });
+
+    // 关闭下拉 - 同步移除 area、trigger、dropdown 的 active
+    area.removeClass('active');
+    area.find('.custom-select-trigger').removeClass('active');
+    dropdown.removeClass('active');
+
+    // 执行回调
+    if (typeof callback === 'function') {
+        callback();
+    }
+}
+
+// 动态填充自定义下拉选选项
+function populateCustomSelectOptions(areaId, dropdownId, valueId, hiddenId, options, defaultText, callback, iconFn) {
+    var $ = window._$;
+    var dropdown = $('#' + dropdownId);
+    var valueSpan = $('#' + valueId);
+    var hiddenInput = $('#' + hiddenId);
+    var cbName = (callback && typeof callback === 'function') ? callback.name : '';
+
+    // 清空现有选项
+    dropdown.empty();
+
+    // 添加默认选项
+    dropdown.append('<div class="custom-select-option" data-value="" onclick="selectCustomOption(\'' + areaId + '\',\'' + dropdownId + '\',\'' + valueId + '\',\'\',\'' + defaultText + '\',\'' + cbName + '\',event)">' + defaultText + '</div>');
+
+    // 添加其他选项
+    options.forEach(function(opt) {
+        var iconHtml = (typeof iconFn === 'function') ? iconFn(opt.value, opt.text) : '';
+        var inner = iconHtml ? iconHtml + '<span>' + esc(opt.text) + '</span>' : esc(opt.text);
+        dropdown.append('<div class="custom-select-option" data-value="' + esc(opt.value) + '" onclick="selectCustomOption(\'' + areaId + '\',\'' + dropdownId + '\',\'' + valueId + '\',\'' + esc(opt.value).replace(/'/g, '&#39;') + '\',\'' + esc(opt.text).replace(/'/g, '&#39;') + '\',\'' + cbName + '\',event)">' + inner + '</div>');
+    });
+
+    // 同步初始化：根据当前隐藏 input 的值标记对应项为 selected
+    var currentVal = hiddenInput.val() || '';
+    var matchOpt = options.find(function(o) { return o.value === currentVal; });
+    if (currentVal && matchOpt) {
+        valueSpan.text(matchOpt.text);
+        dropdown.find('.custom-select-option').removeClass('selected');
+        dropdown.find('.custom-select-option[data-value="' + esc(currentVal).replace(/"/g, '\\"') + '"]').addClass('selected');
+    } else {
+        // 重置为默认值
+        valueSpan.text(defaultText);
+        hiddenInput.val('');
+        dropdown.find('.custom-select-option').removeClass('selected');
+        dropdown.find('.custom-select-option[data-value=""]').addClass('selected');
     }
 }
 

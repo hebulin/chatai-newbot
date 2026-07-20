@@ -1612,9 +1612,12 @@ function toggleSidebar() {
     if (isMobile) {
         sidebar.classList.toggle('open');
         sidebar.classList.remove('collapsed');
+        document.body.classList.remove('sidebar-collapsed');
         toggleOverlay(sidebar.classList.contains('open'));
     } else {
         sidebar.classList.toggle('collapsed');
+        // 桌面端：同步主内容区域压缩/展开
+        document.body.classList.toggle('sidebar-collapsed', sidebar.classList.contains('collapsed'));
     }
     // 侧边栏切换动画结束后重新定位scroll-nav
     setTimeout(updateScrollNav, 350);
@@ -1641,6 +1644,11 @@ function handleResize() {
     if (window.innerWidth > 768) {
         sidebar.classList.remove('open');
         toggleOverlay(false);
+        // 桌面端：按 collapsed 状态同步主内容边距
+        document.body.classList.toggle('sidebar-collapsed', sidebar.classList.contains('collapsed'));
+    } else {
+        // 移动端：主内容始终撑满
+        document.body.classList.remove('sidebar-collapsed');
     }
     updateScrollNav(); // 窗口大小变化时重新定位滚动导航按钮
 }
@@ -1680,7 +1688,7 @@ function updateScrollNav() {
     var topBtn = document.getElementById('scrollToTopBtn');
     var bottomBtn = document.getElementById('scrollToBottomBtn');
     var scrollNav = document.getElementById('scrollNav');
-    if (!container || !topBtn || !bottomBtn) return;
+    if (!container || !bottomBtn) return;
 
     // 动态定位scroll-nav到chat-container右下角（fixed定位）
     if (scrollNav) {
@@ -1696,7 +1704,7 @@ function updateScrollNav() {
     var isAtTop = scrollTop <= 5;
     var isAtBottom = scrollHeight - scrollTop - clientHeight <= 5;
 
-    topBtn.style.display = isAtTop ? 'none' : 'flex';
+    if (topBtn) topBtn.style.display = isAtTop ? 'none' : 'flex';
     bottomBtn.style.display = isAtBottom ? 'none' : 'flex';
 }
 
