@@ -1,4 +1,4 @@
-package com.chatai.newbot.controller;
+﻿package com.chatai.newbot.controller;
 
 import com.chatai.newbot.model.*;
 import com.chatai.newbot.service.FileStorageService;
@@ -6,8 +6,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
 
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -701,3 +701,4 @@ public class AdminController {
         return copy;
     }
 }
+
