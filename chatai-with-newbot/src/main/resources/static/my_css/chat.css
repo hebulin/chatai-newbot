@@ -892,6 +892,8 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
    ============================================ */
 .input-area {
     padding: 14px 40px 12px;
+    /* 底部预留 Home Indicator 高度（无刘海设备 env() 为 0，无副作用） */
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
     background: var(--bg);
     border-top: 1px solid var(--border);
     flex-shrink: 0;
@@ -1203,7 +1205,9 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
 /* ============================================
    OVERLAY
    ============================================ */
-.overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 999; }
+/* 遮罩层级须低于顶栏(100)与侧边栏(90)、高于主内容：
+   否则 fixed+inset:0 的遮罩会盖住汉堡按钮与侧边栏叉号，导致窄屏无法折叠侧边栏 */
+.overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 80; }
 .overlay.active { display: block; }
 
 /* ============================================
@@ -1698,12 +1702,15 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
     .main-content { margin-left: 0; }
     .chat-container { padding: 16px; }
     .input-area { padding: 10px 14px 8px; }
+    .input-area { padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
     .atelier-top { padding: 10px 14px; }
     .msg-row { max-width: 92%; }
     .input-footer .foot-l { display: none; }
     .input-footer .foot-c { font-size: 10px; }
     .input-footer .foot-r { font-size: 9px; min-width: 60px; }
     .scroll-nav { right: 12px; bottom: 120px; }
+    /* iOS Safari：输入框字号 <16px 时聚焦会自动缩放页面 */
+    #userInput { font-size: 16px; }
 }
 
 @media (max-width: 480px) {

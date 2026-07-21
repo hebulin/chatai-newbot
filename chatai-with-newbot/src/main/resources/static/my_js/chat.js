@@ -644,6 +644,15 @@ function switchChat(id) {
     resetState();
     updateChatList();
     displayMessages();
+    // 移动端：选中会话后收起侧边栏与遮罩，避免遮罩残留罩住整页
+    if (window.innerWidth <= 768) {
+        var sb = document.getElementById('sidebar');
+        if (sb && sb.classList.contains('open')) {
+            sb.classList.remove('open');
+            sb.classList.add('collapsed');
+            toggleOverlay(false);
+        }
+    }
 }
 
 function deleteChat(id, e) {
