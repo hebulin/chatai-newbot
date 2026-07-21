@@ -8,6 +8,8 @@ import org.springframework.web.bind.annotation.*;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -487,7 +489,8 @@ public class AdminController {
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) String username,
             @RequestParam(required = false) String modelName,
-            @RequestParam(required = false) String date,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate,
             HttpServletRequest request, HttpServletResponse response) {
         Map<String, Object> result = new HashMap<>();
         if (!checkAdmin(request, response)) {
@@ -495,6 +498,9 @@ public class AdminController {
             result.put("message", "无权限");
             return result;
         }
+        // 校验日期范围（最多 30 天）
+        Map<String, Object> rangeCheck = validateDateRange(startDate, endDate);
+        if (rangeCheck != null) return rangeCheck;
         List<UsageLog> logs = storageService.getAllUsageLogs();
 
         // 过滤
@@ -504,8 +510,18 @@ public class AdminController {
         if (modelName != null && !modelName.isEmpty()) {
             logs = logs.stream().filter(l -> modelName.equals(l.getModelName())).collect(Collectors.toList());
         }
-        if (date != null && !date.isEmpty()) {
-            logs = logs.stream().filter(l -> l.getTimestamp() != null && l.getTimestamp().startsWith(date)).collect(Collectors.toList());
+        // 日期范围过滤：startDate <= log.date <= endDate（按 timestamp 前 10 位 yyyy-MM-dd 比较）
+        String finalStart = startDate;
+        String finalEnd = endDate;
+        if ((finalStart != null && !finalStart.isEmpty()) || (finalEnd != null && !finalEnd.isEmpty())) {
+            logs = logs.stream().filter(l -> {
+                String ts = l.getTimestamp();
+                if (ts == null || ts.length() < 10) return false;
+                String d = ts.substring(0, 10);
+                if (finalStart != null && !finalStart.isEmpty() && d.compareTo(finalStart) < 0) return false;
+                if (finalEnd != null && !finalEnd.isEmpty() && d.compareTo(finalEnd) > 0) return false;
+                return true;
+            }).collect(Collectors.toList());
         }
 
         // 按时间降序
@@ -554,6 +570,7 @@ public class AdminController {
 
     /**
      * 使用统计 - 按用户+日期+模型维度聚合，支持搜索+分页
+     * getAll=true 时不分页，返回全部聚合数据（图表专用）
      */
     @GetMapping("/usage/stats")
     public Map<String, Object> getUsageStats(
@@ -561,7 +578,9 @@ public class AdminController {
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) String username,
             @RequestParam(required = false) String modelName,
-            @RequestParam(required = false) String date,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate,
+            @RequestParam(defaultValue = "false") boolean getAll,
             HttpServletRequest request, HttpServletResponse response) {
         Map<String, Object> result = new HashMap<>();
         if (!checkAdmin(request, response)) {
@@ -569,6 +588,9 @@ public class AdminController {
             result.put("message", "无权限");
             return result;
         }
+        // 校验日期范围（最多 30 天）
+        Map<String, Object> rangeCheck = validateDateRange(startDate, endDate);
+        if (rangeCheck != null) return rangeCheck;
 
         List<UsageLog> logs = storageService.getAllUsageLogs();
 
@@ -579,8 +601,18 @@ public class AdminController {
         if (modelName != null && !modelName.isEmpty()) {
             logs = logs.stream().filter(l -> modelName.equals(l.getModelName())).collect(Collectors.toList());
         }
-        if (date != null && !date.isEmpty()) {
-            logs = logs.stream().filter(l -> l.getTimestamp() != null && l.getTimestamp().startsWith(date)).collect(Collectors.toList());
+        // 日期范围过滤
+        String finalStart = startDate;
+        String finalEnd = endDate;
+        if ((finalStart != null && !finalStart.isEmpty()) || (finalEnd != null && !finalEnd.isEmpty())) {
+            logs = logs.stream().filter(l -> {
+                String ts = l.getTimestamp();
+                if (ts == null || ts.length() < 10) return false;
+                String d = ts.substring(0, 10);
+                if (finalStart != null && !finalStart.isEmpty() && d.compareTo(finalStart) < 0) return false;
+                if (finalEnd != null && !finalEnd.isEmpty() && d.compareTo(finalEnd) > 0) return false;
+                return true;
+            }).collect(Collectors.toList());
         }
 
         // 按 (username, date, modelName) 聚合
@@ -617,23 +649,79 @@ public class AdminController {
             return ((String) a.get("modelName")).compareTo((String) b.get("modelName"));
         });
 
-        // 分页
         int total = statsList.size();
-        int totalPages = Math.max(1, (int) Math.ceil((double) total / size));
-        int fromIndex = Math.min((page - 1) * size, total);
-        int toIndex = Math.min(fromIndex + size, total);
-        List<Map<String, Object>> pageData = statsList.subList(fromIndex, toIndex);
-
         result.put("success", true);
-        result.put("data", pageData);
         result.put("total", total);
-        result.put("page", page);
-        result.put("size", size);
-        result.put("totalPages", totalPages);
+
+        if (getAll) {
+            // 图表专用：不分页，一次性返回全量聚合数据
+            result.put("data", statsList);
+            result.put("page", 1);
+            result.put("size", total);
+            result.put("totalPages", 1);
+        } else {
+            // 列表专用：分页
+            int totalPages = Math.max(1, (int) Math.ceil((double) total / size));
+            int fromIndex = Math.min((page - 1) * size, total);
+            int toIndex = Math.min(fromIndex + size, total);
+            List<Map<String, Object>> pageData = statsList.subList(fromIndex, toIndex);
+            result.put("data", pageData);
+            result.put("page", page);
+            result.put("size", size);
+            result.put("totalPages", totalPages);
+        }
         return result;
     }
 
     // ========== 工具方法 ==========
+
+    /**
+     * 校验统计接口的日期范围：两个日期不能同时为空（只填一边视为单日查询，最多 30 天）
+     * 返回 null 表示通过；返回非 null Map（success=false, message=...）表示失败
+     */
+    private Map<String, Object> validateDateRange(String startDate, String endDate) {
+        boolean hasStart = startDate != null && !startDate.isEmpty();
+        boolean hasEnd = endDate != null && !endDate.isEmpty();
+        if (!hasStart && !hasEnd) return null; // 都为空 = 不筛选
+        if (hasStart && !startDate.matches("\\d{4}-\\d{2}-\\d{2}")) {
+            Map<String, Object> err = new HashMap<>();
+            err.put("success", false);
+            err.put("message", "开始日期格式错误，应为 yyyy-MM-dd");
+            return err;
+        }
+        if (hasEnd && !endDate.matches("\\d{4}-\\d{2}-\\d{2}")) {
+            Map<String, Object> err = new HashMap<>();
+            err.put("success", false);
+            err.put("message", "结束日期格式错误，应为 yyyy-MM-dd");
+            return err;
+        }
+        // 只填一个就当作单日：复制到另一边
+        String s = hasStart ? startDate : endDate;
+        String e = hasEnd ? endDate : startDate;
+        try {
+            LocalDate start = LocalDate.parse(s);
+            LocalDate end = LocalDate.parse(e);
+            if (end.isBefore(start)) {
+                Map<String, Object> err = new HashMap<>();
+                err.put("success", false);
+                err.put("message", "结束日期不能早于开始日期");
+                return err;
+            }
+            long days = ChronoUnit.DAYS.between(start, end) + 1;
+            if (days > 30) {
+                Map<String, Object> err = new HashMap<>();
+                err.put("success", false);
+                err.put("message", "统计时间范围不能超过 30 天（当前 " + days + " 天）");
+                return err;
+            }
+        } catch (Exception ex) {
+            Map<String, Object> err = new HashMap<>();
+            err.put("success", false);
+            err.put("message", "日期解析失败，请使用 yyyy-MM-dd 格式");
+            return err;
+        }
+        return null;
+    }
 
     /**
      * API Key 脱敏：保留前4位和后4位，中间用星号替代
