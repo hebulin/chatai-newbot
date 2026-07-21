@@ -264,8 +264,12 @@
                                     <input type="hidden" id="usageSearchModel" value="">
                                 </div>
                             <div class="search-field">
-                                <label class="search-label">日期</label>
-                                <input type="date" id="usageSearchDate" class="stats-search-input">
+                                <label class="search-label">开始日期</label>
+                                <input type="date" id="usageSearchStartDate" class="stats-search-input">
+                            </div>
+                            <div class="search-field">
+                                <label class="search-label">结束日期</label>
+                                <input type="date" id="usageSearchEndDate" class="stats-search-input">
                             </div>
                             <div class="search-actions">
                                 <button class="primary-btn" onclick="searchUsage()">
@@ -313,8 +317,12 @@
                                     <input type="hidden" id="statsSearchModel" value="">
                                 </div>
                             <div class="search-field">
-                                <label class="search-label">日期</label>
-                                <input type="date" id="statsSearchDate" class="stats-search-input">
+                                <label class="search-label">开始日期</label>
+                                <input type="date" id="statsSearchStartDate" class="stats-search-input">
+                            </div>
+                            <div class="search-field">
+                                <label class="search-label">结束日期</label>
+                                <input type="date" id="statsSearchEndDate" class="stats-search-input">
                             </div>
                             <div class="search-actions">
                                 <button class="primary-btn" onclick="searchUsageStats()">
@@ -341,12 +349,34 @@
                         </div>
                         <!-- 曲线图视图 -->
                         <div class="stats-mini-tab-content" id="stats-mini-line">
+                            <div class="stats-chart-toolbar">
+                                <span class="metric-label">指标</span>
+                                <div class="chart-metric-selector">
+                                    <button type="button" class="metric-btn active" onclick="switchLineMetric('count', this)">调用次数</button>
+                                    <button type="button" class="metric-btn" onclick="switchLineMetric('promptTokens', this)">输入Token</button>
+                                    <button type="button" class="metric-btn" onclick="switchLineMetric('completionTokens', this)">输出Token</button>
+                                    <button type="button" class="metric-btn" onclick="switchLineMetric('reasoningTokens', this)">思考Token</button>
+                                    <button type="button" class="metric-btn" onclick="switchLineMetric('cachedTokens', this)">缓存Token</button>
+                                    <button type="button" class="metric-btn" onclick="switchLineMetric('thinkingCount', this)">思考模式</button>
+                                </div>
+                            </div>
                             <div id="statsLineChart" class="stats-chart-canvas">
                                 <div class="chart-empty-tip">请先选择查询条件并点击搜索</div>
                             </div>
                         </div>
                         <!-- 柱状图视图 -->
                         <div class="stats-mini-tab-content" id="stats-mini-bar">
+                            <div class="stats-chart-toolbar">
+                                <span class="metric-label">指标</span>
+                                <div class="chart-metric-selector">
+                                    <button type="button" class="metric-btn active" onclick="switchBarMetric('totalTokens', this)">Token总量</button>
+                                    <button type="button" class="metric-btn" onclick="switchBarMetric('count', this)">调用次数</button>
+                                    <button type="button" class="metric-btn" onclick="switchBarMetric('promptTokens', this)">输入Token</button>
+                                    <button type="button" class="metric-btn" onclick="switchBarMetric('completionTokens', this)">输出Token</button>
+                                    <button type="button" class="metric-btn" onclick="switchBarMetric('reasoningTokens', this)">思考Token</button>
+                                    <button type="button" class="metric-btn" onclick="switchBarMetric('cachedTokens', this)">缓存Token</button>
+                                </div>
+                            </div>
                             <div id="statsBarChart" class="stats-chart-canvas">
                                 <div class="chart-empty-tip">请先选择查询条件并点击搜索</div>
                             </div>

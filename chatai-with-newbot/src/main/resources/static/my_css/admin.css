@@ -1737,3 +1737,73 @@ body::before {
     font-family: var(--sans);
     text-anchor: middle;
 }
+.chart-axis-label {
+    fill: var(--ink-3);
+    font-size: 11px;
+    font-family: var(--sans);
+    letter-spacing: 0;
+}
+.chart-point {
+    transition: r 0.15s var(--ease);
+    cursor: pointer;
+}
+.chart-point:hover { r: 7; }
+
+/* Chart Toolbar - 指标切换器 */
+.stats-chart-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 4px 14px;
+    flex-wrap: wrap;
+}
+.chart-metric-selector {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+.metric-label {
+    font-size: 13px;
+    color: var(--ink-3);
+    font-weight: 500;
+    font-family: var(--sans);
+    text-transform: none;
+    letter-spacing: 0;
+}
+.metric-btn {
+    padding: 5px 12px;
+    font-size: 12px;
+    color: var(--ink-2);
+    background: var(--paper);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.2s var(--ease);
+    font-family: var(--sans);
+    line-height: 1.4;
+    white-space: nowrap;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+}
+.metric-btn:hover {
+    color: var(--primary);
+    border-color: var(--primary);
+    background: var(--accent-soft);
+}
+.metric-btn.active {
+    color: var(--primary);
+    background: var(--accent-soft);
+    border-color: var(--primary);
+    font-weight: 500;
+}
+.metric-btn:focus { outline: none; }
+.metric-btn:focus-visible {
+    box-shadow: 0 0 0 3px rgba(66, 133, 244, 0.20);
+}
+
+@media (max-width: 768px) {
+    .stats-chart-toolbar { padding-bottom: 10px; }
+    .metric-btn { padding: 4px 10px; font-size: 11px; }
+}

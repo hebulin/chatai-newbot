@@ -1134,6 +1134,8 @@ function switchDataSubTab(tab, el) {
         $(el || '.data-sub-tab-item:last').addClass('active');
         $('#data-sub-stats').addClass('active').show();
         loadUsageStats();
+        // 切到统计 Tab 时同步加载图表数据，让曲线图/柱状图切过去就有数据
+        loadUsageStatsCharts();
     }
 }
 
@@ -1165,11 +1167,13 @@ function loadUsage() {
     var $ = window._$;
     var username = $('#usageSearchUser').val() || '';
     var modelName = $('#usageSearchModel').val() || '';
-    var date = $('#usageSearchDate').val() || '';
+    var startDate = $('#usageSearchStartDate').val() || '';
+    var endDate = $('#usageSearchEndDate').val() || '';
     var url = '/api/admin/usage?page=' + usagePage + '&size=' + usageSize;
     if (username) url += '&username=' + encodeURIComponent(username);
     if (modelName) url += '&modelName=' + encodeURIComponent(modelName);
-    if (date) url += '&date=' + encodeURIComponent(date);
+    if (startDate) url += '&startDate=' + encodeURIComponent(startDate);
+    if (endDate) url += '&endDate=' + encodeURIComponent(endDate);
     api(url).then(function(data) {
         if (data && data.success) {
             // API返回 {success, data: [...], total, page, size}
@@ -1185,11 +1189,13 @@ function loadUsageStats() {
     var $ = window._$;
     var username = $('#statsSearchUser').val() || '';
     var modelName = $('#statsSearchModel').val() || '';
-    var date = $('#statsSearchDate').val() || '';
+    var startDate = $('#statsSearchStartDate').val() || '';
+    var endDate = $('#statsSearchEndDate').val() || '';
     var url = '/api/admin/usage/stats?page=' + statsPage + '&size=' + statsSize;
     if (username) url += '&username=' + encodeURIComponent(username);
     if (modelName) url += '&modelName=' + encodeURIComponent(modelName);
-    if (date) url += '&date=' + encodeURIComponent(date);
+    if (startDate) url += '&startDate=' + encodeURIComponent(startDate);
+    if (endDate) url += '&endDate=' + encodeURIComponent(endDate);
     api(url).then(function(data) {
         if (data && data.success) {
             // API返回 {success, data: [...], total, page, size}
@@ -1261,8 +1267,40 @@ function renderPagination(elemId, total, current, size, callback) {
     });
 }
 
-function searchUsage() { usagePage = 1; loadUsage(); }
+/**
+ * 校验日期范围：startDate ≤ endDate 且间隔 ≤ 30 天
+ * 返回 null 表示通过；返回错误消息表示失败
+ */
+function validateDateRange(startDate, endDate) {
+    var hasStart = !!startDate;
+    var hasEnd = !!endDate;
+    if (!hasStart && !hasEnd) return null; // 都为空 = 不筛选
+    var s = hasStart ? startDate : endDate;
+    var e = hasEnd ? endDate : startDate;
+    var sd = new Date(s + 'T00:00:00');
+    var ed = new Date(e + 'T00:00:00');
+    if (isNaN(sd.getTime()) || isNaN(ed.getTime())) return '日期格式错误，请使用 yyyy-MM-dd';
+    if (ed < sd) return '结束日期不能早于开始日期';
+    var days = Math.floor((ed - sd) / 86400000) + 1;
+    if (days > 30) return '统计时间范围不能超过 30 天（当前 ' + days + ' 天）';
+    return null;
+}
+
+function searchUsage() {
+    var $ = window._$;
+    var startDate = $('#usageSearchStartDate').val() || '';
+    var endDate = $('#usageSearchEndDate').val() || '';
+    var err = validateDateRange(startDate, endDate);
+    if (err) { window._layer.msg(err, { icon: 2 }); return; }
+    usagePage = 1;
+    loadUsage();
+}
 function searchUsageStats() {
+    var $ = window._$;
+    var startDate = $('#statsSearchStartDate').val() || '';
+    var endDate = $('#statsSearchEndDate').val() || '';
+    var err = validateDateRange(startDate, endDate);
+    if (err) { window._layer.msg(err, { icon: 2 }); return; }
     statsPage = 1;
     loadUsageStats();
     loadUsageStatsCharts();
@@ -1272,6 +1310,17 @@ function searchUsageStats() {
    用户统计 - 内嵌小tab切换 & 图表渲染
    ============================================ */
 var statsChartData = [];
+var currentLineMetric = 'count';
+var currentBarMetric = 'totalTokens';
+var CHART_METRICS = {
+    count: '调用次数',
+    promptTokens: '输入Token',
+    completionTokens: '输出Token',
+    reasoningTokens: '思考Token',
+    cachedTokens: '缓存Token',
+    thinkingCount: '思考模式',
+    totalTokens: 'Token总量'
+};
 
 function switchStatsMiniTab(tab, el) {
     var nav = el.parentElement;
@@ -1279,8 +1328,9 @@ function switchStatsMiniTab(tab, el) {
     el.classList.add('active');
     var parent = document.getElementById('data-sub-stats');
     parent.querySelectorAll('.stats-mini-tab-content').forEach(function(c) { c.classList.remove('active'); });
-    if (tab === 'list') document.getElementById('stats-mini-list').classList.add('active');
-    else if (tab === 'line') {
+    if (tab === 'list') {
+        document.getElementById('stats-mini-list').classList.add('active');
+    } else if (tab === 'line') {
         document.getElementById('stats-mini-line').classList.add('active');
         renderStatsLineChart();
     } else if (tab === 'bar') {
@@ -1290,116 +1340,157 @@ function switchStatsMiniTab(tab, el) {
 }
 
 function loadUsageStatsCharts() {
+    var $ = window._$;
+    if (!$) return;
     var username = $('#statsSearchUser').val() || '';
     var modelName = $('#statsSearchModel').val() || '';
-    var date = $('#statsSearchDate').val() || '';
-    var url = '/api/admin/usage/stats?page=1&size=500';
+    var startDate = $('#statsSearchStartDate').val() || '';
+    var endDate = $('#statsSearchEndDate').val() || '';
+    // 图表需要全量聚合数据，getAll=true 让后端不分页；size=10000 是安全上限
+    var url = '/api/admin/usage/stats?getAll=true&size=10000';
     if (username) url += '&username=' + encodeURIComponent(username);
     if (modelName) url += '&modelName=' + encodeURIComponent(modelName);
-    if (date) url += '&date=' + encodeURIComponent(date);
+    if (startDate) url += '&startDate=' + encodeURIComponent(startDate);
+    if (endDate) url += '&endDate=' + encodeURIComponent(endDate);
     api(url).then(function(data) {
         if (data && data.success) {
             statsChartData = data.data || [];
-            // 如果图表视图已激活则重新渲染
+            // 重新渲染当前可见的图表
             var line = document.getElementById('stats-mini-line');
             var bar = document.getElementById('stats-mini-bar');
             if (line && line.classList.contains('active')) renderStatsLineChart();
             if (bar && bar.classList.contains('active')) renderStatsBarChart();
+        } else if (data && data.message) {
+            // 后端校验失败（如超过 30 天） - 把消息显示在两个图表里
+            var tipHtml = '<div class="chart-empty-tip" style="color:var(--warn)">' + esc(data.message) + '</div>';
+            var line = document.getElementById('statsLineChart');
+            var bar = document.getElementById('statsBarChart');
+            if (line && line.offsetParent !== null) line.innerHTML = tipHtml;
+            if (bar && bar.offsetParent !== null) bar.innerHTML = tipHtml;
         }
+    }).catch(function() { /* 静默处理 - 图表可稍后再加载 */ });
+}
+
+function getChartMetricValue(record, metric) {
+    if (metric === 'totalTokens') {
+        return (record.promptTokens || 0) + (record.completionTokens || 0) + (record.reasoningTokens || 0);
+    }
+    return record[metric] || 0;
+}
+
+function aggregateBy(data, keyFn, metric) {
+    var result = {};
+    data.forEach(function(r) {
+        var key = keyFn(r) || '-';
+        result[key] = (result[key] || 0) + getChartMetricValue(r, metric);
     });
+    return result;
 }
 
 function renderStatsLineChart() {
     var container = document.getElementById('statsLineChart');
     if (!container) return;
     if (!statsChartData || statsChartData.length === 0) {
-        container.innerHTML = '<div class="chart-empty-tip">暂无统计数据</div>';
+        container.innerHTML = '<div class="chart-empty-tip">暂无统计数据，请先搜索</div>';
         return;
     }
-    // 按日期聚合"调用次数"
-    var byDate = {};
-    statsChartData.forEach(function(r) {
-        var d = r.date || '-';
-        byDate[d] = (byDate[d] || 0) + (r.count || 0);
-    });
+    var byDate = aggregateBy(statsChartData, function(r) { return r.date; }, currentLineMetric);
     var dates = Object.keys(byDate).sort();
     var values = dates.map(function(d) { return byDate[d]; });
-    container.innerHTML = buildLineChartSvg(dates, values, '调用次数');
+    container.innerHTML = buildLineChartSvg(dates, values, currentLineMetric);
 }
 
 function renderStatsBarChart() {
     var container = document.getElementById('statsBarChart');
     if (!container) return;
     if (!statsChartData || statsChartData.length === 0) {
-        container.innerHTML = '<div class="chart-empty-tip">暂无统计数据</div>';
+        container.innerHTML = '<div class="chart-empty-tip">暂无统计数据，请先搜索</div>';
         return;
     }
-    // 按模型聚合"输入Token+输出Token"
-    var byModel = {};
-    statsChartData.forEach(function(r) {
-        var m = r.modelName || '-';
-        byModel[m] = (byModel[m] || 0) + (r.promptTokens || 0) + (r.completionTokens || 0);
-    });
+    var byModel = aggregateBy(statsChartData, function(r) { return r.modelName; }, currentBarMetric);
     var models = Object.keys(byModel).sort(function(a, b) { return byModel[b] - byModel[a]; }).slice(0, 10);
     var values = models.map(function(m) { return byModel[m]; });
-    container.innerHTML = buildBarChartSvg(models, values, 'Token总量');
+    container.innerHTML = buildBarChartSvg(models, values, currentBarMetric);
 }
 
-function buildLineChartSvg(labels, values, valueName) {
+function switchLineMetric(metric, el) {
+    if (!CHART_METRICS[metric]) return;
+    currentLineMetric = metric;
+    var nav = el.parentElement;
+    nav.querySelectorAll('.metric-btn').forEach(function(n) { n.classList.remove('active'); });
+    el.classList.add('active');
+    renderStatsLineChart();
+}
+
+function switchBarMetric(metric, el) {
+    if (!CHART_METRICS[metric]) return;
+    currentBarMetric = metric;
+    var nav = el.parentElement;
+    nav.querySelectorAll('.metric-btn').forEach(function(n) { n.classList.remove('active'); });
+    el.classList.add('active');
+    renderStatsBarChart();
+}
+
+function buildLineChartSvg(labels, values, metric) {
     var w = 720, h = 320;
-    var padL = 50, padR = 20, padT = 30, padB = 50;
+    var padL = 60, padR = 30, padT = 30, padB = 60;
     var chartW = w - padL - padR;
     var chartH = h - padT - padB;
-    var maxV = Math.max.apply(null, values) || 1;
-    var niceMax = Math.ceil(maxV * 1.15);
+    var maxV = Math.max.apply(null, values);
+    var niceMax = maxV > 0 ? Math.ceil(maxV * 1.15) : 1;
     var points = values.map(function(v, i) {
         var x = padL + (labels.length === 1 ? chartW / 2 : (i / (labels.length - 1)) * chartW);
         var y = padT + chartH - (v / niceMax) * chartH;
         return { x: x, y: y, v: v, label: labels[i] };
     });
     var yTicks = 4;
-    var svg = '<svg viewBox="0 0 ' + w + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">';
+    var valueName = CHART_METRICS[metric] || metric;
+    var svg = '<svg viewBox="0 0 ' + w + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" style="width:100%;height:100%;display:block;">';
+    // 横向网格线 + Y轴刻度
     for (var i = 0; i <= yTicks; i++) {
         var yv = niceMax * i / yTicks;
         var yy = padT + chartH - (i / yTicks) * chartH;
         svg += '<line class="chart-axis" x1="' + padL + '" y1="' + yy + '" x2="' + (w - padR) + '" y2="' + yy + '" stroke-opacity="0.15"/>';
         svg += '<text class="chart-label" x="' + (padL - 8) + '" y="' + (yy + 4) + '" text-anchor="end">' + fmtTokenShort(yv) + '</text>';
     }
-    // 折线
+    // 折线 + 区域填充
     if (points.length > 1) {
         var path = 'M ' + points.map(function(p) { return p.x + ' ' + p.y; }).join(' L ');
-        svg += '<path d="' + path + '" fill="none" stroke="var(--primary)" stroke-width="2"/>';
-        // 填充区域
-        var areaPath = path + ' L ' + points[points.length-1].x + ' ' + (padT + chartH) + ' L ' + points[0].x + ' ' + (padT + chartH) + ' Z';
+        svg += '<path d="' + path + '" fill="none" stroke="var(--primary)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>';
+        var areaPath = path + ' L ' + points[points.length - 1].x + ' ' + (padT + chartH) + ' L ' + points[0].x + ' ' + (padT + chartH) + ' Z';
         svg += '<path d="' + areaPath + '" fill="var(--primary)" fill-opacity="0.1" stroke="none"/>';
     }
-    // 圆点 + 标签
+    // 数据点 + SVG <title> 悬浮提示
     points.forEach(function(p) {
-        svg += '<circle cx="' + p.x + '" cy="' + p.y + '" r="4" fill="var(--primary)"/>';
-        svg += '<text class="chart-value-label" x="' + p.x + '" y="' + (p.y - 10) + '">' + fmtTokenShort(p.v) + '</text>';
+        svg += '<circle class="chart-point" cx="' + p.x + '" cy="' + p.y + '" r="5" fill="var(--primary)" stroke="var(--paper)" stroke-width="2">';
+        svg += '<title>' + esc(p.label) + '\n' + valueName + '：' + fmtToken(p.v) + '</title>';
+        svg += '</circle>';
     });
-    // X轴标签 - 自动旋转避免重叠
+    // X轴日期标签 - 自动跳过避免重叠
     var maxLabel = 8;
     var skipStep = labels.length > maxLabel ? Math.ceil(labels.length / maxLabel) : 1;
     points.forEach(function(p, i) {
         if (i % skipStep !== 0 && i !== points.length - 1) return;
-        svg += '<text class="chart-label" x="' + p.x + '" y="' + (padT + chartH + 16) + '" text-anchor="middle">' + esc(p.label.substring(5)) + '</text>';
+        var dateLabel = (p.label && p.label.length >= 10) ? p.label.substring(5) : (p.label || '');
+        svg += '<text class="chart-label" x="' + p.x + '" y="' + (padT + chartH + 18) + '" text-anchor="middle">' + esc(dateLabel) + '</text>';
     });
-    svg += '<text class="chart-label" x="' + padL + '" y="' + (h - 10) + '">日期（月-日） · 纵轴：' + valueName + '</text>';
+    // 底部图例说明
+    svg += '<text class="chart-axis-label" x="' + padL + '" y="' + (h - 8) + '">' + esc(valueName + ' · 按日期趋势') + '</text>';
     svg += '</svg>';
     return svg;
 }
 
-function buildBarChartSvg(labels, values, valueName) {
-    var w = 720, h = 320;
-    var padL = 60, padR = 20, padT = 30, padB = 80;
+function buildBarChartSvg(labels, values, metric) {
+    var w = 720, h = 360;
+    var padL = 60, padR = 20, padT = 30, padB = 110;
     var chartW = w - padL - padR;
     var chartH = h - padT - padB;
-    var maxV = Math.max.apply(null, values) || 1;
-    var niceMax = Math.ceil(maxV * 1.15);
-    var barW = Math.min(40, chartW / labels.length * 0.6);
-    var step = chartW / labels.length;
-    var svg = '<svg viewBox="0 0 ' + w + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">';
+    var maxV = Math.max.apply(null, values);
+    var niceMax = maxV > 0 ? Math.ceil(maxV * 1.15) : 1;
+    var barW = Math.min(40, chartW / Math.max(labels.length, 1) * 0.6);
+    var step = chartW / Math.max(labels.length, 1);
+    var valueName = CHART_METRICS[metric] || metric;
+    var svg = '<svg viewBox="0 0 ' + w + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" style="width:100%;height:100%;display:block;">';
     var yTicks = 4;
     for (var i = 0; i <= yTicks; i++) {
         var yv = niceMax * i / yTicks;
@@ -1411,13 +1502,16 @@ function buildBarChartSvg(labels, values, valueName) {
         var x = padL + i * step + (step - barW) / 2;
         var bh = (v / niceMax) * chartH;
         var y = padT + chartH - bh;
-        svg += '<rect class="chart-bar" x="' + x + '" y="' + y + '" width="' + barW + '" height="' + bh + '" rx="3"/>';
-        svg += '<text class="chart-value-label" x="' + (x + barW / 2) + '" y="' + (y - 4) + '">' + fmtTokenShort(v) + '</text>';
+        svg += '<rect class="chart-bar" x="' + x + '" y="' + y + '" width="' + barW + '" height="' + bh + '" rx="3">';
+        svg += '<title>' + esc(labels[i] || '') + '\n' + valueName + '：' + fmtToken(v) + '</title>';
+        svg += '</rect>';
+        svg += '<text class="chart-value-label" x="' + (x + barW / 2) + '" y="' + (y - 6) + '">' + fmtTokenShort(v) + '</text>';
         var lbl = labels[i] || '';
-        if (lbl.length > 12) lbl = lbl.substring(0, 11) + '…';
-        svg += '<text class="chart-label" x="' + (x + barW / 2) + '" y="' + (padT + chartH + 14) + '" text-anchor="end" transform="rotate(-30 ' + (x + barW / 2) + ' ' + (padT + chartH + 14) + ')">' + esc(lbl) + '</text>';
+        if (lbl.length > 14) lbl = lbl.substring(0, 13) + '…';
+        svg += '<text class="chart-label" x="' + (x + barW / 2) + '" y="' + (padT + chartH + 16) + '" text-anchor="end" transform="rotate(-30 ' + (x + barW / 2) + ' ' + (padT + chartH + 16) + ')">' + esc(lbl) + '</text>';
     });
-    svg += '<text class="chart-label" x="' + padL + '" y="' + (h - 8) + '">模型 · 纵轴：' + valueName + '</text>';
+    // 底部图例说明
+    svg += '<text class="chart-axis-label" x="' + padL + '" y="' + (h - 12) + '">' + esc(valueName + ' · 按模型 Top 10') + '</text>';
     svg += '</svg>';
     return svg;
 }
@@ -1432,7 +1526,8 @@ function resetUsage() {
     var $ = window._$;
     resetCustomSelect('usageSearchUserArea', 'usageSearchUserValue', 'usageSearchUser', '全部用户');
     $('#usageSearchModel').val('');
-    $('#usageSearchDate').val('');
+    $('#usageSearchStartDate').val('');
+    $('#usageSearchEndDate').val('');
     // 重置自定义下拉框显示文本
     $('#usageModelSelectValue').text('全部模型');
     usagePage = 1;
@@ -1442,13 +1537,15 @@ function resetUsageStats() {
     var $ = window._$;
     resetCustomSelect('statsSearchUserArea', 'statsSearchUserValue', 'statsSearchUser', '全部用户');
     $('#statsSearchModel').val('');
-    $('#statsSearchDate').val('');
+    $('#statsSearchStartDate').val('');
+    $('#statsSearchEndDate').val('');
     // 重置自定义下拉框显示文本
     $('#statsModelSelectValue').text('全部模型');
     // 重置layui渲染的select
     if (window._form) window._form.render('select');
     statsPage = 1;
     loadUsageStats();
+    loadUsageStatsCharts();
 }
 
 
