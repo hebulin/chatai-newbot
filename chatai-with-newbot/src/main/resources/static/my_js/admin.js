@@ -33,22 +33,27 @@ function fmtToken(n) {
 function getProviderIconHtml(pid, size) {
     size = size || 24;
     var icon = providerIconMap[pid];
-    if (icon) return '<img src="' + icon + '" style="width:' + size + 'px;height:' + size + 'px;object-fit:contain;border-radius:4px;flex-shrink:0;" onerror="this.style.display=\'none\'"/>';
-    return '<div style="width:' + size + 'px;height:' + size + 'px;border-radius:4px;background:#334155;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:' + Math.round(size*0.5) + 'px;flex-shrink:0;">' + (pid ? pid[0].toUpperCase() : '?') + '</div>';
+    if (icon) return '<span class="cso-icon" style="width:' + size + 'px;height:' + size + 'px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;"><img src="' + icon + '" class="cso-icon-img" style="width:' + size + 'px;height:' + size + 'px;object-fit:contain;border-radius:4px;flex-shrink:0;" onerror="this.style.display=\'none\'"/></span>';
+    return '<span class="cso-icon" style="width:' + size + 'px;height:' + size + 'px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;background:#334155;border-radius:4px;color:#94a3b8;font-size:' + Math.round(size*0.5) + 'px;">' + (pid ? pid[0].toUpperCase() : '?') + '</span>';
 }
 function getProviderSmallIconHtml(pid) { return getProviderIconHtml(pid, 20); }
 
-// 厂商/模型图标：预设厂商及其模型用预设 SVG 图标；自定义厂商及其模型用可设置的 emoji 图标，未设置则显示空占位
+// 厂商/模型图标：预设厂商及其模型用预设 SVG 图标；自定义厂商及其模型用可设置的 emoji 图标
+// 返回带 .cso-icon 类的固定尺寸 span，确保下拉选中所有选项布局一致
 function getEntityIconHtml(providerId, icon, size) {
     size = size || 20;
-    if (providerId && providerId !== '__custom__') {
-        return getProviderIconHtml(providerId, size);
+    var inner;
+    if (providerId && providerId !== '__custom__' && providerIconMap[providerId]) {
+        // 预置厂商：使用 SVG 图标
+        inner = '<img src="' + providerIconMap[providerId] + '" class="cso-icon-img" style="width:' + size + 'px;height:' + size + 'px;object-fit:contain;border-radius:4px;flex-shrink:0;" onerror="this.style.display=\'none\'"/>';
+    } else if (icon) {
+        // 自定义厂商/有 emoji 图标
+        inner = '<span style="font-size:' + size + 'px;line-height:1;display:inline-flex;align-items:center;justify-content:center;width:' + size + 'px;height:' + size + 'px;flex-shrink:0;">' + esc(icon) + '</span>';
+    } else {
+        // 无图标：占位（保持布局一致）
+        inner = '';
     }
-    var ic = icon || '';
-    if (ic) {
-        return '<span style="font-size:' + size + 'px;line-height:1;display:inline-flex;align-items:center;justify-content:center;width:' + size + 'px;height:' + size + 'px;flex-shrink:0;">' + esc(ic) + '</span>';
-    }
-    return '<span style="display:inline-block;width:' + size + 'px;height:' + size + 'px;flex-shrink:0;"></span>';
+    return '<span class="cso-icon" style="width:' + size + 'px;height:' + size + 'px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;">' + inner + '</span>';
 }
 function getModelProviderIconHtml(model, size) {
     return getEntityIconHtml(model && model.providerId, model && model.providerIcon, size);
@@ -56,21 +61,26 @@ function getModelProviderIconHtml(model, size) {
 
 function getUsageModelIconHtml(modelName) {
     if (!modelName) return '';
-    // 优先按 displayName 匹配当前已配置模型，使用其厂商图标（自定义模型也能显示设置的 emoji 图标）
+    // 1) 优先按 displayName 精确匹配
     var model = null;
     if (allModels && allModels.length) {
         model = allModels.find(function(m) { return (m.displayName || '') === modelName; });
+        // 2) 回退按 modelId 匹配（兼容某些场景下 log 存的是 modelId 而非 displayName）
+        if (!model) {
+            model = allModels.find(function(m) { return (m.modelId || '') === modelName; });
+        }
     }
     if (model) {
+        // 自定义厂商的 emoji 图标由 ModelConfig.providerIcon 提供（renameProvider 时已同步）
         return getEntityIconHtml(model.providerId, model.providerIcon, 18);
     }
-    // 回退1：按模型名推断预设厂商（显示预设 SVG 图标）
+    // 3) 仍找不到则按模型名关键字推断预设厂商（SVG 图标）
     var pid = inferProviderId(modelName);
     if (pid) {
         return getProviderIconHtml(pid, 18);
     }
-    // 回退2：无法识别（如已删除的自定义模型）：显示空占位，不再显示首字母色块
-    return '<span style="display:inline-block;width:18px;height:18px;flex-shrink:0;"></span>';
+    // 4) 实在没有：返回空占位（与正常选项结构一致，避免排版错位）
+    return '<span class="cso-icon cso-icon-empty" style="width:18px;height:18px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;"></span>';
 }
 
 function inferProviderId(modelName) {
@@ -183,28 +193,44 @@ function populateModelFilterOptions() {
     allModels.forEach(function(m) {
         var pid = m.providerId || '__custom__';
         var pname = m.providerName || pid;
-        if (!providerMap[pid]) providerMap[pid] = pname;
+        // 自定义厂商的图标来自 ModelConfig.providerIcon（renameProvider 时已同步）
+        var picon = m.providerIcon || '';
+        if (!providerMap[pid]) {
+            providerMap[pid] = { name: pname, icon: picon };
+        } else if (!providerMap[pid].icon && picon) {
+            // 同一厂商多个模型时取第一个非空图标
+            providerMap[pid].icon = picon;
+        }
     });
     // 填充厂商自定义下拉选
     var providerOptions = Object.keys(providerMap).sort().map(function(pid) {
-        return { value: pid, text: providerMap[pid] };
+        return { value: pid, text: providerMap[pid].name, icon: providerMap[pid].icon };
     });
     populateCustomSelectOptions('mfProviderArea', 'mfProviderDropdown', 'mfProviderValue', 'mfProvider', providerOptions, '全部厂商', applyModelFilter, function(value, text) {
-        // 厂商图标
-        return getEntityIconHtml(value, null, 18);
+        // 厂商图标（用预存的 opt.icon，避免再次推断）
+        var opt = providerOptions.find(function(o) { return o.value === value; });
+        return getEntityIconHtml(value, opt ? opt.icon : null, 18);
     });
 
-    // 填充模型ID自定义下拉选
+    // 填充模型ID自定义下拉选：value=modelId（保持筛选逻辑兼容），text=displayName（更友好）
     var modelOptions = [];
     var seen = {};
     allModels.forEach(function(m) {
         var mid = m.modelId || '';
         if (mid && !seen[mid]) {
             seen[mid] = true;
-            modelOptions.push({ value: mid, text: mid });
+            modelOptions.push({
+                value: mid,
+                text: m.displayName || mid,
+                icon: getEntityIconHtml(m.providerId, m.providerIcon, 18)
+            });
         }
     });
-    populateCustomSelectOptions('mfModelIdArea', 'mfModelIdDropdown', 'mfModelIdValue', 'mfModelId', modelOptions, '全部模型', applyModelFilter, getUsageModelIconHtml);
+    populateCustomSelectOptions('mfModelIdArea', 'mfModelIdDropdown', 'mfModelIdValue', 'mfModelId', modelOptions, '全部模型', applyModelFilter, function(value, text) {
+        // 通过 value 找回该模型的 icon（避免 iconFn 收到的是 displayName 时按 modelId 找不到）
+        var opt = modelOptions.find(function(o) { return o.value === value; });
+        return opt && opt.icon ? opt.icon : getUsageModelIconHtml(value);
+    });
 }
 
 function applyModelFilter() {
@@ -1557,10 +1583,23 @@ function renderModelFilterDropdown(areaId, hiddenId, modelNames) {
     var trigger = area.find('.custom-select-trigger');
     var dropdown = area.find('.custom-select-dropdown');
     dropdown.empty();
-    dropdown.append('<div class="custom-select-option" data-value="" onclick="selectModelFilter(\'' + areaId + '\',\'' + hiddenId + '\',\'\',\'全部模型\')">全部模型</div>');
+    // 统一结构：每个 option 都是 [cso-icon][cso-text]，避免布局错位
+    dropdown.append('<div class="custom-select-option" data-value="" onclick="selectModelFilter(\'' + areaId + '\',\'' + hiddenId + '\',\'\',\'全部模型\')"><span class="cso-icon cso-icon-empty" style="width:18px;height:18px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;"></span><span class="cso-text">全部模型</span></div>');
     modelNames.forEach(function(mn) {
         var iconHtml = getUsageModelIconHtml(mn);
-        dropdown.append('<div class="custom-select-option" data-value="' + esc(mn) + '" onclick="selectModelFilter(\'' + areaId + '\',\'' + hiddenId + '\',\'' + esc(mn).replace(/'/g, "\\'") + '\',\'' + esc(mn).replace(/'/g, "\\'") + '\')">' + iconHtml + '<span>' + esc(mn) + '</span></div>');
+        var iconSpan = iconHtml || '<span class="cso-icon cso-icon-empty" style="width:18px;height:18px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;"></span>';
+        // 显示名：优先展示 displayName（更友好），保留 mn（modelName 原始值）作为 data-value
+        var displayText = (function(){
+            if (allModels && allModels.length) {
+                var m = allModels.find(function(x){ return (x.displayName || '') === mn; });
+                if (m) return m.displayName;
+                m = allModels.find(function(x){ return (x.modelId || '') === mn; });
+                if (m) return m.displayName || m.modelId;
+            }
+            return mn;
+        })();
+        // 4 个参数：areaId, hiddenId, value(=mn 用于后端筛选), label(=displayText 用于显示)
+        dropdown.append('<div class="custom-select-option" data-value="' + esc(mn) + '" onclick="selectModelFilter(\'' + areaId + '\',\'' + hiddenId + '\',\'' + esc(mn).replace(/'/g, "\\'") + '\',\'' + esc(displayText).replace(/'/g, "\\'") + '\')">' + iconSpan + '<span class="cso-text">' + esc(displayText) + '</span></div>');
     });
 }
 
@@ -1648,14 +1687,24 @@ function populateCustomSelectOptions(areaId, dropdownId, valueId, hiddenId, opti
     // 清空现有选项
     dropdown.empty();
 
+    // 统一结构：每个 option 都用 [icon][text] 布局，避免无图标时结构不一致导致排版错位
+    function buildOption(value, text, rawIcon) {
+        var iconHtml = rawIcon;
+        if (!iconHtml && typeof iconFn === 'function') {
+            iconHtml = iconFn(value, text) || '';
+        }
+        // iconHtml 已经是带 .cso-icon 类的 span 字符串；空时补一个透明占位
+        var iconSpan = iconHtml || '<span class="cso-icon cso-icon-empty"></span>';
+        return '<div class="custom-select-option" data-value="' + esc(value) + '" onclick="selectCustomOption(\'' + areaId + '\',\'' + dropdownId + '\',\'' + valueId + '\',\'' + esc(value).replace(/'/g, '&#39;') + '\',\'' + esc(text).replace(/'/g, '&#39;') + '\',\'' + cbName + '\',event)">' + iconSpan + '<span class="cso-text">' + esc(text) + '</span></div>';
+    }
+
     // 添加默认选项
-    dropdown.append('<div class="custom-select-option" data-value="" onclick="selectCustomOption(\'' + areaId + '\',\'' + dropdownId + '\',\'' + valueId + '\',\'\',\'' + defaultText + '\',\'' + cbName + '\',event)">' + defaultText + '</div>');
+    dropdown.append(buildOption('', defaultText, ''));
 
     // 添加其他选项
     options.forEach(function(opt) {
-        var iconHtml = (typeof iconFn === 'function') ? iconFn(opt.value, opt.text) : '';
-        var inner = iconHtml ? iconHtml + '<span>' + esc(opt.text) + '</span>' : esc(opt.text);
-        dropdown.append('<div class="custom-select-option" data-value="' + esc(opt.value) + '" onclick="selectCustomOption(\'' + areaId + '\',\'' + dropdownId + '\',\'' + valueId + '\',\'' + esc(opt.value).replace(/'/g, '&#39;') + '\',\'' + esc(opt.text).replace(/'/g, '&#39;') + '\',\'' + cbName + '\',event)">' + inner + '</div>');
+        // 优先使用 opt.icon（避免 iconFn 内部因参数不足查不到图标）
+        dropdown.append(buildOption(opt.value, opt.text, opt.icon || ''));
     });
 
     // 同步初始化：根据当前隐藏 input 的值标记对应项为 selected

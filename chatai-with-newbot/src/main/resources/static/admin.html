@@ -58,7 +58,7 @@
                     </button>
                 </div>
                 <div class="card">
-                    <div class="stats-search-bar">
+                    <div class="stats-search-bar stats-search-bar--model">
                         <div class="search-field">
                             <label class="search-label">名称</label>
                             <input type="text" id="mfName" class="stats-search-input" placeholder="模糊查询，忽略大小写" oninput="applyModelFilter()" autocomplete="off" />
@@ -89,7 +89,7 @@
                             </div>
                             <input type="hidden" id="mfModelId" value="">
                         </div>
-                        <div class="search-field">
+                        <div class="search-field search-field--group-start">
                             <label class="search-label">思考</label>
                             <div class="custom-select-area" id="mfThinkingArea">
                                 <div class="custom-select-trigger" onclick="toggleCustomDropdown('mfThinkingArea', event)">
