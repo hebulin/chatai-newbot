@@ -64,6 +64,11 @@
                     <target>21</target>
                     <release>21</release>
                     <encoding>UTF-8</encoding>
+                    <!-- Spring Boot 3 / Spring Framework 6 不再从调试信息推断参数名，
+                         必须开启 -parameters，否则 @PathVariable/@RequestParam 未显式
+                         命名时会抛 IllegalArgumentException（后台编辑/统计等接口报500）。
+                         spring-boot-starter-parent 默认开启此项，本项目未继承父 POM，需手动开启。 -->
+                    <parameters>true</parameters>
                 </configuration>
             </plugin>
             <plugin>
