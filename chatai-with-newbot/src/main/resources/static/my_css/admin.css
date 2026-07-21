@@ -40,6 +40,8 @@
     --chart-3: #fbbc05;
     --chart-4: #0043ad;
     --chart-5: #34a853;
+    --row-hover: #20242c;
+    --scroll-shadow: rgba(0, 0, 0, 0.42);
 }
 
 [data-theme="light"] {
@@ -67,6 +69,8 @@
     --input-border: #e2e3e4;
     --shadow-card: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
     --shadow-elevated: 0 4px 6px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04);
+    --row-hover: #f2f6fd;
+    --scroll-shadow: rgba(0, 0, 0, 0.08);
 }
 
 * { margin:0; padding:0; box-sizing:border-box; }
@@ -137,7 +141,7 @@ body::before {
     align-items: center;
     justify-content: space-between;
     padding: 0 32px;
-    height: 64px;
+    height: 60px;
     background: var(--bg-2);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
@@ -149,24 +153,50 @@ body::before {
 .nav-brand {
     display: flex;
     align-items: center;
-    gap: 14px;
-    color: var(--ink);
-    font-family: var(--sans);
-    font-size: 18px;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-    position: relative;
-    padding-left: 0;
+    gap: 12px;
+    min-width: 0;
 }
 .nav-brand::before {
     content: none;
 }
-.nav-brand svg { color: var(--primary); }
-.nav-actions { display: flex; align-items: center; gap: 12px; }
+.nav-brand-icon {
+    width: 34px; height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--primary);
+    background: var(--paper-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    flex-shrink: 0;
+}
+.nav-brand-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.15;
+    min-width: 0;
+}
+.nav-brand-name {
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 16px;
+    color: var(--ink);
+    letter-spacing: -0.01em;
+}
+.nav-brand-text .nav-brand-sub {
+    font-family: var(--mono);
+    font-weight: 400;
+    font-size: 10px;
+    color: var(--ink-3);
+    letter-spacing: 0.06em;
+    margin-top: 2px;
+    white-space: nowrap;
+}
+.nav-actions { display: flex; align-items: center; gap: 10px; }
 .nav-btn {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 7px;
     padding: 8px 14px;
     border: 1px solid var(--border);
     color: var(--ink-2);
@@ -179,21 +209,46 @@ body::before {
     letter-spacing: 0;
     border-radius: var(--radius);
 }
-.nav-btn:hover { color: var(--primary); border-color: var(--primary); }
+.nav-btn:hover { color: var(--primary); border-color: var(--primary); background: var(--accent-soft); }
 
+/* Theme toggle - pill switch, 与主界面(index.html)统一 */
 .theme-toggle-btn {
-    background: transparent;
+    width: 48px; height: 26px;
+    background: var(--paper-2);
     border: 1px solid var(--border);
-    color: var(--ink-3);
-    width: 36px; height: 36px;
+    border-radius: 13px;
+    padding: 2px;
     cursor: pointer;
+    position: relative;
+    transition: all 0.3s var(--ease);
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+.theme-toggle-btn:hover { border-color: var(--primary); }
+.toggle-track { display: block; position: relative; width: 100%; height: 100%; }
+.toggle-knob {
+    position: absolute;
+    top: 0; left: 0;
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: var(--primary);
+    transition: all 0.4s var(--ease);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+}
+.toggle-knob::before {
+    content: '\263E';
+    position: absolute;
+    inset: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s;
-    border-radius: var(--radius);
+    font-size: 11px;
+    color: #fff;
+    line-height: 1;
 }
-.theme-toggle-btn:hover { color: var(--primary); border-color: var(--primary); }
+[data-theme="light"] .toggle-knob { left: calc(100% - 20px); background: var(--primary); }
+[data-theme="light"] .toggle-knob::before { content: '\2600'; color: #fff; }
 
 /* ============================================
    MAIN
@@ -207,13 +262,21 @@ body::before {
     position: relative;
     z-index: 2;
 }
+.admin-footer {
+    padding: 18px 16px 28px;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    color: var(--ink-4);
+}
 
 /* Tabs - clean underline style */
 .admin-tab { background: transparent; }
 .admin-tab .layui-tab-title {
     background: transparent;
     border: none;
-    border-bottom: none;
+    border-bottom: 1px solid var(--border);
     padding: 0;
     height: 48px;
     display: flex;
@@ -224,10 +287,15 @@ body::before {
     letter-spacing: 0;
     font-size: 14px;
     color: var(--ink-3);
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
 }
+.admin-tab .layui-tab-title::-webkit-scrollbar { display: none; }
 .admin-tab .layui-tab-title li {
     display: inline-flex;
     align-items: center;
+    flex: 0 0 auto;
     padding: 0 20px;
     height: 48px;
     line-height: 48px;
@@ -245,6 +313,7 @@ body::before {
     text-transform: none;
     letter-spacing: 0;
     font-weight: 500;
+    white-space: nowrap;
 }
 .admin-tab .layui-tab-title li:hover { color: var(--ink-2); }
 .admin-tab .layui-tab-title li.layui-this {
@@ -256,20 +325,41 @@ body::before {
 .admin-tab .layui-tab-title li::before {
     content: none;
 }
+/* 覆盖 layui brief 主题默认的绿色 :after 下划线，统一为品牌主色 */
+.admin-tab .layui-tab-title li.layui-this::after {
+    border-color: var(--primary) !important;
+}
+/* 隐藏 layui 在标签溢出时自动生成的折叠下拉条（移动端用横向滚动代替） */
+.admin-tab .layui-tab-bar { display: none !important; }
 .admin-tab .layui-tab-content { padding: 0; }
 .admin-tab .layui-tab-item { display: none; }
 .admin-tab .layui-tab-item.layui-show { display: block; animation: tabIn 0.3s var(--ease); }
 @keyframes tabIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
-/* Section header - clean sans-serif */
+/* Section header - 编辑式标题：mono 眉标 + 大标题 */
 .section-header {
     display: flex;
-    align-items: baseline;
+    align-items: flex-end;
     justify-content: space-between;
     margin-bottom: 24px;
     padding-bottom: 0;
     flex-wrap: wrap;
-    gap: 12px;
+    gap: 12px 16px;
+}
+.section-title {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+.section-eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--primary);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    white-space: nowrap;
 }
 .section-header h2 {
     font-family: var(--sans);
@@ -280,6 +370,7 @@ body::before {
     letter-spacing: -0.02em;
     position: relative;
     padding-left: 0;
+    line-height: 1.25;
 }
 .section-header h2::before {
     content: none;
@@ -290,6 +381,10 @@ body::before {
     font-family: var(--sans);
     text-transform: none;
     letter-spacing: 0;
+    max-width: 560px;
+    line-height: 1.6;
+    text-align: right;
+    padding-bottom: 2px;
 }
 
 /* Card - rounded, subtle shadow, no corner brackets */
@@ -608,7 +703,54 @@ body::before {
 .layui-table[lay-skin="nob"] tbody tr:hover td { background: transparent !important; }
 .layui-table[lay-skin="line"] th, .layui-table[lay-skin="line"] td { border-right: none !important; border-left: none !important; }
 
-.table-scroll-wrapper { overflow-x: auto; max-width: 100%; }
+.table-scroll-wrapper {
+    overflow-x: auto;
+    max-width: 100%;
+    position: relative;
+    -webkit-overflow-scrolling: touch;
+}
+.table-scroll-wrapper::-webkit-scrollbar { height: 6px; }
+.table-scroll-wrapper::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 3px; }
+/* 窄屏下表格保持可读的最小宽度，由外层容器横向滚动 */
+.table-scroll-wrapper .data-table { min-width: 760px; }
+
+/* ---- 首列吸附（横滑时名称列固定） ---- */
+.data-table th:first-child,
+.data-table td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    white-space: nowrap;
+    /* 注意：不可在此设 overflow:hidden，否则会裁掉右缘的 ::after 阴影 */
+}
+.data-table thead th:first-child { z-index: 2; }
+.data-table tbody td:first-child {
+    /* !important 必需：layui 的 .layui-table td{background:transparent !important} 否则会让冻结列透明、横滑内容透出 */
+    background: var(--paper) !important;
+    /* 冻结列右缘常亮发丝线，明确"固定区/滚动区"边界 */
+    box-shadow: inset -1px 0 0 var(--border);
+}
+.data-table tbody tr:hover td:first-child { background: var(--row-hover) !important; }
+/* 滚动后首列右缘的渐变阴影，提示后方还有内容 */
+.data-table th:first-child::after,
+.data-table td:first-child::after {
+    content: '';
+    position: absolute;
+    top: 0; bottom: 0;
+    right: -10px;
+    width: 10px;
+    pointer-events: none;
+    background: linear-gradient(90deg, var(--scroll-shadow), transparent);
+    opacity: 0;
+    transition: opacity 0.25s var(--ease);
+}
+.table-scroll-wrapper.is-scrolled th:first-child::after,
+.table-scroll-wrapper.is-scrolled td:first-child::after { opacity: 1; }
+/* 状态/能力列文本不竖排折行 */
+.data-table td .think-badge,
+.data-table td .status-badge { white-space: nowrap; }
+.data-table td:nth-child(4),
+.data-table td:nth-child(5) { white-space: nowrap; }
 .table-empty, .data-table .layui-table-cell .table-empty {
     text-align: center;
     color: var(--ink-3);
@@ -636,13 +778,16 @@ body::before {
 .provider-card {
     background: var(--paper);
     border: 1px solid var(--border);
-    padding: 22px;
+    padding: 18px 20px;
     cursor: pointer;
     transition: all 0.3s var(--ease);
     position: relative;
     overflow: hidden;
     border-radius: var(--radius);
     box-shadow: var(--shadow-card);
+    display: flex;
+    align-items: center;
+    gap: 14px;
 }
 .provider-card::before, .provider-card::after {
     content: none;
@@ -677,12 +822,18 @@ body::before {
 }
 .provider-card-name {
     font-family: var(--sans);
-    font-size: 16px;
+    font-size: 15px;
     color: var(--ink);
     margin: 0;
-    flex: 1;
     font-weight: 600;
     letter-spacing: -0.01em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.provider-card.active {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-card);
 }
 .provider-card-status {
     display: inline-flex;
@@ -1242,25 +1393,61 @@ body::before {
 }
 @media (max-width: 768px) {
     .admin-nav { padding: 0 16px; }
-    .admin-nav .nav-brand span { display: none; }
     .admin-main { padding: 20px 16px 40px; }
-    .section-header { flex-direction: column; align-items: flex-start; gap: 8px; }
+    .section-header { flex-direction: column; align-items: flex-start; gap: 10px; }
     .section-header h2 { font-size: 20px; }
-    .stats-search-bar { grid-template-columns: 1fr; gap: 12px; }
+    .section-tip { text-align: left; max-width: 100%; }
+    /* 筛选区：两列布局，名称输入独占一行 */
+    .stats-search-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
     .search-field { min-width: 0; }
+    .search-field:first-child { grid-column: 1 / -1; min-width: 0; }
+    .custom-select-area { min-width: 0; }
+    .custom-select-trigger { min-width: 0; }
+    /* iOS Safari：输入框字号 <16px 时聚焦会自动缩放页面 */
+    .stats-search-input, .search-field input, .admin-form-input { font-size: 16px; }
     .search-actions { width: 100%; justify-content: flex-end; }
     .stats-grid { grid-template-columns: repeat(2, 1fr); }
     .stats-grid-item-value { font-size: 22px; }
     .admin-tab .layui-tab-title { font-size: 13px; }
-    .admin-tab .layui-tab-title li { padding: 0 12px; }
+    .admin-tab .layui-tab-title li { padding: 0 14px; }
     .data-sub-tab-item { padding: 10px 14px; font-size: 13px; }
+    .nav-btn { padding: 7px 12px; font-size: 12px; }
+    /* 吸附首列限宽，避免长名称占满整行；超出部分省略 */
+    .data-table th:first-child, .data-table td:first-child { max-width: min(50vw, 240px); }
 }
 @media (max-width: 480px) {
-    .admin-main { padding: 16px 12px 32px; }
-    .section-header h2 { font-size: 18px; }
+    .admin-nav {
+        padding: 0 12px;
+        padding-left: calc(12px + env(safe-area-inset-left));
+        padding-right: calc(12px + env(safe-area-inset-right));
+        height: 56px;
+    }
+    .admin-main {
+        padding: 16px 12px 32px;
+        padding-left: calc(12px + env(safe-area-inset-left));
+        padding-right: calc(12px + env(safe-area-inset-right));
+    }
+    .nav-brand-text .nav-brand-sub { display: none; }
+    .nav-btn-label { display: none; }
+    .nav-btn { padding: 8px 10px; }
+    .section-header h2 { font-size: 19px; }
+    .section-eyebrow { font-size: 10px; }
+    .admin-tab .layui-tab-title { margin-bottom: 20px; }
+    .admin-tab .layui-tab-title li { padding: 0 12px; font-size: 13px; }
+    .stats-search-bar { gap: 10px; padding: 16px 14px 14px; }
+    /* 搜索/重置按钮平分宽度，便于拇指点按 */
+    .search-actions .primary-btn, .search-actions .cancel-btn { flex: 1; justify-content: center; margin-left: 0; }
     .stats-grid { grid-template-columns: 1fr; }
-    .admin-tab .layui-tab-title li { padding: 0 10px; font-size: 12px; }
-    .nav-btn { padding: 6px 10px; font-size: 12px; }
+    .data-sub-tab-nav { width: 100%; }
+    .data-sub-tab-item { flex: 1; text-align: center; padding: 10px 8px; }
+    .provider-grid { grid-template-columns: 1fr; }
+    .provider-card { padding: 16px; }
+    .stats-chart-canvas { min-height: 280px; }
+    .stats-mini-tab-item { padding: 6px 10px; font-size: 12px; }
+    /* 弹窗内表单：标签不左浮动，占整行 */
+    .layui-form-label { float: none !important; width: auto !important; padding: 0 0 6px !important; }
+    .layui-layer-btn { text-align: center !important; }
+    .layui-layer-btn a { margin: 0 4px !important; }
 }
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
@@ -1385,11 +1572,12 @@ body::before {
     gap: 4px;
 }
 .provider-card-count {
-    font-size: 12px;
+    font-size: 11px;
     color: var(--ink-3);
-    font-family: var(--sans);
+    font-family: var(--mono);
     text-transform: none;
-    letter-spacing: 0;
+    letter-spacing: 0.02em;
+    margin-top: 3px;
 }
 .provider-card-action {
     display: flex;
@@ -1620,6 +1808,12 @@ body::before {
     padding: 2px 8px;
     border-radius: var(--radius-xs);
     border: 1px solid var(--border);
+    display: inline-block;
+    white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: middle;
 }
 
 /* Model checkbox group (in quick add & permissions) */
