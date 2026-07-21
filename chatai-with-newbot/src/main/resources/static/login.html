@@ -111,7 +111,6 @@
 
                     <div class="form-row">
                         <label class="check-rail" id="rememberMeRail">
-                            <input type="checkbox" id="rememberMe" autocomplete="off" tabindex="-1">
                             <span class="check-box"><span class="check-tick"></span></span>
                             <span class="check-label">记住我 · REMEMBER</span>
                         </label>
@@ -211,12 +210,18 @@
         });
     })();
 
-    // 复选框交互
+    // 复选框交互：用 label.check-rail 替代原生 input；defineProperty 让 rail.checked 兼容旧调用
     (function(){
-        document.querySelectorAll('.check-rail input').forEach(function(cb){
-            cb.addEventListener('change', function(){
-                cb.parentElement.classList.toggle('on', cb.checked);
+        document.querySelectorAll('.check-rail').forEach(function(rail){
+            var checked = false;
+            Object.defineProperty(rail, 'checked', {
+                get: function(){ return checked; },
+                set: function(v){ checked = !!v; rail.classList.toggle('on', checked); }
             });
+            rail.setAttribute('role', 'checkbox');
+            rail.setAttribute('tabindex', '0');
+            rail.addEventListener('click', function(e){ e.preventDefault(); rail.checked = !rail.checked; });
+            rail.addEventListener('keydown', function(e){ if (e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); rail.checked = !rail.checked; } });
         });
     })();
 
