@@ -99,7 +99,7 @@ input, button, textarea, select { font: inherit; color: inherit; background: non
 .eyebrow, .sb-eyebrow, .meta-tag, .input-footer, .foot-stat-lbl,
 .brand-sub, .nc-label, .nc-shortcut, .field-name, .field-num,
 .user-menu-item, .user-info, .chat-search-input::placeholder,
-.model-select-value, .model-group-header, .model-item,
+.model-select-value, .cascader-col-empty,
 .msg-time, .msg-time-top, .msg-footer, .msg-token-info, .msg-model-name,
 .thinking-header, .code-header, .ai-img-btn, .ai-vid-btn, .scroll-nav-btn,
 .icon-btn, .theme-toggle-btn, .new-chat-btn {
@@ -987,98 +987,154 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
 .think-icon-btn.active { background: var(--primary); color: #ffffff; border-color: var(--primary); }
 .think-icon-btn.active:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
 
-/* Model select */
+/* Model select — 无外边框级联选择器 */
 .model-select-area { position: relative; margin-left: auto; }
 .model-select-trigger {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 5px 10px;
+    padding: 5px 8px;
     background: transparent;
-    border: 1px solid var(--border);
+    border: none; /* 去掉外边框 */
     border-radius: var(--radius);
     cursor: pointer;
-    transition: all 0.2s;
+    transition: color 0.2s, background 0.2s;
     font-size: 10px;
     color: var(--fg-2);
     flex-shrink: 0;
     font-family: var(--mono);
     text-transform: none;
     letter-spacing: 0.04em;
+    max-width: 100%;
+    text-align: left;
+    line-height: 1.35;
 }
-.model-select-trigger:hover { border-color: var(--primary); color: var(--fg); }
-.model-select-trigger.active { border-color: var(--primary); color: var(--fg); background: var(--primary-soft); }
+.model-select-trigger:hover { color: var(--fg); background: var(--primary-soft); }
+.model-select-trigger.active { color: var(--fg); background: var(--primary-soft); }
 .model-select-value {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    white-space: nowrap;
-    max-width: 140px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    display: inline;
+    /* 不截断长选项：长文本在分隔符或空格处自然换行 */
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
     text-transform: none;
     letter-spacing: 0;
     font-family: var(--sans);
     font-size: 12px;
 }
+.model-select-value .msv-name { font-weight: 500; color: var(--fg); }
+.model-select-value .msv-provider { color: var(--fg-2); }
+.model-select-value .msv-sep {
+    color: var(--fg-4);
+    font-weight: 300;
+    user-select: none;
+    padding: 0 4px;
+}
 .model-select-icon { width: 14px; height: 14px; border-radius: 50%; object-fit: contain; flex-shrink: 0; }
 .model-select-arrow { transition: transform 0.2s; flex-shrink: 0; }
 .model-select-trigger.active .model-select-arrow { transform: rotate(180deg); }
+
+/* 级联下拉容器（无外边框，仅阴影做层次） */
 .model-select-dropdown {
     display: none;
     position: absolute;
     bottom: calc(100% + 6px);
     left: auto; right: 0;
     background: var(--surface);
-    border: 1px solid var(--border);
+    border: none; /* 去掉下拉框自身外边框 */
     box-shadow: var(--shadow-lg);
-    max-height: 400px;
-    overflow-y: auto;
     z-index: 1000;
-    min-width: 240px;
     border-radius: var(--radius);
+    overflow: hidden;
 }
-.model-select-dropdown.active { display: block; }
+.model-select-dropdown.active { display: flex; }
 .model-select-dropdown.dropup { top: auto; bottom: 100%; }
-.model-select-dropdown::-webkit-scrollbar { width: 4px; }
-.model-select-dropdown::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-.model-group-header {
+.model-cascader {
     display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    font-size: 10px;
-    color: var(--primary);
-    border-bottom: 1px solid var(--border);
-    position: sticky;
-    top: 0;
-    z-index: 1;
+    max-height: 520px; /* 给两列内容留足 12 行上限的空间 */
+    min-width: 200px;
+}
+.model-cascader.has-second { min-width: 420px; }
+.cascader-col {
+    display: flex;
+    flex-direction: column;
+    min-width: 200px;
+    max-width: 320px;
+    min-height: 200px; /* 5 行最小高度，避免选项少时下拉过窄 */
+    max-height: 500px; /* 12 行上限，超过时组内滚动 */
+    overflow-y: auto;
     background: var(--surface);
+}
+.cascader-col + .cascader-col {
+    border-left: 1px solid var(--border);
+}
+/* 第二列：所有厂商的模型组预渲染并绝对定位堆叠，
+   通过 visibility 切换显示，避免切换时重排造成闪烁 */
+.cascader-col-models {
+    position: relative;
+    overflow: hidden; /* 防止绝对定位的子元素溢出 */
+}
+.cascader-models-group {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    visibility: hidden;
+    pointer-events: none;
+}
+.cascader-models-group.is-active {
+    visibility: visible;
+    pointer-events: auto;
+}
+.cascader-col::-webkit-scrollbar { width: 4px; }
+.cascader-col::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.cascader-col-empty {
+    padding: 24px 14px;
+    font-size: 11px;
+    color: var(--fg-4);
+    text-align: center;
     font-family: var(--mono);
-    text-transform: none;
     letter-spacing: 0.04em;
 }
-.model-group-icon { width: 16px; height: 16px; border-radius: 50%; object-fit: contain; }
-.model-group-emoji { font-size: 13px; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; }
-.model-item {
+.cascader-item {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 9px 12px;
+    padding: 9px 14px;
     cursor: pointer;
-    transition: all 0.15s;
-    font-size: 12px;
+    transition: background 0.12s, color 0.12s;
+    font-size: 12.5px;
     color: var(--fg-2);
-    text-transform: none;
-    letter-spacing: 0;
     font-family: var(--sans);
-    border-left: none;
+    border-left: 2px solid transparent;
+    /* 关键：长文本不被截断，允许换行 */
+    white-space: normal;
+    word-break: break-word;
+    line-height: 1.4;
 }
-.model-item:hover { background: var(--primary-soft); color: var(--fg); }
-.model-item.selected { background: var(--primary-soft); color: var(--primary); }
-.model-item-icon { width: 18px; height: 18px; border-radius: 50%; object-fit: contain; flex-shrink: 0; }
-.model-item-emoji { font-size: 13px; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; flex-shrink: 0; }
-.model-item-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cascader-item:hover,
+.cascader-item.is-active { background: var(--primary-soft); color: var(--fg); border-left-color: var(--primary); }
+.cascader-item.is-selected { color: var(--primary); font-weight: 500; }
+.cascader-item.is-selected .cascader-check { opacity: 1; }
+.cascader-item-icon { width: 18px; height: 18px; border-radius: 50%; object-fit: contain; flex-shrink: 0; }
+.cascader-item-emoji {
+    font-size: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px; height: 18px;
+    flex-shrink: 0;
+}
+.cascader-item-name {
+    flex: 1;
+    min-width: 0;
+    /* 不截断：允许自然换行 */
+    white-space: normal;
+    word-break: break-word;
+}
+.cascader-item-arrow { color: var(--fg-4); flex-shrink: 0; }
+.cascader-check { color: var(--primary); opacity: 0; flex-shrink: 0; }
 
 /* Send button */
 .send-btn {

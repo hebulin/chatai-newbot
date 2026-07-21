@@ -298,66 +298,208 @@ function inferProviderId(model) {
     return '';
 }
 
-// ===== 自定义模型选择下拉框 =====
+// ===== 自定义模型选择下拉框（级联选择器）=====
+// 全局缓存：当前所有模型按厂商分组的结果，避免每次重渲染都重新计算
+var modelGroupedCache = null; // { groups: [{key, name, providerId, providerIcon, models:[...]}], order:[...] }
+
+// 触发器上的 icon HTML（与下拉列中复用同一函数）
+function buildProviderIconHtml(providerId, providerIcon) {
+    var iconPath = providerIconMap[providerId];
+    if (iconPath) {
+        return '<img src="' + iconPath + '" class="cascader-item-icon" />';
+    }
+    if (providerIcon) {
+        return '<span class="cascader-item-emoji">' + escapeHtml(providerIcon) + '</span>';
+    }
+    return '';
+}
+
+// 把 modelsData 按厂商分组并缓存到 modelGroupedCache
+function buildModelGroups(modelsData) {
+    var groups = {};
+    var order = [];
+    modelsData.forEach(function(m) {
+        var key = m.providerName || m.providerId || 'custom';
+        if (!groups[key]) {
+            groups[key] = {
+                key: key,
+                name: key,
+                providerId: m.providerId || inferProviderId(m),
+                providerIcon: m.providerIcon || '',
+                models: []
+            };
+            order.push(key);
+        }
+        groups[key].models.push(m);
+    });
+    // 同一组内，providerIcon 取第一个非空的（个别模型可能为空）
+    order.forEach(function(k) {
+        var g = groups[k];
+        if (!g.providerIcon) {
+            for (var i = 0; i < g.models.length; i++) {
+                if (g.models[i].providerIcon) { g.providerIcon = g.models[i].providerIcon; break; }
+            }
+        }
+    });
+    modelGroupedCache = { groups: groups, order: order };
+    return modelGroupedCache;
+}
+
+// 渲染级联容器：所有厂商的模型组一次性预渲染，
+// hover 切换时只切 is-active（visibility），不再重排 DOM，避免闪烁
 function renderModelSelector(modelsData) {
     var dropdown = document.getElementById('modelSelectDropdown');
     if (!dropdown) return;
     dropdown.innerHTML = '';
 
-    // 按厂商分组
-    var groups = {};
-    var groupOrder = [];
-    modelsData.forEach(function(m) {
-        var key = m.providerName || m.providerId || 'custom';
-        if (!groups[key]) {
-            groups[key] = { name: key, providerId: m.providerId || inferProviderId(m), models: [] };
-            groupOrder.push(key);
-        }
-        groups[key].models.push(m);
-    });
+    var cache = buildModelGroups(modelsData);
+    if (!cache.order.length) return;
 
-    groupOrder.forEach(function(key) {
-        var group = groups[key];
-        // 厂商分组标题
-        var groupHeader = document.createElement('div');
-        groupHeader.className = 'model-group-header';
-        var iconPath = providerIconMap[group.providerId];
-        var iconHtml = '';
-        if (iconPath) {
-            iconHtml = '<img src="' + iconPath + '" class="model-group-icon" />';
-        } else {
-            // 没有 SVG 图标时，使用后端 ModelConfig.providerIcon（emoji）
-            var emojiIcon = group.models[0] && group.models[0].providerIcon;
-            if (emojiIcon) {
-                iconHtml = '<span class="model-group-emoji" style="font-size:14px;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;">' + escapeHtml(emojiIcon) + '</span>';
-            }
-        }
-        groupHeader.innerHTML = iconHtml + '<span>' + escapeHtml(group.name) + '</span>';
-        dropdown.appendChild(groupHeader);
+    // 当前选中模型对应的厂商 key（用于默认激活第二列）
+    var currentModel = findModelById(currentModelId);
+    var activeProviderKey = (currentModel && (currentModel.providerName || currentModel.providerId)) || cache.order[0];
 
-        // 模型列表
-        group.models.forEach(function(m) {
-            var item = document.createElement('div');
-            item.className = 'model-item' + (m.id === currentModelId ? ' selected' : '');
-            item.setAttribute('data-model-id', m.id);
-            item.setAttribute('data-provider-id', m.providerId || inferProviderId(m));
-            item.setAttribute('data-supports-thinking', m.supportsThinking ? 'true' : 'false');
-            var pid = m.providerId || inferProviderId(m);
-            var itemIconPath = providerIconMap[pid];
-            var itemIconHtml = '';
-            if (itemIconPath) {
-                itemIconHtml = '<img src="' + itemIconPath + '" class="model-item-icon" />';
-            } else if (m.providerIcon) {
-                // 没有 SVG 图标时，使用 model.providerIcon（emoji），与厂商分组标题一致
-                itemIconHtml = '<span class="model-item-emoji" style="font-size:13px;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;flex-shrink:0;">' + escapeHtml(m.providerIcon) + '</span>';
-            }
-            item.innerHTML = itemIconHtml + '<span class="model-item-name">' + escapeHtml(m.displayName) + '</span>';
-            item.onclick = function() {
-                selectModel(m);
-            };
-            dropdown.appendChild(item);
+    // 两列容器
+    var cascader = document.createElement('div');
+    cascader.className = 'model-cascader';
+
+    var col1 = document.createElement('div');
+    col1.className = 'cascader-col cascader-col-providers';
+    col1.setAttribute('data-col', 'providers');
+
+    var col2 = document.createElement('div');
+    col2.className = 'cascader-col cascader-col-models';
+    col2.setAttribute('data-col', 'models');
+
+    cascader.appendChild(col1);
+    cascader.appendChild(col2);
+    dropdown.appendChild(cascader);
+
+    // 渲染第一列：厂商列表
+    cache.order.forEach(function(key) {
+        var g = cache.groups[key];
+        var item = document.createElement('div');
+        item.className = 'cascader-item cascader-provider' + (key === activeProviderKey ? ' is-active' : '');
+        item.setAttribute('data-provider-key', key);
+        item.innerHTML =
+            buildProviderIconHtml(g.providerId, g.providerIcon) +
+            '<span class="cascader-item-name">' + escapeHtml(g.name) + '</span>' +
+            '<svg class="cascader-item-arrow" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="9 18 15 12 9 6"/></svg>';
+        // hover 切换 is-active（只切类，不再重渲染第二列）
+        item.addEventListener('mouseenter', function() {
+            setActiveProvider(key);
         });
+        // 移动端 fallback：点击厂商也激活
+        item.addEventListener('click', function(e) {
+            e.stopPropagation();
+            setActiveProvider(key);
+        });
+        col1.appendChild(item);
     });
+
+    // 预渲染所有厂商的模型组（一次性渲染，hover 时只切 visibility）
+    cache.order.forEach(function(key) {
+        var g = cache.groups[key];
+        var group = document.createElement('div');
+        group.className = 'cascader-models-group' + (key === activeProviderKey ? ' is-active' : '');
+        group.setAttribute('data-provider-key', key);
+        if (g.models && g.models.length) {
+            g.models.forEach(function(m) {
+                var item = document.createElement('div');
+                item.className = 'cascader-item cascader-model' + (m.id === currentModelId ? ' is-selected' : '');
+                item.setAttribute('data-model-id', m.id);
+                item.setAttribute('data-supports-thinking', m.supportsThinking ? 'true' : 'false');
+                var iconHtml = '';
+                if (m.providerIcon) {
+                    iconHtml = '<span class="cascader-item-emoji">' + escapeHtml(m.providerIcon) + '</span>';
+                } else if (providerIconMap[m.providerId || g.providerId]) {
+                    iconHtml = '<img src="' + providerIconMap[m.providerId || g.providerId] + '" class="cascader-item-icon" />';
+                }
+                item.innerHTML =
+                    iconHtml +
+                    '<span class="cascader-item-name">' + escapeHtml(m.displayName) + '</span>' +
+                    '<svg class="cascader-check" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
+                item.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    selectModel(m);
+                });
+                group.appendChild(item);
+            });
+        } else {
+            var empty = document.createElement('div');
+            empty.className = 'cascader-col-empty';
+            empty.textContent = '该厂商下暂无模型';
+            group.appendChild(empty);
+        }
+        col2.appendChild(group);
+    });
+
+    if (cache.order.length > 0) {
+        dropdown.classList.add('has-second');
+        cascader.classList.add('has-second');
+    }
+
+    // 在浏览器布局完成后，测量所有模型组的最大自然高度，并锁定第二列高度
+    // 这样切换厂商时下拉面板高度不会变化，彻底避免闪烁
+    requestAnimationFrame(function() {
+        var groups = col2.querySelectorAll('.cascader-models-group');
+        // 一次性临时把全部组改为 static（参与文档流）以测量真实高度
+        var saved = [];
+        Array.prototype.forEach.call(groups, function(g) {
+            saved.push({ pos: g.style.position, vis: g.style.visibility });
+            g.style.position = 'static';
+            g.style.visibility = 'hidden';
+        });
+        var maxH = 0;
+        Array.prototype.forEach.call(groups, function(g) {
+            if (g.offsetHeight > maxH) maxH = g.offsetHeight;
+        });
+        // 恢复原始内联样式（CSS 类的 visibility/position 重新生效）
+        Array.prototype.forEach.call(groups, function(g, i) {
+            g.style.position = saved[i].pos;
+            g.style.visibility = saved[i].vis;
+        });
+
+        // 第二列高度策略：
+        //   - 至少 5 行（200px），避免父节点少时下拉过窄
+        //   - 按最高模型组自然高度扩展
+        //   - 上限 500px（12 行），超过时组内滚动而不是无限拉高
+        // CSS 的 min-height/max-height 也会兜底，这里做一次 JS 钳制保证稳定
+        var col2MinH = 200;
+        var col2MaxH = 500;
+        var col2H = maxH > 0 ? maxH : col2MinH;
+        if (col2H < col2MinH) col2H = col2MinH;
+        if (col2H > col2MaxH) col2H = col2MaxH;
+        col2.style.height = col2H + 'px';
+    });
+}
+
+// 切换第一列 active 状态 + 切换第二列对应组的 visibility
+// 不再重渲染 DOM，零布局抖动
+function setActiveProvider(providerKey, opts) {
+    var dropdown = document.getElementById('modelSelectDropdown');
+    if (!dropdown) return;
+    var col1 = dropdown.querySelector('.cascader-col-providers');
+    var col2 = dropdown.querySelector('.cascader-col-models');
+    if (!col1 || !col2) return;
+    Array.prototype.forEach.call(col1.querySelectorAll('.cascader-provider'), function(el) {
+        if (el.getAttribute('data-provider-key') === providerKey) el.classList.add('is-active');
+        else el.classList.remove('is-active');
+    });
+    Array.prototype.forEach.call(col2.querySelectorAll('.cascader-models-group'), function(el) {
+        if (el.getAttribute('data-provider-key') === providerKey) el.classList.add('is-active');
+        else el.classList.remove('is-active');
+    });
+    // 需要滚动到当前选中项时（仅打开下拉时使用，hover 切换不滚）
+    if (opts && opts.scroll) {
+        var activeGroup = col2.querySelector('.cascader-models-group.is-active');
+        if (activeGroup) {
+            var selected = activeGroup.querySelector('.cascader-model.is-selected');
+            if (selected && selected.scrollIntoView) {
+                try { selected.scrollIntoView({ block: 'nearest' }); } catch(e) {}
+            }
+        }
+    }
 }
 
 function selectModel(model) {
@@ -369,29 +511,37 @@ function selectModel(model) {
     updateModelSelectDisplay(model);
     updateThinkToggle(model, prevModelId !== model.id);
     closeModelDropdown();
-    // 更新选中态
-    var items = document.querySelectorAll('.model-item');
-    items.forEach(function(item) {
-        if (item.getAttribute('data-model-id') === model.id) {
-            item.classList.add('selected');
-        } else {
-            item.classList.remove('selected');
-        }
-    });
+    // 更新第二列的选中态（不重渲染整个结构，仅切 class）
+    var dropdown = document.getElementById('modelSelectDropdown');
+    if (dropdown) {
+        Array.prototype.forEach.call(dropdown.querySelectorAll('.cascader-model'), function(item) {
+            if (item.getAttribute('data-model-id') === model.id) item.classList.add('is-selected');
+            else item.classList.remove('is-selected');
+        });
+    }
 }
 
+// 触发器显示：厂商 / 模型（不再截断）
 function updateModelSelectDisplay(model) {
     var valueEl = document.getElementById('modelSelectValue');
     if (!valueEl) return;
+    var providerName = model.providerName || model.providerId || '';
     var pid = model.providerId || inferProviderId(model);
-    var iconPath = providerIconMap[pid];
     var iconHtml = '';
-    if (iconPath) {
-        iconHtml = '<img src="' + iconPath + '" class="model-select-icon" />';
+    if (providerIconMap[pid]) {
+        iconHtml = '<img src="' + providerIconMap[pid] + '" class="model-select-icon" />';
     } else if (model.providerIcon) {
         iconHtml = '<span class="model-select-emoji" style="font-size:14px;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;">' + escapeHtml(model.providerIcon) + '</span>';
     }
-    valueEl.innerHTML = iconHtml + '<span>' + escapeHtml(model.displayName) + '</span>';
+    var providerSpan = providerName
+        ? '<span class="msv-provider">' + escapeHtml(providerName) + '</span>'
+        : '';
+    var sep = providerName ? '<span class="msv-sep">/</span>' : '';
+    valueEl.innerHTML =
+        iconHtml +
+        providerSpan +
+        sep +
+        '<span class="msv-name">' + escapeHtml(model.displayName) + '</span>';
 }
 
 function toggleModelDropdown() {
@@ -414,16 +564,18 @@ function openModelDropdown() {
             var dropdownHeight = dropdown.scrollHeight;
             var spaceBelow = window.innerHeight - rect.bottom;
             var spaceAbove = rect.top;
-            // 如果下方空间不足且上方空间更大，则向上展开
             if (spaceBelow < dropdownHeight + 10 && spaceAbove > spaceBelow) {
                 dropdown.classList.add('dropup');
             } else {
                 dropdown.classList.remove('dropup');
             }
-            // 自动滚动到当前选中项
-            var selectedItem = dropdown.querySelector('.model-item.selected');
-            if (selectedItem) {
-                selectedItem.scrollIntoView({ block: 'nearest' });
+            // 自动定位到当前选中项：找到当前模型所在的厂商，激活其列
+            var currentModel = findModelById(currentModelId);
+            if (currentModel && modelGroupedCache) {
+                var key = currentModel.providerName || currentModel.providerId;
+                if (modelGroupedCache.groups[key]) {
+                    setActiveProvider(key, { scroll: true });
+                }
             }
         }, 0);
     }
