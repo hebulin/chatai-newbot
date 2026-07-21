@@ -27,11 +27,9 @@ function loadRememberedUsername() {
         var flag = safeStorageGet(REMEMBERED_FLAG_KEY);
         if (flag === '1') {
             var username = safeStorageGet(REMEMBERED_USER_KEY);
-            var cb = document.getElementById('rememberMe');
             var rail = document.getElementById('rememberMeRail');
             var input = document.getElementById('login-username');
-            if (cb) cb.checked = true;
-            if (rail) rail.classList.add('on');
+            if (rail) rail.checked = true;
             if (input && username) input.value = username;
         }
     } catch(e) {}
@@ -107,8 +105,8 @@ layui.use(['form', 'layer', 'jquery'], function() {
         .then(function(data) {
             if (data.success) {
                 // 记住我：勾选则持久化用户名；未勾选则清除
-                var remember = document.getElementById('rememberMe');
-                if (remember && remember.checked) {
+                var rail = document.getElementById('rememberMeRail');
+                if (rail && rail.checked) {
                     safeStorageSet(REMEMBERED_FLAG_KEY, '1');
                     safeStorageSet(REMEMBERED_USER_KEY, data.username || data.field.username);
                 } else {
