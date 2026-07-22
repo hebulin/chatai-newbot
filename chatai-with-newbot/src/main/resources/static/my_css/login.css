@@ -941,7 +941,12 @@ input::-ms-clear {
     line-height: 50px !important;
     border-radius: var(--radius-large) var(--radius-large) 0 0 !important;
 }
-.layui-layer-content { color: var(--foreground) !important; padding: 24px !important; }
+/* 仅覆盖文字颜色，不要全局覆盖 padding：
+   带图标的 layer.msg（如表单校验"请输入密码"提示）依赖 layui 默认的
+   .layui-layer-padding（18px 24px 18px 58px）为左侧绝对定位图标预留空间，
+   强制 padding: 24px 会把左侧 58px 压成 24px，导致图标与文案重叠。
+   与后台管理页 admin.css 的做法保持一致 */
+.layui-layer-content { color: var(--foreground) !important; }
 .layui-layer-btn {
     background: transparent !important;
     border-top: 1px solid var(--border) !important;
