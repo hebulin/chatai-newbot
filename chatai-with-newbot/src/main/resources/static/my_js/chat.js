@@ -624,9 +624,11 @@ function closeModelDropdown() {
 // 更新深度思考开关
 function updateThinkToggle(model, isModelChanged) {
     var thinkIconBtn = document.getElementById('thinkIconBtn');
+    var toolbarDivider = document.getElementById('toolbarDivider');
     if (!thinkIconBtn) return;
     if (model.supportsThinking) {
         thinkIconBtn.style.display = 'flex';
+        if (toolbarDivider) toolbarDivider.style.display = '';
         if (isModelChanged) {
             // 切换到新模型时，默认关闭深度思考
             isDeepThinking = false;
@@ -634,6 +636,7 @@ function updateThinkToggle(model, isModelChanged) {
         thinkIconBtn.classList.toggle('active', isDeepThinking);
     } else {
         thinkIconBtn.style.display = 'none';
+        if (toolbarDivider) toolbarDivider.style.display = 'none';
         isDeepThinking = false;
     }
 }
@@ -1934,6 +1937,38 @@ function handlePasteImage(e) {
             var base64 = event.target.result;
             if (!supportsMultimodal) {
                 // 不支持多模态：显示警告
+                showPasteWarning('当前模型不支持图像理解，请切换支持多模态的模型或删除图片');
+            }
+            pendingImages.push(base64);
+            renderImagePreview();
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
+// ===== 图片上传按钮（显式上传入口） =====
+function triggerImageUpload() {
+    var input = document.getElementById('imageFileInput');
+    if (input) {
+        input.value = ''; // 清空以便重复选择同一文件
+        input.click();
+    }
+}
+
+function handleImageUpload(input) {
+    var files = input.files;
+    if (!files || files.length === 0) return;
+    var supportsMultimodal = window._currentModelSupportsMultimodal;
+    Array.prototype.forEach.call(files, function(file) {
+        if (file.type.indexOf('image') === -1) return;
+        if (file.size > MAX_IMAGE_SIZE) {
+            showToast('图片超过5MB限制');
+            return;
+        }
+        var reader = new FileReader();
+        reader.onload = function(event) {
+            var base64 = event.target.result;
+            if (!supportsMultimodal) {
                 showPasteWarning('当前模型不支持图像理解，请切换支持多模态的模型或删除图片');
             }
             pendingImages.push(base64);

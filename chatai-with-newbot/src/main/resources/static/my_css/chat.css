@@ -989,6 +989,30 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
 .think-icon-btn.active { background: var(--primary); color: #ffffff; border-color: var(--primary); }
 .think-icon-btn.active:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
 
+/* Toolbar divider */
+.toolbar-divider {
+    width: 1px;
+    height: 16px;
+    background: var(--border);
+    flex-shrink: 0;
+}
+
+/* Upload image button */
+.upload-image-btn {
+    width: 28px; height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--fg-3);
+    flex-shrink: 0;
+    border-radius: var(--radius-sm);
+}
+.upload-image-btn:hover { border-color: var(--primary); color: var(--primary); }
+
 /* Model select — 无外边框级联选择器 */
 .model-select-area { position: relative; margin-left: auto; }
 .model-select-trigger {
