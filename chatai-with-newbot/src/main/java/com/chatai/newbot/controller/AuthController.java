@@ -1,7 +1,7 @@
 package com.chatai.newbot.controller;
 
 import com.chatai.newbot.model.User;
-import com.chatai.newbot.service.FileStorageService;
+import com.chatai.newbot.service.StorageManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
@@ -14,9 +14,9 @@ import java.util.Map;
 @RequestMapping("/api/auth")
 public class AuthController {
     private static final Logger log = LoggerFactory.getLogger(AuthController.class);
-    private final FileStorageService storageService;
+    private final StorageManager storageService;
 
-    public AuthController(FileStorageService storageService) {
+    public AuthController(StorageManager storageService) {
         this.storageService = storageService;
     }
 

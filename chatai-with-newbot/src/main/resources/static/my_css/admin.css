@@ -1862,3 +1862,59 @@ body::before {
 .layui-form-item { display: none !important; }
 .layui-input-block { display: none !important; }
 .layui-form-mid { display: none !important; }
+
+/* ============================================
+   系统设置 Tab
+   ============================================ */
+.settings-card {
+    padding: 24px;
+}
+.settings-section {
+    margin-bottom: 32px;
+}
+.settings-section-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--ink);
+    margin: 0 0 16px 0;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--line);
+}
+.settings-row {
+    display: flex;
+    gap: 32px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+}
+.settings-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.settings-label {
+    font-size: 12px;
+    color: var(--ink-2);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.settings-value {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--ink);
+}
+.settings-actions {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+}
+.settings-hint {
+    font-size: 13px;
+    color: var(--ink-2);
+    line-height: 1.8;
+    margin: 0;
+    padding: 12px 16px;
+    background: var(--paper-2);
+    border-radius: var(--radius-sm);
+    border-left: 3px solid var(--info);
+}

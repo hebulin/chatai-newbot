@@ -41,6 +41,7 @@
                 <li>模型管理</li>
                 <li>厂商管理</li>
                 <li>用户管理</li>
+                <li>系统设置</li>
             </ul>
             <div class="layui-tab-content">
                 <!-- 快速接入 -->
@@ -239,6 +240,44 @@
                             <thead><tr><th>用户名</th><th>角色</th><th>注册时间</th><th>最近登录</th><th>登录IP</th><th>浏览器</th><th>操作</th></tr></thead>
                             <tbody id="userTableBody"></tbody>
                         </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 系统设置 -->
+            <div class="layui-tab-item">
+                <div class="section-header">
+                    <div class="section-title">
+                        <span class="section-eyebrow">05 / SETTINGS · 设置</span>
+                        <h2>系统设置</h2>
+                    </div>
+                </div>
+                <div class="card settings-card">
+                    <div class="settings-section">
+                        <h3 class="settings-section-title">存储模式</h3>
+                        <div class="settings-row">
+                            <div class="settings-info">
+                                <span class="settings-label">当前模式</span>
+                                <span class="settings-value" id="currentStorageMode">加载中...</span>
+                            </div>
+                            <div class="settings-info">
+                                <span class="settings-label">数据库文件大小</span>
+                                <span class="settings-value" id="dbFileSize">-</span>
+                            </div>
+                        </div>
+                        <div class="settings-actions">
+                            <button class="primary-btn" id="sqliteToggleBtn" onclick="toggleStorageMode()">
+                                切换到 SQLite
+                            </button>
+                            <button class="cancel-btn" id="migrateBtn" onclick="migrateToSqlite()">
+                                一键迁移到 SQLite
+                            </button>
+                        </div>
+                        <p class="settings-hint">
+                            切换后新数据将写入 SQLite 数据库文件 (data/chatai.db)。<br>
+                            首次切换会自动迁移现有 JSON 数据。也可点击「一键迁移」手动将全部 JSON 数据写入 SQLite。<br>
+                            切换回 JSON 模式后，将读取 JSON 文件中的旧数据（迁移后新增的数据不会回写）。
+                        </p>
                     </div>
                 </div>
             </div>

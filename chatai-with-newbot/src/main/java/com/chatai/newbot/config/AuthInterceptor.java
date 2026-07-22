@@ -1,7 +1,7 @@
 package com.chatai.newbot.config;
 
 import com.chatai.newbot.model.User;
-import com.chatai.newbot.service.FileStorageService;
+import com.chatai.newbot.service.StorageManager;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
@@ -11,9 +11,9 @@ import jakarta.servlet.http.HttpServletResponse;
 @Component
 public class AuthInterceptor implements HandlerInterceptor {
 
-    private final FileStorageService storageService;
+    private final StorageManager storageService;
 
-    public AuthInterceptor(FileStorageService storageService) {
+    public AuthInterceptor(StorageManager storageService) {
         this.storageService = storageService;
     }
 
