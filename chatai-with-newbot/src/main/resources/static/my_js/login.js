@@ -208,6 +208,54 @@ document.addEventListener('focusin', function(e) {
     }, 320);
 });
 
+// ============================================
+// 卡片等高（仅 PC / 平板 >480px）：让介绍页与登录页卡片尺寸完全一致，
+// 切换时如同同一张卡片在更换内容。测量两面板的自然高度、取较大者写入 --card-h，
+// 较短的面板由 CSS 用 flex 居中其内容、补齐高度差，故无需写死魔法数值，
+// 且随视口自适应。手机为满屏布局，不参与等高
+// ============================================
+var cardHeightTimer = null;
+
+// 测量两卡片并写入统一高度；窄屏时清除变量、交还满屏布局
+function syncCardHeight() {
+    var root = document.documentElement;
+    // 仅 PC / 平板参与等高，手机满屏布局清除变量
+    if (!window.matchMedia('(min-width: 481px)').matches) {
+        root.style.removeProperty('--card-h');
+        return;
+    }
+    var b = document.querySelector('.brand-panel');
+    var f = document.querySelector('.form-panel');
+    if (!b || !f) return;
+    // 先清除变量，得到各自不受等高约束的"自然高度"
+    // （登录页此时 visibility:hidden，但仍保留布局，offsetHeight 可正常读取）
+    root.style.removeProperty('--card-h');
+    var h = Math.max(b.offsetHeight, f.offsetHeight);
+    if (h > 0) root.style.setProperty('--card-h', h + 'px');
+}
+
+// 防抖：旋转 / 拖拽窗口时避免逐帧测量
+function scheduleSyncCardHeight() {
+    if (cardHeightTimer) clearTimeout(cardHeightTimer);
+    cardHeightTimer = setTimeout(syncCardHeight, 150);
+}
+
+// 接线：首屏等 Web 字体加载完再量（否则标题高度不准），并兜底 DOM 就绪量一次；
+// 窗口尺寸变化、屏幕旋转时防抖重测
+(function initCardHeightSync() {
+    function first() { syncCardHeight(); }
+    if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(first);
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', first);
+    } else {
+        first();
+    }
+    window.addEventListener('resize', scheduleSyncCardHeight);
+    window.addEventListener('orientationchange', scheduleSyncCardHeight);
+})();
+
 layui.use(['form', 'layer', 'jquery'], function() {
     var form = layui.form;
     var layer = layui.layer;
