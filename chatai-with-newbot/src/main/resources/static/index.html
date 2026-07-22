@@ -20,6 +20,7 @@
     <!-- 自定义样式 -->
     <link rel="stylesheet" href="my_css/chat.css">
     <link rel="stylesheet" href="my_css/mermaid.css">
+    <link rel="stylesheet" href="my_css/usage-stats.css">
 </head>
 <body>
 <!-- 纸张纹理 -->
@@ -104,6 +105,10 @@
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                         <span>导出会话</span>
                     </div>
+                    <div class="user-menu-item" onclick="UsageStats.open()">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="3" y1="20" x2="21" y2="20"/></svg>
+                        <span>数据统计</span>
+                    </div>
                     <div class="user-menu-item" id="adminMenuItem" onclick="goAdmin()" style="display:none">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd"><path d="M12 8.4A3.6 3.6 0 1 0 12 15.6 3.6 3.6 0 1 0 12 8.4Z M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58Z"/></svg>
                         <span>后台管理</span>
@@ -181,6 +186,7 @@
 <!-- Mermaid 渲染模块（独立模块，DeepSeek 风格） -->
 <script src="my_js/mermaid-renderer.js"></script>
 <script src="my_js/chat.js"></script>
+<script src="my_js/usage-stats.js"></script>
 <script>
     // 启动入场：遮罩 + reveal
     (function(){
