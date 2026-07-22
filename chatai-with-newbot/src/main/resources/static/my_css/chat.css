@@ -1,4 +1,4 @@
-﻿/* ============================================
+/* ============================================
    ATELIER · Chat
    Google Material-style design system
    ============================================ */
@@ -1715,6 +1715,47 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
     .scroll-nav { right: 12px; bottom: 120px; }
     /* iOS Safari：输入框字号 <16px 时聚焦会自动缩放页面 */
     #userInput { font-size: 16px; }
+
+    /* === 移动端：模型级联选择器适配 === */
+    .model-select-dropdown {
+        position: fixed;
+        left: 12px;
+        right: 12px;
+        bottom: auto;
+        top: auto;
+        width: auto;
+        max-width: none;
+        border: 1px solid var(--border);
+        box-shadow: 0 8px 32px rgba(0,0,0,.18);
+    }
+    .model-select-dropdown.active {
+        display: flex;
+        /* JS 动态设置 bottom/top，紧贴触发按钮 */
+    }
+    .model-select-dropdown.dropup {
+        bottom: auto;
+    }
+    .model-cascader {
+        min-width: 0;
+        width: 100%;
+        max-height: 60vh;
+    }
+    .model-cascader.has-second { min-width: 0; }
+    .cascader-col {
+        min-width: 0;
+        max-width: none;
+        flex: 1;
+        min-height: 160px;
+        max-height: 55vh;
+    }
+    .cascader-item {
+        padding: 10px 10px;
+        font-size: 12px;
+        gap: 8px;
+    }
+    .cascader-item-name {
+        font-size: 12px;
+    }
 }
 
 @media (max-width: 480px) {

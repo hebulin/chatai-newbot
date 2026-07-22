@@ -441,7 +441,9 @@ function renderModelSelector(modelsData) {
 
     // 在浏览器布局完成后，测量所有模型组的最大自然高度，并锁定第二列高度
     // 这样切换厂商时下拉面板高度不会变化，彻底避免闪烁
+    // 移动端（≤768px）使用 CSS 弹性高度，不做 JS 锁定
     requestAnimationFrame(function() {
+        if (window.innerWidth <= 768) return;
         var groups = col2.querySelectorAll('.cascader-models-group');
         // 一次性临时把全部组改为 static（参与文档流）以测量真实高度
         var saved = [];
@@ -564,11 +566,30 @@ function openModelDropdown() {
             var dropdownHeight = dropdown.scrollHeight;
             var spaceBelow = window.innerHeight - rect.bottom;
             var spaceAbove = rect.top;
-            if (spaceBelow < dropdownHeight + 10 && spaceAbove > spaceBelow) {
-                dropdown.classList.add('dropup');
+
+            // 移动端：用 fixed 定位，动态计算位置紧贴触发按钮
+            if (window.innerWidth <= 768) {
+                if (spaceAbove >= dropdownHeight + 10 || spaceAbove > spaceBelow) {
+                    // 向上展开：浮窗底边紧贴触发按钮顶部
+                    dropdown.style.bottom = (window.innerHeight - rect.top + 6) + 'px';
+                    dropdown.style.top = 'auto';
+                    dropdown.classList.add('dropup');
+                } else {
+                    // 向下展开：浮窗顶边紧贴触发按钮底部
+                    dropdown.style.top = (rect.bottom + 6) + 'px';
+                    dropdown.style.bottom = 'auto';
+                    dropdown.classList.remove('dropup');
+                }
             } else {
-                dropdown.classList.remove('dropup');
+                dropdown.style.bottom = '';
+                dropdown.style.top = '';
+                if (spaceBelow < dropdownHeight + 10 && spaceAbove > spaceBelow) {
+                    dropdown.classList.add('dropup');
+                } else {
+                    dropdown.classList.remove('dropup');
+                }
             }
+
             // 自动定位到当前选中项：找到当前模型所在的厂商，激活其列
             var currentModel = findModelById(currentModelId);
             if (currentModel && modelGroupedCache) {
@@ -590,6 +611,9 @@ function closeModelDropdown() {
     if (dropdown) {
         dropdown.classList.remove('active');
         dropdown.classList.remove('dropup');
+        // 清除移动端动态定位的内联样式
+        dropdown.style.bottom = '';
+        dropdown.style.top = '';
         modelDropdownOpen = false;
     }
     if (trigger) {
