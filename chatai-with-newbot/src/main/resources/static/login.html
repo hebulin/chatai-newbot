@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Atelier · 智语</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -11,177 +11,209 @@
     <link rel="stylesheet" href="/my_css/login.css">
 </head>
 <body>
-    <!-- 纸张纹理层 -->
+    <!-- 纸张纹理层（保留开关，默认禁用） -->
     <div class="paper-grain" aria-hidden="true"></div>
+    <!-- 环境背景层：两团极淡的径向光晕缓慢漂移，给居中面板提供纵深 -->
+    <div class="ambient" aria-hidden="true"></div>
 
-    <!-- 左侧编辑式 brand 区域 -->
-    <aside class="brand-pane">
-        <div class="brand-mark">
-            <div class="mark-glyph">
-                <span class="mark-line mark-line-1"></span>
-                <span class="mark-line mark-line-2"></span>
-                <span class="mark-line mark-line-3"></span>
-            </div>
-            <div class="mark-meta">
-                <span class="mark-no">№ 001</span>
-                <span class="mark-sep">/</span>
-                <span class="mark-vol">VOL. II</span>
-            </div>
-        </div>
+    <!-- ============ 视图一 · 品牌介绍页 ============ -->
+    <section class="view view--brand" id="brandView" aria-label="品牌介绍">
+        <div class="view-inner brand-inner">
+            <article class="panel brand-panel">
+                <!-- 超大描边字母水印，纯装饰 -->
+                <span class="brand-watermark" aria-hidden="true">A</span>
 
-        <div class="brand-headline">
-            <span class="eyebrow">A WORKBENCH FOR</span>
-            <h1 class="display">
-                <span class="display-line">Conversations</span>
-                <span class="display-line display-italic">that <em>think</em></span>
-                <span class="display-line">alongside you.</span>
-            </h1>
-        </div>
-
-        <p class="brand-lede">
-            Atelier 是一座安静的工坊。它把多家大语言模型收拢在同一张工作台上，让你用最少的仪式感，写下最值得说出口的话。
-        </p>
-
-        <div class="brand-foot">
-            <div class="foot-stat">
-                <span class="foot-stat-no">12</span>
-                <span class="foot-stat-lbl">MODELS<br>CURATED</span>
-            </div>
-            <div class="foot-stat">
-                <span class="foot-stat-no">∞</span>
-                <span class="foot-stat-lbl">CONTEXT<br>WINDOW</span>
-            </div>
-            <div class="foot-stat">
-                <span class="foot-stat-no">0</span>
-                <span class="foot-stat-lbl">AD<br>NOISE</span>
-            </div>
-        </div>
-    </aside>
-
-    <!-- 右侧表单区域 -->
-    <main class="form-pane">
-        <header class="form-top">
-            <div class="top-date" id="topDate">—</div>
-            <button class="theme-toggle" id="themeToggleBtn" onclick="toggleTheme()" aria-label="切换主题">
-                <span class="toggle-track">
-                    <span class="toggle-knob"></span>
-                </span>
-            </button>
-        </header>
-
-        <section class="form-stage">
-            <div class="stage-head">
-                <span class="stage-no" id="stageNo">A.</span>
-                <span class="stage-eyebrow" id="stageEyebrow">SIGN IN · 登录</span>
-            </div>
-
-            <h2 class="stage-title" id="stageTitle">
-                <span class="stage-title-1" id="stageTitle1">欢迎回来</span>
-                <span class="stage-title-2 stage-italic" id="stageTitle2">Welcome back</span>
-            </h2>
-
-            <!-- 表单容器 - 登录/注册用绝对定位叠放，避免高度突变 -->
-            <div class="forms-stack">
-                <!-- 登录表单 -->
-                <form class="atelier-form layui-form form-pane-active" id="loginFormArea" lay-filter="loginForm" autocomplete="off">
-                    <div class="field">
-                        <label class="field-label" for="login-username">
-                            <span class="field-num">01</span>
-                            <span class="field-name">用户名 · USERNAME</span>
-                        </label>
-                        <div class="field-input-wrap">
-                            <input type="text" id="login-username" name="username" lay-verify="required" lay-reqtext="请输入用户名" placeholder="your.name" autocomplete="username" class="field-input" required>
-                            <span class="field-bar"></span>
+                <header class="panel-top brand-top">
+                    <div class="brand-mark">
+                        <div class="mark-glyph">
+                            <span class="mark-line mark-line-1"></span>
+                            <span class="mark-line mark-line-2"></span>
+                            <span class="mark-line mark-line-3"></span>
+                        </div>
+                        <div class="mark-meta">
+                            <span class="mark-no">№ 001</span>
+                            <span class="mark-sep">/</span>
+                            <span class="mark-vol">VOL. II</span>
                         </div>
                     </div>
-
-                    <div class="field">
-                        <label class="field-label" for="login-password">
-                            <span class="field-num">02</span>
-                            <span class="field-name">密码 · PASSWORD</span>
-                        </label>
-                        <div class="field-input-wrap">
-                            <input type="password" id="login-password" name="password" lay-verify="required" lay-reqtext="请输入密码" placeholder="••••••••" autocomplete="current-password" class="field-input" required>
-                            <button type="button" class="field-eye" id="loginEye" tabindex="-1" aria-label="显示/隐藏密码">
-                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
-                            </button>
-                            <span class="field-bar"></span>
-                        </div>
-                    </div>
-
-                    <div class="form-row">
-                        <label class="check-rail" id="rememberMeRail">
-                            <span class="check-box"><span class="check-tick"></span></span>
-                            <span class="check-label">记住我 · REMEMBER</span>
-                        </label>
-                        <a href="javascript:;" class="link-quiet" onclick="showRegisterForm()">创建账号 →</a>
-                    </div>
-
-                    <button class="submit-cta" lay-submit lay-filter="loginSubmit" id="loginBtn" type="submit">
-                        <span class="cta-text">进入工坊 · ENTER</span>
-                        <span class="cta-arrow">
-                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-                        </span>
+                    <button class="theme-toggle" type="button" onclick="toggleTheme()" aria-label="切换主题">
+                        <span class="toggle-track"><span class="toggle-knob"></span></span>
                     </button>
-                </form>
+                </header>
 
-                <!-- 注册表单 -->
-                <form class="atelier-form layui-form" id="registerFormArea" lay-filter="registerForm" autocomplete="off">
-                    <div class="field">
-                        <label class="field-label" for="reg-username">
-                            <span class="field-num">01</span>
-                            <span class="field-name">用户名 · USERNAME</span>
-                        </label>
-                        <div class="field-input-wrap">
-                            <input type="text" id="reg-username" name="username" lay-verify="required" lay-reqtext="请输入用户名" placeholder="2-20个字符" autocomplete="username" class="field-input" required>
-                            <span class="field-bar"></span>
+                <div class="brand-body">
+                    <span class="eyebrow">A WORKBENCH FOR</span>
+                    <h1 class="display">
+                        <span class="display-line">Conversations</span>
+                        <span class="display-line display-italic">that <em>think</em></span>
+                        <span class="display-line">alongside you.</span>
+                    </h1>
+
+                    <p class="brand-lede">
+                        Atelier 是一座安静的工坊。它把多家大语言模型收拢在同一张工作台上，让你用最少的仪式感，写下最值得说出口的话。
+                    </p>
+
+                    <div class="brand-foot">
+                        <div class="foot-stat">
+                            <span class="foot-stat-no">12</span>
+                            <span class="foot-stat-lbl">MODELS<br>CURATED</span>
+                        </div>
+                        <div class="foot-stat">
+                            <span class="foot-stat-no">∞</span>
+                            <span class="foot-stat-lbl">CONTEXT<br>WINDOW</span>
+                        </div>
+                        <div class="foot-stat">
+                            <span class="foot-stat-no">0</span>
+                            <span class="foot-stat-lbl">AD<br>NOISE</span>
                         </div>
                     </div>
-
-                    <div class="field">
-                        <label class="field-label" for="reg-password">
-                            <span class="field-num">02</span>
-                            <span class="field-name">密码 · PASSWORD</span>
-                        </label>
-                        <div class="field-input-wrap">
-                            <input type="password" id="reg-password" name="password" lay-verify="required|password" lay-reqtext="请输入密码" placeholder="至少4个字符" autocomplete="new-password" class="field-input" required>
-                            <span class="field-bar"></span>
-                        </div>
-                    </div>
-
-                    <div class="field">
-                        <label class="field-label" for="reg-password2">
-                            <span class="field-num">03</span>
-                            <span class="field-name">确认 · CONFIRM</span>
-                        </label>
-                        <div class="field-input-wrap">
-                            <input type="password" id="reg-password2" name="password2" lay-verify="required|confirmPassword" lay-reqtext="请确认密码" placeholder="再次输入" autocomplete="new-password" class="field-input" required>
-                            <span class="field-bar"></span>
-                        </div>
-                    </div>
-
-                    <button class="submit-cta" lay-submit lay-filter="registerSubmit" id="regBtn" type="submit">
-                        <span class="cta-text">创建账号 · CREATE</span>
-                        <span class="cta-arrow">
-                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-                        </span>
-                    </button>
-
-                    <div class="form-row form-row-end">
-                        <a href="javascript:;" class="link-quiet" onclick="showLoginForm()">← 返回登录</a>
-                    </div>
-                </form>
-            </div>
-
-            <div class="form-foot">
-                <div class="foot-line"></div>
-                <div class="foot-meta">
-                    <span class="meta-l">SECURE · TOKEN BASED</span>
-                    <span class="meta-c app-version">v—</span>
-                    <span class="meta-r">© ATELIER</span>
                 </div>
-            </div>
-        </section>
+
+                <div class="brand-cta-row">
+                    <button class="brand-cta" id="brandCta" type="button" onclick="enterFormView()">
+                        <span class="cta-text">立刻体验 · TRY NOW</span>
+                        <span class="cta-arrow">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                        </span>
+                    </button>
+                </div>
+            </article>
+        </div>
+    </section>
+
+    <!-- ============ 视图二 · 登录表单页 ============ -->
+    <main class="view view--form" id="formView" aria-label="登录">
+        <div class="view-inner form-inner">
+            <article class="panel form-panel">
+                <header class="panel-top form-top">
+                    <!-- 返回品牌介绍页 -->
+                    <button class="back-to-brand" id="backToBrandBtn" type="button" onclick="backToBrand()" aria-label="返回介绍页">
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                        <span class="back-label">返回</span>
+                    </button>
+                    <div class="top-date" id="topDate">—</div>
+                    <button class="theme-toggle" type="button" onclick="toggleTheme()" aria-label="切换主题">
+                        <span class="toggle-track">
+                            <span class="toggle-knob"></span>
+                        </span>
+                    </button>
+                </header>
+
+                <section class="form-stage">
+                    <div class="stage-head">
+                        <span class="stage-no" id="stageNo">A.</span>
+                        <span class="stage-eyebrow" id="stageEyebrow">SIGN IN · 登录</span>
+                    </div>
+
+                    <h2 class="stage-title" id="stageTitle">
+                        <span class="stage-title-1" id="stageTitle1">欢迎回来</span>
+                        <span class="stage-title-2 stage-italic" id="stageTitle2">Welcome back</span>
+                    </h2>
+
+                    <!-- 表单容器 - 登录/注册用绝对定位叠放，避免高度突变 -->
+                    <div class="forms-stack">
+                        <!-- 登录表单 -->
+                        <form class="atelier-form layui-form form-pane-active" id="loginFormArea" lay-filter="loginForm" autocomplete="off">
+                            <div class="field">
+                                <label class="field-label" for="login-username">
+                                    <span class="field-num">01</span>
+                                    <span class="field-name">用户名 · USERNAME</span>
+                                </label>
+                                <div class="field-input-wrap">
+                                    <input type="text" id="login-username" name="username" lay-verify="required" lay-reqtext="请输入用户名" placeholder="your.name" autocomplete="username" class="field-input" required>
+                                    <span class="field-bar"></span>
+                                </div>
+                            </div>
+
+                            <div class="field">
+                                <label class="field-label" for="login-password">
+                                    <span class="field-num">02</span>
+                                    <span class="field-name">密码 · PASSWORD</span>
+                                </label>
+                                <div class="field-input-wrap">
+                                    <input type="password" id="login-password" name="password" lay-verify="required" lay-reqtext="请输入密码" placeholder="••••••••" autocomplete="current-password" class="field-input" required>
+                                    <button type="button" class="field-eye" id="loginEye" tabindex="-1" aria-label="显示/隐藏密码">
+                                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+                                    </button>
+                                    <span class="field-bar"></span>
+                                </div>
+                            </div>
+
+                            <div class="form-row">
+                                <label class="check-rail" id="rememberMeRail">
+                                    <span class="check-box"><span class="check-tick"></span></span>
+                                    <span class="check-label">记住我 · REMEMBER</span>
+                                </label>
+                                <a href="javascript:;" class="link-quiet" onclick="showRegisterForm()">创建账号 →</a>
+                            </div>
+
+                            <button class="submit-cta" lay-submit lay-filter="loginSubmit" id="loginBtn" type="submit">
+                                <span class="cta-text">进入工坊 · ENTER</span>
+                                <span class="cta-arrow">
+                                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                                </span>
+                            </button>
+                        </form>
+
+                        <!-- 注册表单 -->
+                        <form class="atelier-form layui-form" id="registerFormArea" lay-filter="registerForm" autocomplete="off">
+                            <div class="field">
+                                <label class="field-label" for="reg-username">
+                                    <span class="field-num">01</span>
+                                    <span class="field-name">用户名 · USERNAME</span>
+                                </label>
+                                <div class="field-input-wrap">
+                                    <input type="text" id="reg-username" name="username" lay-verify="required" lay-reqtext="请输入用户名" placeholder="2-20个字符" autocomplete="username" class="field-input" required>
+                                    <span class="field-bar"></span>
+                                </div>
+                            </div>
+
+                            <div class="field">
+                                <label class="field-label" for="reg-password">
+                                    <span class="field-num">02</span>
+                                    <span class="field-name">密码 · PASSWORD</span>
+                                </label>
+                                <div class="field-input-wrap">
+                                    <input type="password" id="reg-password" name="password" lay-verify="required|password" lay-reqtext="请输入密码" placeholder="至少4个字符" autocomplete="new-password" class="field-input" required>
+                                    <span class="field-bar"></span>
+                                </div>
+                            </div>
+
+                            <div class="field">
+                                <label class="field-label" for="reg-password2">
+                                    <span class="field-num">03</span>
+                                    <span class="field-name">确认 · CONFIRM</span>
+                                </label>
+                                <div class="field-input-wrap">
+                                    <input type="password" id="reg-password2" name="password2" lay-verify="required|confirmPassword" lay-reqtext="请确认密码" placeholder="再次输入" autocomplete="new-password" class="field-input" required>
+                                    <span class="field-bar"></span>
+                                </div>
+                            </div>
+
+                            <button class="submit-cta" lay-submit lay-filter="registerSubmit" id="regBtn" type="submit">
+                                <span class="cta-text">创建账号 · CREATE</span>
+                                <span class="cta-arrow">
+                                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                                </span>
+                            </button>
+
+                            <div class="form-row form-row-end">
+                                <a href="javascript:;" class="link-quiet" onclick="showLoginForm()">← 返回登录</a>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="form-foot">
+                        <div class="foot-line"></div>
+                        <div class="foot-meta">
+                            <span class="meta-l">SECURE · TOKEN BASED</span>
+                            <span class="meta-c app-version">v—</span>
+                            <span class="meta-r">© ATELIER</span>
+                        </div>
+                    </div>
+                </section>
+            </article>
+        </div>
     </main>
 
 <script src="/layui/layui.js"></script>
