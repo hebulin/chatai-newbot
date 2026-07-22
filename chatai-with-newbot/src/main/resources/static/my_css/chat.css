@@ -1697,7 +1697,11 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
         width: 85%;
         max-width: 320px;
         height: calc(100vh - 56px);
+        /* 移动端默认隐藏在屏幕外：仅凭 .open 控制抽屉开合。
+           修复前基类无 transform，"无类名"状态等于展开，导致侧边栏无法折叠 */
+        transform: translateX(-100%);
     }
+    .sidebar.open { transform: translateX(0); }
     .close-sidebar-btn { display: flex; }
     .main-content { margin-left: 0; }
     .chat-container { padding: 16px; }

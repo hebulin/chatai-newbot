@@ -1767,6 +1767,10 @@ function showToast(msg) {
     }
 }
 
+// 遮罩延迟移除定时器：防止快速开合侧边栏时，旧的移除回调把刚激活的遮罩删掉
+var overlayRemoveTimer = null;
+
+// 切换侧边栏：移动端用 .open 控制抽屉式开合并联动遮罩，桌面端用 .collapsed 控制折叠并联动主内容边距
 function toggleSidebar() {
     var sidebar = document.getElementById('sidebar');
     var isMobile = window.innerWidth <= 768;
@@ -1784,8 +1788,10 @@ function toggleSidebar() {
     setTimeout(updateScrollNav, 350);
 }
 
+// 显示/隐藏移动端遮罩层：关闭时延迟移除节点以等待动画，重入时先清除待执行的移除定时器，避免遮罩状态与侧边栏失步
 function toggleOverlay(show) {
     var ov = document.getElementById('overlay');
+    if (overlayRemoveTimer) { clearTimeout(overlayRemoveTimer); overlayRemoveTimer = null; }
     if (show) {
         if (!ov) {
             ov = document.createElement('div');
@@ -1796,7 +1802,10 @@ function toggleOverlay(show) {
         } else { ov.classList.add('active'); }
     } else if (ov) {
         ov.classList.remove('active');
-        setTimeout(function() { if(ov.parentNode) ov.remove(); }, 300);
+        overlayRemoveTimer = setTimeout(function() {
+            if (ov.parentNode) ov.remove();
+            overlayRemoveTimer = null;
+        }, 300);
     }
 }
 

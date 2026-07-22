@@ -1,6 +1,6 @@
 /* ============================================
    ATELIER · Login/Register
-   Google Material Design System
+   双视图结构：介绍页 / 登录页，全端统一切换逻辑
    ============================================ */
 
 :root {
@@ -73,13 +73,22 @@ input, button, textarea, select {
     background: none; border: none; outline: none;
 }
 
+/* 键盘可达性：仅焦点环可见时显示 */
+button:focus-visible, a:focus-visible, .check-rail:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+    border-radius: var(--radius-small);
+}
+
+::selection { background: rgba(66, 133, 244, 0.30); }
+
 /* 滚动条 */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--input-border); border-radius: var(--radius-small); }
 ::-webkit-scrollbar-thumb:hover { background: var(--secondary-text); }
 
-/* ===== Paper grain overlay - DISABLED ===== */
+/* ===== 纸张纹理层 - DISABLED ===== */
 .paper-grain {
     position: fixed; inset: 0;
     pointer-events: none;
@@ -87,74 +96,179 @@ input, button, textarea, select {
     opacity: 0;
     background-image: none;
 }
-[data-theme="light"] .paper-grain {
+
+/* ===== 环境背景层：两团极淡的径向光晕缓慢漂移，衬托居中面板 ===== */
+.ambient {
+    position: fixed;
+    inset: -12%;
+    z-index: 0;
+    pointer-events: none;
+    background:
+        radial-gradient(54% 46% at 15% 14%, rgba(66, 133, 244, 0.13), transparent 70%),
+        radial-gradient(44% 40% at 86% 84%, rgba(252, 44, 80, 0.07), transparent 70%);
+    animation: ambient-drift 28s var(--ease) infinite alternate;
+}
+[data-theme="light"] .ambient {
+    background:
+        radial-gradient(54% 46% at 15% 14%, rgba(66, 133, 244, 0.09), transparent 70%),
+        radial-gradient(44% 40% at 86% 84%, rgba(252, 44, 80, 0.05), transparent 70%);
+}
+@keyframes ambient-drift {
+    from { transform: translate3d(-1.6%, -1.2%, 0) scale(1); }
+    to   { transform: translate3d(1.6%, 1.4%, 0) scale(1.05); }
+}
+
+/* ============================================
+   视图系统 —— 介绍页 / 登录页 叠放，任一时刻只可见一屏
+   进入表单：介绍页向左淡出，登录页自右侧滑入（全端统一）
+   两屏高度与顶边由 CSS 变量 --vvh / --vv-top 驱动
+   （login.js 监听 visualViewport 写入），键盘弹出时整屏
+   收缩进键盘上方的可视区，输入框与提交按钮不被遮挡
+   ============================================ */
+.view {
+    position: fixed;
+    top: var(--vv-top, 0px);
+    left: 0;
+    right: 0;
+    height: var(--vvh, 100%);
+    display: flex;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    will-change: transform, opacity;
+}
+
+/* 动态视口高度降级增强：支持 100dvh 的内核（现代 iOS / Android）下，
+   视图高度随地址栏收放实时变化，底部 CTA 不会被地址栏遮住；
+   不支持的内核沿用上面的 100% 声明 */
+@supports (height: 100dvh) {
+    .view { height: var(--vvh, 100dvh); }
+}
+
+/* 视图一 · 品牌介绍页：默认可见 */
+.view--brand {
+    z-index: 3;
+    transform: translateX(0);
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transition: transform 0.5s var(--ease), opacity 0.42s var(--ease), visibility 0s linear 0s;
+}
+
+/* 视图二 · 登录表单页：默认在右侧屏外待命。
+   pointer-events: none 为关键防线——介绍页可见时表单屏整体不接收任何触摸，
+   杜绝"屏幕看着是空白，点几下却弹出校验提示"的幽灵点击 */
+.view--form {
+    z-index: 2;
+    transform: translateX(9%);
     opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: transform 0.5s var(--ease), opacity 0.42s var(--ease), visibility 0s linear 0.5s;
+}
+
+/* 进入表单视图后：介绍页向左滑出淡出、表单页自右滑入 */
+body.form-view .view--brand {
+    transform: translateX(-7%);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: transform 0.5s var(--ease), opacity 0.36s var(--ease), visibility 0s linear 0.5s;
+}
+body.form-view .view--form {
+    transform: translateX(0);
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transition: transform 0.5s var(--ease), opacity 0.42s var(--ease), visibility 0s linear 0s;
+}
+
+/* 视图内容容器：auto 外边距使面板在视口内水平 + 垂直居中，
+   内容超高时外边距塌缩为 0、视图自身滚动，顶部永不被裁切 */
+.view-inner {
+    margin: auto;
+    width: 100%;
+    padding: clamp(24px, 4.5vh, 56px) clamp(20px, 4vw, 56px);
 }
 
 /* ============================================
-   LAYOUT — two pane asymmetric
+   面板卡片 —— PC / 平板为居中卡片（四周留白），手机满屏
    ============================================ */
-body {
-    display: grid;
-    grid-template-columns: 1.05fr 1fr;
-    min-height: 100vh;
-}
-
-@media (max-width: 980px) {
-    body { grid-template-columns: 1fr; }
-    .brand-pane { display: none; }
-}
-
-/* ============================================
-   BRAND PANE (LEFT)
-   ============================================ */
-.brand-pane {
+.panel {
     position: relative;
     background: var(--surface);
-    border-right: 1px solid var(--border);
-    padding: 56px 56px 48px 64px;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    z-index: 2;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-large);
+    box-shadow: var(--shadow-card);
 }
 
-/* 大型装饰性衬线字母 - DISABLED */
-.brand-pane::before {
+/* 面板角标：左上与右下的主色角线，蓝图式细节，悬停时点亮 */
+.panel::before,
+.panel::after {
     content: '';
     position: absolute;
-    right: -20px;
-    bottom: -50px;
+    width: 22px;
+    height: 22px;
+    border: 1px solid var(--primary);
+    opacity: 0.5;
+    pointer-events: none;
+    z-index: 3;
+    transition: opacity 0.3s var(--ease);
+}
+.panel::before {
+    top: 0; left: 0;
+    border-right: 0; border-bottom: 0;
+    border-top-left-radius: var(--radius-large);
+}
+.panel::after {
+    bottom: 0; right: 0;
+    border-left: 0; border-top: 0;
+    border-bottom-right-radius: var(--radius-large);
+}
+.panel:hover::before,
+.panel:hover::after { opacity: 0.95; }
+
+/* ============================================
+   视图一 · 品牌介绍面板
+   ============================================ */
+.brand-panel {
+    max-width: 720px;
+    margin: 0 auto;
+    overflow: hidden;
+    padding: clamp(30px, 5.5vh, 62px) clamp(26px, 4.5vw, 64px) clamp(28px, 5vh, 52px);
+}
+
+/* 超大描边字母水印，沉在内容之后 */
+.brand-watermark {
+    position: absolute;
+    right: -16px;
+    bottom: -58px;
+    z-index: 0;
     font-family: var(--sans);
-    font-size: 280px;
     font-weight: 600;
-    font-style: normal;
-    line-height: 1;
-    color: var(--border);
+    font-size: clamp(190px, 24vw, 300px);
+    line-height: 0.8;
+    color: transparent;
+    -webkit-text-stroke: 1px var(--input-border);
+    opacity: 0.55;
     pointer-events: none;
     user-select: none;
-    letter-spacing: -0.05em;
-    z-index: 0;
-    opacity: 0;
 }
 
-/* 装饰细线 - DISABLED */
-.brand-pane::after {
-    content: '';
-    position: absolute;
-    top: 80px; bottom: 80px;
-    right: 56px;
-    width: 1px;
-    background: transparent;
-    z-index: 0;
-}
-
-.brand-mark {
+/* --- 介绍页顶栏：品牌符号 + 主题开关 --- */
+.brand-top {
     display: flex;
     align-items: center;
     justify-content: space-between;
     position: relative;
     z-index: 2;
+    margin-bottom: clamp(34px, 6.5vh, 72px);
+}
+
+.brand-mark {
+    display: flex;
+    align-items: center;
+    gap: 16px;
 }
 
 .mark-glyph {
@@ -185,20 +299,20 @@ body {
 .mark-no { color: var(--foreground); }
 .mark-sep { color: var(--input-border); }
 
-.brand-headline {
-    margin-top: auto;
-    padding-top: 60px;
+/* --- 介绍页正文 --- */
+.brand-body {
     position: relative;
-    z-index: 2;
+    z-index: 1;
 }
 
 .eyebrow {
     display: inline-block;
     font-size: 11px;
     color: var(--primary);
-    margin-bottom: 28px;
+    margin-bottom: 26px;
     position: relative;
     padding-left: 32px;
+    animation: line-up 1s var(--ease) 0.2s both;
 }
 .eyebrow::before {
     content: '';
@@ -211,7 +325,7 @@ body {
 }
 
 .display {
-    font-size: clamp(40px, 5.4vw, 72px);
+    font-size: clamp(42px, 6.2vw, 78px);
     line-height: 1.02;
     font-weight: 600;
     letter-spacing: -0.025em;
@@ -236,7 +350,7 @@ body {
     font-style: normal;
     font-weight: 500;
     color: var(--primary);
-    padding-left: 1.2em;
+    padding-left: 0.9em;
 }
 .display-italic em {
     font-style: normal;
@@ -254,25 +368,22 @@ body {
 }
 
 .brand-lede {
-    margin-top: 36px;
-    max-width: 460px;
-    font-size: 15px;
-    line-height: 1.7;
+    margin-top: 30px;
+    max-width: 56ch;
+    font-size: 15.5px;
+    line-height: 1.8;
     color: var(--foreground);
-    position: relative;
-    z-index: 2;
     animation: line-up 1.1s var(--ease) 0.7s both;
 }
 
+/* --- 统计行：细线分隔 --- */
 .brand-foot {
-    margin-top: 56px;
+    margin-top: clamp(30px, 6vh, 56px);
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 32px;
-    padding-top: 32px;
+    gap: 20px;
+    padding-top: 22px;
     border-top: 1px solid var(--border);
-    position: relative;
-    z-index: 2;
     animation: line-up 1.1s var(--ease) 0.85s both;
 }
 .foot-stat {
@@ -280,11 +391,15 @@ body {
     flex-direction: column;
     gap: 8px;
 }
+.foot-stat + .foot-stat {
+    border-left: 1px solid var(--border);
+    padding-left: 20px;
+}
 .foot-stat-no {
     font-family: var(--sans);
     font-style: normal;
     font-weight: 600;
-    font-size: 36px;
+    font-size: clamp(28px, 3vw, 36px);
     line-height: 1;
     color: var(--foreground);
     letter-spacing: -0.02em;
@@ -297,45 +412,108 @@ body {
     white-space: nowrap;
 }
 
-/* ============================================
-   FORM PANE (RIGHT)
-   ============================================ */
-.form-pane {
+/* --- 入口 CTA --- */
+.brand-cta-row {
     position: relative;
-    background: var(--bg);
-    display: flex;
-    flex-direction: column;
-    overflow-y: auto;
-    z-index: 2;
+    z-index: 1;
+    margin-top: clamp(26px, 5vh, 44px);
 }
 
-.form-pane::before {
-    /* 左侧细金线 - DISABLED */
+.brand-cta {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    width: 100%;
+    height: 58px;
+    flex-shrink: 0;
+    background: var(--primary);
+    color: #ffffff;
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    border: none;
+    border-radius: var(--radius-default);
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    transition: all 0.4s var(--ease);
+    box-shadow: var(--shadow-card);
+    /* 入场动画：接在品牌内容级联（0.85s）之后浮现 */
+    animation: line-up 1s var(--ease) 1s both;
+}
+.brand-cta::before {
     content: '';
     position: absolute;
-    left: 0; top: 0; bottom: 0;
-    width: 1px;
-    background: transparent;
+    inset: 0;
+    background: var(--primary-hover);
     opacity: 0;
+    transition: opacity 0.3s var(--ease);
+    z-index: 0;
 }
-[data-theme="light"] .form-pane::before { opacity: 0; }
+.brand-cta > * { position: relative; z-index: 1; }
+.brand-cta:hover::before { opacity: 1; }
+.brand-cta:hover { color: #ffffff; }
+.brand-cta:hover .cta-arrow { transform: translateX(6px); }
+/* 按压反馈用 filter 而非 transform：按钮自身的入场动画（fill: both）
+   会在层叠中压住 :active 的 transform，导致按压效果失效 */
+.brand-cta:active { filter: brightness(0.92); }
+/* 箭头周期性轻推，提示"可进入" */
+.brand-cta .cta-arrow { animation: cta-nudge 2.6s var(--ease) 2.2s infinite; }
 
+/* ============================================
+   视图二 · 登录表单面板
+   ============================================ */
+.form-panel {
+    max-width: 480px;
+    margin: 0 auto;
+}
+
+/* --- 表单页顶栏：返回 + 日期 + 主题开关，内容超高时吸顶 --- */
 .form-top {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 28px 48px;
+    gap: 12px;
+    padding: 16px clamp(20px, 3vw, 28px);
     border-bottom: 1px solid var(--border);
     position: sticky;
     top: 0;
-    background: var(--bg);
     z-index: 10;
-    backdrop-filter: blur(8px);
+    background: var(--surface);
+    border-radius: var(--radius-large) var(--radius-large) 0 0;
 }
 .top-date {
     font-size: 11px;
     color: var(--secondary-text);
 }
+
+/* 返回介绍页按钮 */
+.back-to-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    flex-shrink: 0;
+    height: 34px;
+    padding: 0 13px 0 9px;
+    margin-right: auto; /* 把日期与主题开关推到右缘 */
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--secondary-text);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    cursor: pointer;
+    user-select: none;
+    transition: color 0.25s var(--ease), border-color 0.25s var(--ease), transform 0.2s var(--ease);
+}
+.back-to-brand svg { transition: transform 0.25s var(--ease); }
+.back-to-brand:hover { color: var(--foreground); border-color: var(--primary); }
+.back-to-brand:hover svg { transform: translateX(-3px); }
+.back-to-brand:active { transform: scale(0.95); }
 
 /* 主题切换 — 开关形态 */
 .theme-toggle {
@@ -347,6 +525,7 @@ body {
     cursor: pointer;
     transition: all 0.3s var(--ease);
     position: relative;
+    flex-shrink: 0;
 }
 .theme-toggle:hover { border-color: var(--primary); }
 .toggle-track {
@@ -385,14 +564,9 @@ body {
 
 /* ===== Form stage ===== */
 .form-stage {
-    flex: 1;
     display: flex;
     flex-direction: column;
-    justify-content: center;
-    max-width: 480px;
-    margin: 0 auto;
-    width: 100%;
-    padding: 60px 48px 56px;
+    padding: clamp(28px, 5vh, 48px) clamp(24px, 3.6vw, 36px) clamp(26px, 4.5vh, 44px);
 }
 
 .stage-head {
@@ -400,7 +574,6 @@ body {
     align-items: center;
     gap: 14px;
     margin-bottom: 18px;
-    animation: line-up 0.8s var(--ease) 0.4s both;
 }
 .stage-no {
     font-family: var(--sans);
@@ -420,15 +593,14 @@ body {
 .stage-title {
     font-family: var(--sans);
     font-weight: 600;
-    font-size: 42px;
+    font-size: clamp(30px, 3.6vw, 42px);
     line-height: 1.05;
     letter-spacing: -0.02em;
     color: var(--foreground);
-    margin-bottom: 44px;
+    margin-bottom: 36px;
     display: flex;
     flex-direction: column;
     gap: 4px;
-    animation: line-up 0.9s var(--ease) 0.5s both;
 }
 .stage-title-2 {
     font-style: normal;
@@ -445,7 +617,6 @@ body {
     position: relative;
     width: 100%;
     min-height: 460px; /* 容纳较长的注册表单 */
-    animation: line-up 0.9s var(--ease) 0.65s both;
 }
 .atelier-form {
     position: absolute;
@@ -493,33 +664,8 @@ body {
     transition: border-color 0.3s var(--ease);
     border-radius: 0;
 }
-.field-input-wrap::before {
-    /* 角标 - DISABLED */
-    content: '';
-    position: absolute;
-    right: 0; top: 0;
-    width: 6px; height: 6px;
-    border-top: 1px solid transparent;
-    border-right: 1px solid transparent;
-    transition: border-color 0.3s var(--ease);
-    opacity: 0;
-}
-.field-input-wrap::after {
-    content: '';
-    position: absolute;
-    left: 0; bottom: -1px;
-    width: 6px; height: 6px;
-    border-bottom: 1px solid transparent;
-    border-left: 1px solid transparent;
-    transition: border-color 0.3s var(--ease);
-    opacity: 0;
-}
 .field-input-wrap:focus-within {
     border-bottom-color: var(--primary);
-}
-.field-input-wrap:focus-within::before,
-.field-input-wrap:focus-within::after {
-    border-color: transparent;
 }
 
 .field-input {
@@ -568,20 +714,14 @@ body {
 .field-eye:hover { color: var(--primary); background: rgba(66, 133, 244, 0.08); }
 .field-eye.on { color: var(--primary); }
 
-/* autofill 修复 + 屏蔽浏览器/密码管理器在字段旁插入的额外 UI */
+/* autofill 修复：阴影色与面板背景一致 */
 .field-input:-webkit-autofill,
 .field-input:-webkit-autofill:hover,
 .field-input:-webkit-autofill:focus {
-    -webkit-box-shadow: 0 0 0 1000px var(--bg) inset !important;
+    -webkit-box-shadow: 0 0 0 1000px var(--surface) inset !important;
     -webkit-text-fill-color: var(--foreground) !important;
     caret-color: var(--foreground);
     transition: background-color 5000s ease-in-out 0s;
-}
-[data-theme="light"] .field-input:-webkit-autofill,
-[data-theme="light"] .field-input:-webkit-autofill:hover,
-[data-theme="light"] .field-input:-webkit-autofill:focus {
-    -webkit-box-shadow: 0 0 0 1000px #ffffff inset !important;
-    -webkit-text-fill-color: var(--foreground) !important;
 }
 
 /* 隐藏浏览器/密码管理器自动添加的额外控件，避免在记住我勾选框前多出一个原生勾选框 */
@@ -608,7 +748,6 @@ input::-ms-clear {
     align-items: center;
     justify-content: space-between;
     margin-top: -4px;
-    animation: line-up 0.8s var(--ease) 0.75s both;
 }
 .form-row-end { justify-content: flex-end; }
 
@@ -746,8 +885,7 @@ input::-ms-clear {
    FOOT
    ============================================ */
 .form-foot {
-    margin-top: 60px;
-    animation: line-up 0.9s var(--ease) 0.85s both;
+    margin-top: 44px;
 }
 .foot-line {
     height: 1px;
@@ -851,20 +989,131 @@ input::-ms-clear {
 .layui-input { display: none; } /* 我们用 .field-input 替代 */
 
 /* ============================================
-   MOBILE
+   表单页入场级联浮现（enterFormView 为 .form-stage 追加 .reveal 触发，
+   每次进入都重新播放，与视图滑入同帧进场）
    ============================================ */
-@media (max-width: 980px) {
-    .form-stage { padding: 40px 28px; }
-    .form-top { padding: 20px 28px; }
-    .stage-title { font-size: 34px; }
-    .field-input { font-size: 18px; }
+body.form-view .form-stage.reveal .stage-head,
+body.form-view .form-stage.reveal .stage-title,
+body.form-view .form-stage.reveal .forms-stack,
+body.form-view .form-stage.reveal .form-foot {
+    animation: m-rise 0.5s var(--ease) both;
+}
+body.form-view .form-stage.reveal .stage-title { animation-delay: 0.05s; }
+body.form-view .form-stage.reveal .forms-stack { animation-delay: 0.1s; }
+body.form-view .form-stage.reveal .form-foot { animation-delay: 0.16s; }
+
+@keyframes m-rise {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+/* CTA 箭头轻推 */
+@keyframes cta-nudge {
+    0%, 100% { transform: translateX(0); }
+    55% { transform: translateX(5px); }
 }
 
+/* ============================================
+   平板（≤1024px）：卡片收窄，字号随视口微调
+   ============================================ */
+@media (max-width: 1024px) {
+    .brand-panel { max-width: 640px; }
+    .display { font-size: clamp(40px, 7.4vw, 64px); }
+    .brand-watermark { font-size: 220px; bottom: -44px; }
+}
+
+/* ============================================
+   手机（≤480px）：面板满屏自适应，无留白、无卡片边框；
+   介绍页内容贴底编排，CTA 由 flex 外边距压底（不依赖 sticky）
+   ============================================ */
 @media (max-width: 480px) {
-    .form-stage { padding: 32px 20px; }
-    .form-top { padding: 16px 20px; }
-    .stage-title { font-size: 28px; }
-    .display { font-size: 40px; }
+    :root {
+        /* 左右留白：取固定值与刘海安全区的较大者，横屏缺口屏不被遮挡 */
+        --side-l: max(18px, env(safe-area-inset-left));
+        --side-r: max(18px, env(safe-area-inset-right));
+    }
+
+    .view-inner {
+        padding: 0;
+        min-height: 100%;
+        display: flex;
+        flex-direction: column;
+    }
+    .panel {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        max-width: none;
+        border: none;
+        border-radius: 0;
+        box-shadow: none;
+    }
+    .panel::before,
+    .panel::after { display: none; }
+
+    /* --- 介绍屏：把"正文 + CTA"作为一组整体在剩余空间里垂直居中——
+           正文 margin-top: auto 吃掉上方空白、CTA 行 margin-bottom: auto 吃掉下方空白，
+           flex 自动均分上下留白，使标题 / 简介 / 统计 / 按钮紧凑成一块居中显示，
+           不再出现按钮单独钉在屏幕底边、与介绍脱节的问题；
+           矮屏 / 横屏内容溢出时 auto 外边距归零、整组从顶部起排、视图滚动 --- */
+    .brand-panel {
+        padding: calc(18px + env(safe-area-inset-top)) var(--side-r) calc(14px + env(safe-area-inset-bottom)) var(--side-l);
+    }
+    .brand-top { margin-bottom: 0; }
+    .brand-body { margin-top: auto; }
+    .brand-watermark {
+        font-size: 190px;
+        right: -10px;
+        bottom: 32%;
+        opacity: 0.45;
+    }
+    .display { font-size: clamp(38px, 10.5vw, 52px); }
+    .display-italic { padding-left: 0.5em; }
+    .brand-lede { margin-top: 18px; font-size: 14.5px; }
+    .brand-foot { margin-top: 24px; gap: 12px; padding-top: 16px; }
+    .foot-stat + .foot-stat { padding-left: 12px; }
+    .foot-stat-no { font-size: 26px; }
+    .brand-cta-row { margin-top: 22px; margin-bottom: auto; }
+    .brand-cta { height: 54px; }
+
+    /* --- 表单屏：顶栏吸顶（含刘海安全区），表单区纵向居中、内容超高时退化顶对齐 --- */
+    .form-top {
+        padding: calc(10px + env(safe-area-inset-top)) var(--side-r) 10px var(--side-l);
+        border-radius: 0;
+    }
+    .form-stage {
+        flex: 1;
+        justify-content: center;
+        justify-content: safe center;
+        padding: 26px var(--side-r) calc(20px + env(safe-area-inset-bottom)) var(--side-l);
+    }
+    .stage-head { margin-bottom: 14px; }
+    .stage-title { font-size: 28px; margin-bottom: 28px; }
+    .field-input { font-size: 18px; } /* ≥16px，防止 iOS 聚焦时页面自动缩放 */
+    /* 给 44px 的密码显隐按钮让位，避免输入内容与图标重叠 */
+    #login-password { padding-right: 42px; }
+    .atelier-form { gap: 22px; }
+    /* 叠放容器最小高度按注册表单（3 字段）测算，登录态下方不留大片空白 */
+    .forms-stack { min-height: 396px; }
+    .form-foot { margin-top: 32px; }
+    .submit-cta { height: 54px; margin-top: 10px; }
+
+    /* --- 触控热区扩大：手指目标 ≥ 40px --- */
+    .field-eye { width: 44px; height: 44px; right: -8px; }
+    .check-rail { padding: 8px 6px 8px 0; }
+    .link-quiet { padding: 6px 0; }
+}
+
+/* 超窄屏（≤360px）：隐藏顶栏日期，保证"返回 + 主题开关"一行放得下 */
+@media (max-width: 360px) {
+    .top-date { display: none; }
+}
+
+/* 消除移动端点击高亮与双击缩放延迟 */
+@media (hover: none) {
+    button, a, .check-rail {
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+    }
 }
 
 /* Reduce motion */

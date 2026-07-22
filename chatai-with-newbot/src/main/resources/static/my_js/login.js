@@ -22,6 +22,7 @@ function safeStorageRemove(key) { try { localStorage.removeItem(key); } catch(e)
 var REMEMBERED_USER_KEY = 'rememberedUsername';
 var REMEMBERED_FLAG_KEY = 'rememberMe';
 
+// 从 localStorage 恢复"记住我"勾选状态与持久化的用户名
 function loadRememberedUsername() {
     try {
         var flag = safeStorageGet(REMEMBERED_FLAG_KEY);
@@ -51,6 +52,8 @@ function showRegisterForm() {
     if (t1El) t1El.textContent = '欢迎加入';
     if (t2El) t2El.textContent = 'Join the workshop';
 }
+
+// 注册表单切回登录表单，并还原标题文案
 function showLoginForm() {
     var loginF = document.getElementById('loginFormArea');
     var regF = document.getElementById('registerFormArea');
@@ -65,6 +68,145 @@ function showLoginForm() {
     if (t1El) t1El.textContent = '欢迎回来';
     if (t2El) t2El.textContent = 'Welcome back';
 }
+
+// ============================================
+// 双视图切换（介绍页 ⇄ 登录页，全端统一逻辑）
+// body.form-view 为唯一状态源：
+//   无该 class = 介绍页可见；有该 class = 登录页可见
+// CSS 负责全部过渡动画，JS 只切换 class 与做收尾
+// ============================================
+
+// 判断当前是否为手机满屏布局（与 CSS 断点 480px 保持一致）
+function isPhoneLayout() {
+    return window.innerWidth <= 480;
+}
+
+// 切换到登录表单视图的底层操作（不写 history）：
+// 加状态 class、重放入场级联动画、过渡结束后滚回顶部并按需聚焦首个输入框
+function setFormView() {
+    if (document.body.classList.contains('form-view')) return;
+    document.body.classList.add('form-view');
+    // 重放表单内容的级联浮现：先移除再强制回流后加回，保证每次进入都重新播放
+    var stage = document.querySelector('.form-stage');
+    if (stage) {
+        stage.classList.remove('reveal');
+        void stage.offsetWidth;
+        stage.classList.add('reveal');
+    }
+    // 过渡结束（0.5s）后把表单视图滚回顶部，保证登录表单从头完整可见
+    var view = document.getElementById('formView');
+    if (view) setTimeout(function() { view.scrollTop = 0; }, 520);
+    // 过渡结束后聚焦当前表单的首个输入框（仅 PC / 平板；
+    // 手机跳过，避免键盘立刻弹出遮住刚滑入的页面）
+    setTimeout(function() {
+        if (isPhoneLayout()) return;
+        var activeForm = document.querySelector('.atelier-form.form-pane-active');
+        var firstInput = activeForm ? activeForm.querySelector('input') : null;
+        if (!firstInput) return;
+        try { firstInput.focus({ preventScroll: true }); } catch (e) { firstInput.focus(); }
+    }, 520);
+}
+
+// 切换回品牌介绍视图的底层操作（不写 history）：
+// 移除状态 class，并把介绍视图滚回顶部
+function setBrandView() {
+    document.body.classList.remove('form-view');
+    var view = document.getElementById('brandView');
+    if (view) view.scrollTop = 0;
+}
+
+// "立刻体验"入口：介绍页向左淡出、登录页自右滑入，并压入 history 供系统返回键回退
+function enterFormView() {
+    if (document.body.classList.contains('form-view')) return;
+    setFormView();
+    // 压入历史条目：安卓返回键 / 浏览器后退先退回介绍页，而不是直接离开页面
+    try { history.pushState({ atelierView: 'form' }, ''); } catch (e) {}
+}
+
+// 登录页"返回"：先收起键盘，再走 history.back()（与系统返回键共用 popstate 路径）
+function backToBrand() {
+    var el = document.activeElement;
+    if (el && typeof el.blur === 'function') el.blur();
+    if (history.state && history.state.atelierView === 'form') {
+        try { history.back(); } catch (e) {}
+    }
+    setBrandView();
+    // 键盘收起过程中可视视口逐步还原：延迟复查，杜绝 --vvh 残留把视图压成矮屏
+    scheduleViewportResync();
+}
+
+// 浏览器前进 / 后退 / 安卓返回键：按历史条目同步视图状态（popstate 不重复写 history）
+window.addEventListener('popstate', function() {
+    if (history.state && history.state.atelierView === 'form') {
+        setFormView();
+    } else {
+        setBrandView();
+    }
+});
+
+// ============================================
+// 键盘适配：可视视口显著收缩（键盘弹出）时，把高度与顶偏移写入 CSS 变量，
+// 两个视图随之收缩到键盘上方的可视区，输入框与提交按钮不再被键盘遮挡。
+// 以"见过的最大可视高度"为基线判断键盘开合（不依赖 innerHeight —— iOS 弹出键盘时
+// 布局视口也会收缩，差值法会失灵）；键盘关闭事件在部分安卓设备上有延迟或缺失，
+// 配合失焦重试与 window.resize 兜底，杜绝收缩态变量残留导致的"矮屏 + 白屏"故障
+// ============================================
+var vvMaxHeight = 0; // 见过的最大可视视口高度，即键盘关闭时的满屏高度基线
+
+// 同步可视视口尺寸到 CSS 变量：距基线收缩超过 120px 判定为键盘弹出，否则还原为满屏
+function syncVisualViewport() {
+    if (!window.visualViewport) return;
+    var vv = window.visualViewport;
+    vvMaxHeight = Math.max(vvMaxHeight, vv.height);
+    var root = document.documentElement;
+    if (vvMaxHeight - vv.height > 120) {
+        root.style.setProperty('--vvh', vv.height + 'px');
+        root.style.setProperty('--vv-top', vv.offsetTop + 'px');
+    } else {
+        root.style.removeProperty('--vvh');
+        root.style.removeProperty('--vv-top');
+    }
+}
+
+// 键盘关闭后事件可能滞后/缺失：延迟复查两次，确保收缩态变量一定被清除
+function scheduleViewportResync() {
+    setTimeout(syncVisualViewport, 300);
+    setTimeout(syncVisualViewport, 900);
+}
+
+// 视口事件接线：visualViewport 的 resize/scroll 为主，window.resize 兜底
+(function() {
+    if (!window.visualViewport) return;
+    var lastInnerW = window.innerWidth;
+    window.visualViewport.addEventListener('resize', syncVisualViewport);
+    window.visualViewport.addEventListener('scroll', syncVisualViewport);
+    window.addEventListener('resize', function() {
+        // 宽度变化 = 旋转/分屏：重置基线为当前高度，避免旧基线把横屏满屏误判为"键盘弹出"
+        if (window.innerWidth !== lastInnerW) {
+            lastInnerW = window.innerWidth;
+            vvMaxHeight = window.visualViewport.height;
+        }
+        syncVisualViewport();
+    });
+    syncVisualViewport();
+})();
+
+// 输入框失焦（键盘开始收起）→ 延迟复查视口，防止关闭事件缺失时收缩态残留
+document.addEventListener('focusout', function(e) {
+    var t = e.target;
+    if (!t || !t.classList || !t.classList.contains('field-input')) return;
+    scheduleViewportResync();
+});
+
+// 输入框聚焦后平滑滚动到可视区中央（键盘弹出、视口收缩之后尤其重要）
+document.addEventListener('focusin', function(e) {
+    var t = e.target;
+    if (!t || !t.classList || !t.classList.contains('field-input')) return;
+    setTimeout(function() {
+        try { t.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+        catch (err) { t.scrollIntoView(); }
+    }, 320);
+});
 
 layui.use(['form', 'layer', 'jquery'], function() {
     var form = layui.form;
