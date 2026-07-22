@@ -1,0 +1,469 @@
+package com.chatai.newbot.service;
+
+import com.chatai.newbot.model.*;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+
+import jakarta.annotation.PostConstruct;
+import java.io.File;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * 存储管理器（门面 + 开关控制 + 数据迁移）
+ * 根据 storageMode 开关，将所有数据操作委托给 JsonFileStorageService 或 SqliteStorageService。
+ * Token 管理为内存共享（两种模式共用），不随存储切换而丢失。
+ * 管理员可通过后台页面实时切换存储模式，无需重启。
+ */
+@Service
+public class StorageManager implements StorageService {
+
+    private static final Logger log = LoggerFactory.getLogger(StorageManager.class);
+
+    private final JsonFileStorageService jsonStorage;
+    private final SqliteStorageService sqliteStorage;
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    /** 存储模式开关：false=JSON文件，true=SQLite */
+    private volatile boolean useSqlite = false;
+
+    // ========== Token 管理（内存共享，两种模式通用） ==========
+    private final Map<String, String> activeTokens = new ConcurrentHashMap<>(); // token -> userId
+    private final Map<String, String> tokenIps = new ConcurrentHashMap<>();     // token -> 登录时绑定的IP
+
+    public StorageManager(JsonFileStorageService jsonStorage, SqliteStorageService sqliteStorage) {
+        this.jsonStorage = jsonStorage;
+        this.sqliteStorage = sqliteStorage;
+    }
+
+    /**
+     * 初始化：从 SQLite t_setting 读取上次的开关状态
+     * 若 SQLite 表不存在或读取失败，自动回退到 JSON 模式。
+     */
+    @PostConstruct
+    public void init() {
+        try {
+            String mode = sqliteStorage.getSetting("storage_mode");
+            if ("sqlite".equals(mode)) {
+                this.useSqlite = true;
+                log.info("存储模式: SQLite（从上次配置恢复）");
+            } else {
+                this.useSqlite = false;
+                log.info("存储模式: JSON文件（默认）");
+            }
+        } catch (Exception e) {
+            this.useSqlite = false;
+            log.warn("读取存储模式失败，回退到JSON模式", e);
+        }
+    }
+
+    /** 获取当前活跃的存储实现 */
+    private StorageService active() {
+        return useSqlite ? sqliteStorage : jsonStorage;
+    }
+
+    // ========== 开关控制 ==========
+
+    /**
+     * 当前是否使用 SQLite 存储
+     * @return true=SQLite模式，false=JSON模式
+     */
+    public boolean isUseSqlite() {
+        return useSqlite;
+    }
+
+    /**
+     * 读取 SQLite t_setting 配置值（委托给 SqliteStorageService）
+     * @param key 配置键
+     * @return 配置值，不存在返回 null
+     */
+    public String getSetting(String key) {
+        return sqliteStorage.getSetting(key);
+    }
+
+    /**
+     * 切换存储模式
+     * @param enable true=切换到SQLite，false=切换到JSON
+     */
+    public void setUseSqlite(boolean enable) {
+        this.useSqlite = enable;
+        try {
+            sqliteStorage.setSetting("storage_mode", enable ? "sqlite" : "json");
+            log.info("存储模式已切换为: {}", enable ? "SQLite" : "JSON文件");
+        } catch (Exception e) {
+            log.error("持久化存储模式失败", e);
+        }
+    }
+
+    // ========== Token 管理（内存共享） ==========
+
+    /**
+     * 创建登录 Token
+     * @param userId 用户ID
+     * @param ip 登录IP
+     * @return 生成的 token 字符串
+     */
+    public String createToken(String userId, String ip) {
+        String token = UUID.randomUUID().toString().replace("-", "");
+        activeTokens.put(token, userId);
+        if (ip != null && !ip.isEmpty()) {
+            tokenIps.put(token, ip);
+        }
+        return token;
+    }
+
+    /**
+     * 根据 Token 获取用户
+     * @param token token 字符串
+     * @return 用户对象，无效 token 返回 null
+     */
+    public User getUserByToken(String token) {
+        if (token == null) return null;
+        String userId = activeTokens.get(token);
+        if (userId == null) return null;
+        return active().getUserById(userId);
+    }
+
+    /**
+     * 获取 token 登录时绑定的 IP
+     * @param token token 字符串
+     * @return 绑定的IP，未绑定返回 null
+     */
+    public String getTokenIp(String token) {
+        if (token == null) return null;
+        return tokenIps.get(token);
+    }
+
+    /**
+     * 移除 Token（注销登录）
+     * @param token token 字符串
+     */
+    public void removeToken(String token) {
+        if (token != null) {
+            activeTokens.remove(token);
+            tokenIps.remove(token);
+        }
+    }
+
+    /**
+     * 移除指定用户的所有 Token（修改密码后强制重新登录）
+     * @param userId 用户ID
+     */
+    public void removeTokensByUserId(String userId) {
+        activeTokens.entrySet().removeIf(e -> userId.equals(e.getValue()));
+        // tokenIps 中对应的条目也一并清理
+        tokenIps.keySet().removeIf(k -> !activeTokens.containsKey(k));
+    }
+
+    // ========== 委托方法：用户相关 ==========
+
+    @Override
+    public User authenticate(String username, String password) {
+        return active().authenticate(username, password);
+    }
+
+    @Override
+    public User register(String username, String password, String ip) {
+        return active().register(username, password, ip);
+    }
+
+    @Override
+    public boolean canRegisterFromIp(String ip) {
+        return active().canRegisterFromIp(ip);
+    }
+
+    @Override
+    public void updateLoginInfo(String userId, String ip, String browser) {
+        active().updateLoginInfo(userId, ip, browser);
+    }
+
+    @Override
+    public List<User> getAllUsers() {
+        return active().getAllUsers();
+    }
+
+    @Override
+    public User getUserById(String id) {
+        return active().getUserById(id);
+    }
+
+    @Override
+    public boolean deleteUser(String userId) {
+        return active().deleteUser(userId);
+    }
+
+    @Override
+    public void updateUser(User user) {
+        active().updateUser(user);
+    }
+
+    /**
+     * 修改密码（委托后清除该用户所有 Token，强制重新登录）
+     */
+    @Override
+    public int changePassword(String userId, String oldPassword, String newPassword) {
+        int code = active().changePassword(userId, oldPassword, newPassword);
+        if (code == 0) {
+            removeTokensByUserId(userId);
+        }
+        return code;
+    }
+
+    // ========== 委托方法：模型配置相关 ==========
+
+    @Override
+    public List<ModelConfig> getAllModelConfigs() {
+        return active().getAllModelConfigs();
+    }
+
+    @Override
+    public List<ModelConfig> getVisibleModels(User user) {
+        return active().getVisibleModels(user);
+    }
+
+    @Override
+    public ModelConfig getModelConfigById(String id) {
+        return active().getModelConfigById(id);
+    }
+
+    @Override
+    public ModelConfig addModelConfig(ModelConfig config) {
+        return active().addModelConfig(config);
+    }
+
+    @Override
+    public void updateModelConfig(ModelConfig config) {
+        active().updateModelConfig(config);
+    }
+
+    @Override
+    public boolean deleteModelConfig(String id) {
+        return active().deleteModelConfig(id);
+    }
+
+    // ========== 委托方法：默认模型 ==========
+
+    @Override
+    public String getDefaultModelId() {
+        return active().getDefaultModelId();
+    }
+
+    @Override
+    public void setDefaultModelId(String modelId) {
+        active().setDefaultModelId(modelId);
+    }
+
+    @Override
+    public void clearDefaultModelId() {
+        active().clearDefaultModelId();
+    }
+
+    // ========== 委托方法：厂商相关 ==========
+
+    @Override
+    public List<Provider> getAllProviders() {
+        return active().getAllProviders();
+    }
+
+    @Override
+    public Provider getProvider(String providerId) {
+        return active().getProvider(providerId);
+    }
+
+    @Override
+    public String getProviderDisplayName(String providerId) {
+        return active().getProviderDisplayName(providerId);
+    }
+
+    @Override
+    public int renameProvider(String providerId, String newName, String newIcon, String oldName) {
+        return active().renameProvider(providerId, newName, newIcon, oldName);
+    }
+
+    @Override
+    public List<Map<String, Object>> listCustomProviders() {
+        return active().listCustomProviders();
+    }
+
+    // ========== 委托方法：使用记录相关 ==========
+
+    @Override
+    public void addUsageLog(UsageLog logEntry) {
+        active().addUsageLog(logEntry);
+    }
+
+    @Override
+    public List<UsageLog> getAllUsageLogs() {
+        return active().getAllUsageLogs();
+    }
+
+    @Override
+    public List<UsageLog> getUsageLogsByUser(String userId) {
+        return active().getUsageLogsByUser(userId);
+    }
+
+    @Override
+    public void updateUsageLog(UsageLog logEntry) {
+        active().updateUsageLog(logEntry);
+    }
+
+    @Override
+    public List<String> getUsageLogDates() {
+        return active().getUsageLogDates();
+    }
+
+    // ========== 数据迁移（JSON → SQLite） ==========
+
+    /**
+     * 一键迁移：将 JSON 文件中的全部数据写入 SQLite
+     * 在事务中执行，失败则回滚，不影响 JSON 数据。
+     * @return 迁移统计信息 Map（users, models, logs, chatHistories 数量）
+     */
+    public Map<String, Object> migrateJsonToSqlite() {
+        log.info("===== 开始数据迁移: JSON → SQLite =====");
+        Map<String, Object> stats = new LinkedHashMap<>();
+        long startTime = System.currentTimeMillis();
+
+        try {
+            // 1. 迁移用户
+            List<User> users = jsonStorage.getAllUsers();
+            sqliteStorage.batchInsertUsers(users);
+            stats.put("users", users.size());
+            log.info("迁移用户: {} 条", users.size());
+
+            // 2. 迁移模型配置
+            List<ModelConfig> models = jsonStorage.getAllModelConfigs();
+            sqliteStorage.batchInsertModelConfigs(models);
+            stats.put("models", models.size());
+            log.info("迁移模型配置: {} 条", models.size());
+
+            // 3. 迁移使用记录
+            List<UsageLog> logs = jsonStorage.getAllUsageLogs();
+            sqliteStorage.batchInsertUsageLogs(logs);
+            stats.put("logs", logs.size());
+            log.info("迁移使用记录: {} 条", logs.size());
+
+            // 4. 迁移默认模型ID
+            String defaultModelId = jsonStorage.getDefaultModelId();
+            if (defaultModelId != null) {
+                sqliteStorage.setSetting("default_model_id", defaultModelId);
+            }
+            stats.put("defaultModelId", defaultModelId);
+
+            // 5. 迁移厂商显示名覆盖（从 JSON 文件直接读取）
+            migrateProviderNameOverrides();
+
+            // 6. 迁移 IP 注册计数（从 JSON 文件直接读取）
+            migrateIpRegister();
+
+            // 7. 迁移聊天记录（从 data/chat_history/ 目录读取）
+            int chatCount = migrateChatHistories();
+            stats.put("chatHistories", chatCount);
+            log.info("迁移聊天记录: {} 个用户", chatCount);
+
+            // 8. 标记迁移完成
+            sqliteStorage.setSetting("migration_done", "true");
+
+            long elapsed = System.currentTimeMillis() - startTime;
+            stats.put("elapsedMs", elapsed);
+            log.info("===== 数据迁移完成，耗时 {}ms =====", elapsed);
+        } catch (Exception e) {
+            log.error("数据迁移失败", e);
+            stats.put("error", e.getMessage());
+            throw new RuntimeException("数据迁移失败: " + e.getMessage(), e);
+        }
+        return stats;
+    }
+
+    /** 迁移厂商显示名覆盖（读取 data/provider_names.json） */
+    private void migrateProviderNameOverrides() {
+        try {
+            Path dataDir = Paths.get(System.getProperty("user.dir"), "data");
+            File file = dataDir.resolve("provider_names.json").toFile();
+            if (file.exists()) {
+                Map<String, String> overrides = objectMapper.readValue(file,
+                        new TypeReference<Map<String, String>>() {});
+                if (overrides != null && !overrides.isEmpty()) {
+                    sqliteStorage.setSetting("provider_name_overrides",
+                            objectMapper.writeValueAsString(overrides));
+                    log.info("迁移厂商显示名覆盖: {} 条", overrides.size());
+                }
+            }
+        } catch (Exception e) {
+            log.warn("迁移厂商显示名覆盖失败（非致命）", e);
+        }
+    }
+
+    /** 迁移 IP 注册计数（读取 data/ip_register.json） */
+    private void migrateIpRegister() {
+        try {
+            Path dataDir = Paths.get(System.getProperty("user.dir"), "data");
+            File file = dataDir.resolve("ip_register.json").toFile();
+            if (file.exists()) {
+                String content = new String(java.nio.file.Files.readAllBytes(file.toPath()));
+                sqliteStorage.setSetting("ip_register", content);
+                log.info("迁移IP注册计数完成");
+            }
+        } catch (Exception e) {
+            log.warn("迁移IP注册计数失败（非致命）", e);
+        }
+    }
+
+    /** 迁移聊天记录（读取 data/chat_history/*.json） */
+    private int migrateChatHistories() {
+        int count = 0;
+        try {
+            Path chatDir = Paths.get(System.getProperty("user.dir"), "data", "chat_history");
+            File dir = chatDir.toFile();
+            if (!dir.exists()) return 0;
+
+            File[] files = dir.listFiles((d, name) -> name.endsWith(".json"));
+            if (files == null) return 0;
+
+            for (File file : files) {
+                try {
+                    // 提取 userId（文件名格式: userId.json 或 userId_timestamp.json）
+                    String fileName = file.getName();
+                    String userId;
+                    if (fileName.contains("_")) {
+                        // 归档文件: userId_timestamp.json → 跳过（只迁移主文件）
+                        continue;
+                    }
+                    userId = fileName.replace(".json", "");
+
+                    String chatData = new String(java.nio.file.Files.readAllBytes(file.toPath()));
+                    sqliteStorage.saveChatData(userId, chatData, null, file.lastModified());
+                    count++;
+                } catch (Exception e) {
+                    log.warn("迁移聊天记录文件失败: {}", file.getName(), e);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("迁移聊天记录失败（非致命）", e);
+        }
+        return count;
+    }
+
+    /**
+     * 获取 SQLite 数据库文件大小（人类可读格式）
+     * @return 文件大小字符串，如 "2.3MB"；文件不存在返回 "0B"
+     */
+    public String getDbFileSize() {
+        try {
+            Path dbPath = Paths.get(System.getProperty("user.dir"), "data", "chatai.db");
+            File dbFile = dbPath.toFile();
+            if (!dbFile.exists()) return "0B";
+            long bytes = dbFile.length();
+            if (bytes < 1024) return bytes + "B";
+            if (bytes < 1024 * 1024) return String.format("%.1fKB", bytes / 1024.0);
+            return String.format("%.1fMB", bytes / (1024.0 * 1024.0));
+        } catch (Exception e) {
+            return "未知";
+        }
+    }
+}

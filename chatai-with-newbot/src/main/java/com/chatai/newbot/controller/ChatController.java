@@ -2,7 +2,7 @@ package com.chatai.newbot.controller;
 
 import com.chatai.newbot.model.*;
 import com.chatai.newbot.service.ChatHistoryService;
-import com.chatai.newbot.service.FileStorageService;
+import com.chatai.newbot.service.StorageManager;
 import com.chatai.newbot.service.UnifiedChatService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,10 +21,10 @@ import java.util.*;
 public class ChatController {
     private static final Logger log = LoggerFactory.getLogger(ChatController.class);
     private final UnifiedChatService chatService;
-    private final FileStorageService storageService;
+    private final StorageManager storageService;
     private final ChatHistoryService chatHistoryService;
 
-    public ChatController(UnifiedChatService chatService, FileStorageService storageService,
+    public ChatController(UnifiedChatService chatService, StorageManager storageService,
                           ChatHistoryService chatHistoryService) {
         this.chatService = chatService;
         this.storageService = storageService;

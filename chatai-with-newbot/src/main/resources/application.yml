@@ -1,4 +1,9 @@
 spring:
+  datasource:
+    url: jdbc:sqlite:data/chatai.db
+    driver-class-name: org.sqlite.JDBC
+    hikari:
+      maximum-pool-size: 1
   thymeleaf:
     cache: false
     check-template: true

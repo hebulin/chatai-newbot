@@ -4,10 +4,9 @@ import com.chatai.newbot.model.*;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
-import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 
 import jakarta.annotation.PostConstruct;
 import java.io.File;
@@ -23,10 +22,15 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
-@Service
-public class FileStorageService {
+/**
+ * JSON 文件存储实现 - 原有 FileStorageService 重构而来
+ * 数据以 JSON 文件形式存储在 data/ 目录下。
+ * Token 相关逻辑已抽到 StorageManager 中（两种模式共用内存 Token）。
+ */
+@Component
+public class JsonFileStorageService implements StorageService {
 
-    private static final Logger log = LoggerFactory.getLogger(FileStorageService.class);
+    private static final Logger log = LoggerFactory.getLogger(JsonFileStorageService.class);
     private final ObjectMapper objectMapper;
     private Path dataDir;
 
@@ -34,30 +38,26 @@ public class FileStorageService {
     private List<User> users = Collections.synchronizedList(new ArrayList<>());
     private List<ModelConfig> modelConfigs = Collections.synchronizedList(new ArrayList<>());
     private List<Provider> providers = Collections.synchronizedList(new ArrayList<>());
-    // 预置厂商的显示名覆盖（用户自定义，key=providerId，value=显示名），用于在不修改 providers.json 的情况下改显示名
-    // 预置厂商的图标不可改，只能在自定义厂商中设置（保存在 ModelConfig.providerIcon）
     private Map<String, String> providerNameOverrides = new ConcurrentHashMap<>();
-    // 按天存储的使用记录: dateKey(yyyy-MM-dd) -> 日志列表
     private Map<String, List<UsageLog>> usageLogsByDay = new ConcurrentHashMap<>();
-    private Map<String, Map<String, Integer>> ipRegisterMap = new ConcurrentHashMap<>(); // date -> {ip -> count}
-    private Map<String, String> activeTokens = new ConcurrentHashMap<>(); // token -> userId
-    private Map<String, String> tokenIps = new ConcurrentHashMap<>();   // token -> 登录时绑定的IP（用于后续请求IP校验）
-    private volatile String defaultModelId = null; // 全局默认模型（新会话自动选中），持久化到 default_model.json
+    private Map<String, Map<String, Integer>> ipRegisterMap = new ConcurrentHashMap<>();
+    private volatile String defaultModelId = null;
 
     // 内置admin密码
     private static final String ADMIN_USERNAME = "admin";
     private static final String ADMIN_DEFAULT_PASSWORD = "admin123";
 
-    public FileStorageService() {
+    public JsonFileStorageService() {
         this.objectMapper = new ObjectMapper();
         this.objectMapper.enable(SerializationFeature.INDENT_OUTPUT);
     }
 
-
+    /**
+     * 初始化：加载所有 JSON 数据文件
+     */
     @PostConstruct
     public void init() {
         try {
-            // 数据目录在 jar 同级的 data 文件夹中
             String userDir = System.getProperty("user.dir");
             this.dataDir = Paths.get(userDir, "data");
             Files.createDirectories(dataDir);
@@ -77,18 +77,18 @@ public class FileStorageService {
             log.info("已加载 IP 注册计数");
             loadDefaultModel();
 
-            // 确保admin用户存在
             ensureAdminUser();
             log.info("已确保admin用户存在");
         } catch (Exception e) {
-            log.error("初始化文件存储服务失败", e);
-            throw new RuntimeException("初始化文件存储服务失败", e);
+            log.error("初始化JSON存储服务失败", e);
+            throw new RuntimeException("初始化JSON存储服务失败", e);
         }
-        log.info("文件存储服务初始化完成");
+        log.info("JSON存储服务初始化完成");
     }
 
     // ========== 用户相关 ==========
 
+    /** 确保内置 admin 用户存在 */
     private void ensureAdminUser() {
         Optional<User> adminOpt = users.stream()
                 .filter(u -> ADMIN_USERNAME.equals(u.getUsername()))
@@ -106,6 +106,7 @@ public class FileStorageService {
         }
     }
 
+    @Override
     public User authenticate(String username, String password) {
         return users.stream()
                 .filter(u -> u.getUsername().equals(username)
@@ -114,6 +115,7 @@ public class FileStorageService {
                 .orElse(null);
     }
 
+    @Override
     public boolean canRegisterFromIp(String ip) {
         String today = LocalDate.now().toString();
         Map<String, Integer> todayMap = ipRegisterMap.computeIfAbsent(today, k -> new ConcurrentHashMap<>());
@@ -121,12 +123,11 @@ public class FileStorageService {
         return count < 5;
     }
 
+    @Override
     public User register(String username, String password, String ip) {
-        // 检查用户名是否已存在
         if (users.stream().anyMatch(u -> u.getUsername().equals(username))) {
             return null;
         }
-        // 不允许注册admin
         if (ADMIN_USERNAME.equalsIgnoreCase(username)) {
             return null;
         }
@@ -141,7 +142,6 @@ public class FileStorageService {
         users.add(user);
         saveUsers();
 
-        // 更新IP注册计数
         String today = LocalDate.now().toString();
         Map<String, Integer> todayMap = ipRegisterMap.computeIfAbsent(today, k -> new ConcurrentHashMap<>());
         todayMap.merge(ip, 1, Integer::sum);
@@ -150,6 +150,7 @@ public class FileStorageService {
         return user;
     }
 
+    @Override
     public void updateLoginInfo(String userId, String ip, String browser) {
         users.stream()
                 .filter(u -> u.getId().equals(userId))
@@ -162,49 +163,24 @@ public class FileStorageService {
                 });
     }
 
-    public String createToken(String userId, String ip) {
-        String token = UUID.randomUUID().toString().replace("-", "");
-        activeTokens.put(token, userId);
-        if (ip != null && !ip.isEmpty()) {
-            tokenIps.put(token, ip);
-        }
-        return token;
-    }
-
-    public User getUserByToken(String token) {
-        if (token == null) return null;
-        String userId = activeTokens.get(token);
-        if (userId == null) return null;
-        return users.stream().filter(u -> u.getId().equals(userId)).findFirst().orElse(null);
-    }
-
-    /** 获取 token 登录时绑定的 IP（未绑定则返回 null） */
-    public String getTokenIp(String token) {
-        if (token == null) return null;
-        return tokenIps.get(token);
-    }
-
-    public void removeToken(String token) {
-        if (token != null) {
-            activeTokens.remove(token);
-            tokenIps.remove(token);
-        }
-    }
-
+    @Override
     public List<User> getAllUsers() {
         return new ArrayList<>(users);
     }
 
+    @Override
     public User getUserById(String id) {
         return users.stream().filter(u -> u.getId().equals(id)).findFirst().orElse(null);
     }
 
+    @Override
     public boolean deleteUser(String userId) {
         boolean removed = users.removeIf(u -> u.getId().equals(userId) && !"admin".equals(u.getRole()));
         if (removed) saveUsers();
         return removed;
     }
 
+    @Override
     public void updateUser(User user) {
         for (int i = 0; i < users.size(); i++) {
             if (users.get(i).getId().equals(user.getId())) {
@@ -215,30 +191,24 @@ public class FileStorageService {
         }
     }
 
-    /**
-     * 修改用户密码
-     * @param userId 用户ID
-     * @param oldPassword 旧密码（明文）
-     * @param newPassword 新密码（明文）
-     * @return 0=成功; 1=用户不存在; 2=旧密码错误
-     */
+    @Override
     public int changePassword(String userId, String oldPassword, String newPassword) {
         User user = getUserById(userId);
         if (user == null) return 1;
         if (!user.getPassword().equals(hashPassword(oldPassword))) return 2;
         user.setPassword(hashPassword(newPassword));
         saveUsers();
-        // 移除该用户的所有token，强制重新登录
-        activeTokens.entrySet().removeIf(e -> userId.equals(e.getValue()));
         return 0;
     }
 
     // ========== 模型配置相关 ==========
 
+    @Override
     public List<ModelConfig> getAllModelConfigs() {
         return new ArrayList<>(modelConfigs);
     }
 
+    @Override
     public List<ModelConfig> getVisibleModels(User user) {
         return modelConfigs.stream()
                 .filter(ModelConfig::isEnabled)
@@ -248,10 +218,12 @@ public class FileStorageService {
                 .collect(Collectors.toList());
     }
 
+    @Override
     public ModelConfig getModelConfigById(String id) {
         return modelConfigs.stream().filter(m -> m.getId().equals(id)).findFirst().orElse(null);
     }
 
+    @Override
     public ModelConfig addModelConfig(ModelConfig config) {
         if (config.getId() == null || config.getId().isEmpty()) {
             config.setId(UUID.randomUUID().toString());
@@ -259,17 +231,47 @@ public class FileStorageService {
         if (config.getCreatedAt() == null) {
             config.setCreatedAt(nowString());
         }
-        // 默认全员可见
         if (config.getVisibleToAll() == null) {
             config.setVisibleToAll(true);
         }
-        // 自动填充厂商信息
-        if (config.getProviderId() != null && !"custom".equals(config.getProviderId())) {
+        fillProviderInfo(config);
+        modelConfigs.add(config);
+        saveModelConfigs();
+        return config;
+    }
+
+    @Override
+    public void updateModelConfig(ModelConfig config) {
+        for (int i = 0; i < modelConfigs.size(); i++) {
+            if (modelConfigs.get(i).getId().equals(config.getId())) {
+                fillProviderInfo(config);
+                modelConfigs.set(i, config);
+                saveModelConfigs();
+                return;
+            }
+        }
+    }
+
+    @Override
+    public boolean deleteModelConfig(String id) {
+        boolean removed = modelConfigs.removeIf(m -> m.getId().equals(id));
+        if (removed) {
+            if (id != null && id.equals(defaultModelId)) {
+                clearDefaultModelId();
+            }
+            saveModelConfigs();
+        }
+        return removed;
+    }
+
+    /** 自动填充厂商信息（providerName、providerIcon、thinkingParamType） */
+    private void fillProviderInfo(ModelConfig config) {
+        if (config.getProviderId() != null && !"custom".equals(config.getProviderId())
+                && !"__custom__".equals(config.getProviderId())) {
             providers.stream()
                     .filter(p -> p.getId().equals(config.getProviderId()))
                     .findFirst()
                     .ifPresent(p -> {
-                        // 优先使用用户自定义的显示名覆盖；图标直接来自 providers.json
                         String displayName = getProviderDisplayName(p.getId());
                         if (config.getProviderName() == null || config.getProviderName().isEmpty()) {
                             config.setProviderName(displayName);
@@ -282,49 +284,11 @@ public class FileStorageService {
                         }
                     });
         }
-        modelConfigs.add(config);
-        saveModelConfigs();
-        return config;
     }
 
-    public void updateModelConfig(ModelConfig config) {
-        for (int i = 0; i < modelConfigs.size(); i++) {
-            if (modelConfigs.get(i).getId().equals(config.getId())) {
-                // 自动填充厂商信息（与addModelConfig保持一致）
-                if (config.getProviderId() != null && !"custom".equals(config.getProviderId())) {
-                    providers.stream()
-                            .filter(p -> p.getId().equals(config.getProviderId()))
-                            .findFirst()
-                            .ifPresent(p -> {
-                                // 优先使用用户自定义的显示名覆盖；图标直接来自 providers.json
-                                config.setProviderName(getProviderDisplayName(p.getId()));
-                                config.setProviderIcon(p.getIcon());
-                                if (config.getThinkingParamType() == null || config.getThinkingParamType().isEmpty()) {
-                                    config.setThinkingParamType(p.getThinkingParamType());
-                                }
-                            });
-                }
-                modelConfigs.set(i, config);
-                saveModelConfigs();
-                return;
-            }
-        }
-    }
+    // ========== 默认模型 ==========
 
-    public boolean deleteModelConfig(String id) {
-        boolean removed = modelConfigs.removeIf(m -> m.getId().equals(id));
-        if (removed) {
-            // 删除的是默认模型则清空默认设置
-            if (id != null && id.equals(defaultModelId)) {
-                clearDefaultModelId();
-            }
-            saveModelConfigs();
-        }
-        return removed;
-    }
-
-    // ========== 默认模型（全局，新会话自动选中） ==========
-
+    /** 从 default_model.json 加载默认模型ID */
     private void loadDefaultModel() {
         File file = dataDir.resolve("default_model.json").toFile();
         if (file.exists()) {
@@ -340,21 +304,25 @@ public class FileStorageService {
         }
     }
 
+    /** 保存默认模型ID到 default_model.json */
     private void saveDefaultModel() {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("defaultModelId", defaultModelId);
         saveToFile("default_model.json", data);
     }
 
+    @Override
     public String getDefaultModelId() {
         return defaultModelId;
     }
 
+    @Override
     public synchronized void setDefaultModelId(String modelId) {
         this.defaultModelId = (modelId == null || modelId.isEmpty()) ? null : modelId;
         saveDefaultModel();
     }
 
+    @Override
     public synchronized void clearDefaultModelId() {
         this.defaultModelId = null;
         saveDefaultModel();
@@ -362,8 +330,8 @@ public class FileStorageService {
 
     // ========== 厂商相关 ==========
 
+    @Override
     public List<Provider> getAllProviders() {
-        // 返回时应用显示名覆盖（图标不可改，直接使用 providers.json 中的值）
         List<Provider> copy = new ArrayList<>();
         for (Provider p : providers) {
             Provider c = new Provider();
@@ -379,17 +347,13 @@ public class FileStorageService {
         return copy;
     }
 
-    /**
-     * 通过 ID 获取原始预置厂商（不应用覆盖）
-     */
+    @Override
     public Provider getProvider(String providerId) {
         if (providerId == null) return null;
         return providers.stream().filter(p -> p.getId().equals(providerId)).findFirst().orElse(null);
     }
 
-    /**
-     * 获取预置厂商当前的显示名（应用了用户自定义的覆盖）
-     */
+    @Override
     public String getProviderDisplayName(String providerId) {
         if (providerId == null) return null;
         Provider p = providers.stream().filter(x -> x.getId().equals(providerId)).findFirst().orElse(null);
@@ -398,17 +362,7 @@ public class FileStorageService {
         return (override != null && !override.trim().isEmpty()) ? override : p.getName();
     }
 
-    /**
-     * 修改厂商显示名/图标
-     * - 预置厂商(providerId ∈ providers.json): 仅修改显示名, 图标不可改(来自 providers.json)
-     * - 自定义厂商(providerId="__custom__"): 仅修改 providerName=oldName 对应的 ModelConfig（可同时改 name+icon）
-     *
-     * @param providerId 预置厂商ID / 自定义厂商固定 "__custom__"
-     * @param newName 新的显示名（不可为空）
-     * @param newIcon 新的图标（仅自定义厂商生效；预置厂商会被忽略）
-     * @param oldName 自定义厂商的旧名（仅自定义厂商使用，可为 null）
-     * @return 实际被改动的 ModelConfig 数量
-     */
+    @Override
     public synchronized int renameProvider(String providerId, String newName, String newIcon, String oldName) {
         if (providerId == null || newName == null) {
             throw new IllegalArgumentException("providerId 和 newName 不能为空");
@@ -419,7 +373,6 @@ public class FileStorageService {
         }
         String trimmedIcon = newIcon == null ? "" : newIcon.trim();
         if (providerId.startsWith("__custom__")) {
-            // 自定义厂商：仅更新 providerId=__custom__ 且 providerName=oldName 的 ModelConfig
             String targetOldName = oldName == null ? trimmed : oldName;
             int updated = 0;
             for (ModelConfig c : modelConfigs) {
@@ -434,17 +387,14 @@ public class FileStorageService {
             if (updated > 0) saveModelConfigs();
             return updated;
         }
-        // 预置厂商：仅允许修改显示名；图标来自 providers.json，不可改（忽略 newIcon 参数）
         Provider p = providers.stream().filter(x -> x.getId().equals(providerId)).findFirst().orElse(null);
         if (p == null) throw new IllegalArgumentException("厂商不存在: " + providerId);
-        // 名称：与默认名一致则清除覆盖
         if (trimmed.equals(p.getName())) {
             providerNameOverrides.remove(providerId);
         } else {
             providerNameOverrides.put(providerId, trimmed);
         }
         saveProviderNameOverrides();
-        // 同步所有 ModelConfig（仅同步名称；图标保持 providers.json 的值不变）
         int updated = 0;
         for (ModelConfig c : modelConfigs) {
             if (providerId.equals(c.getProviderId()) && !trimmed.equals(c.getProviderName())) {
@@ -456,14 +406,10 @@ public class FileStorageService {
         return updated;
     }
 
-    /**
-     * 获取所有自定义厂商条目（去重，按 providerName 分组）
-     * 用于在管理后台的"厂商管理"Tab 中显示
-     */
+    @Override
     public List<Map<String, Object>> listCustomProviders() {
-        // 按 providerName 分组，记录数量和最常见的图标
-        Map<String, int[]> nameCount = new LinkedHashMap<>(); // name -> [count]
-        Map<String, Map<String, Integer>> nameIconCount = new LinkedHashMap<>(); // name -> {icon -> count}
+        Map<String, int[]> nameCount = new LinkedHashMap<>();
+        Map<String, Map<String, Integer>> nameIconCount = new LinkedHashMap<>();
         for (ModelConfig c : modelConfigs) {
             if ("__custom__".equals(c.getProviderId())) {
                 String n = c.getProviderName();
@@ -481,7 +427,6 @@ public class FileStorageService {
             m.put("id", "__custom__");
             m.put("name", name);
             m.put("modelCount", count[0]);
-            // 选取最常见的图标
             String mainIcon = "";
             int maxCount = 0;
             Map<String, Integer> iconMap = nameIconCount.get(name);
@@ -500,8 +445,9 @@ public class FileStorageService {
         return result;
     }
 
-    // ========== 厂商显示名/图标覆盖（持久化） ==========
+    // ========== 厂商显示名覆盖（持久化） ==========
 
+    /** 从 provider_names.json 加载厂商显示名覆盖 */
     private void loadProviderNameOverrides() {
         File file = dataDir.resolve("provider_names.json").toFile();
         if (file.exists()) {
@@ -518,12 +464,14 @@ public class FileStorageService {
         }
     }
 
+    /** 保存厂商显示名覆盖到 provider_names.json */
     private void saveProviderNameOverrides() {
         saveToFile("provider_names.json", providerNameOverrides);
     }
 
     // ========== 使用记录相关（按天存储） ==========
 
+    @Override
     public void addUsageLog(UsageLog logEntry) {
         String dayKey = logEntry.getTimestamp() != null ? logEntry.getTimestamp().substring(0, 10) : LocalDate.now().toString();
         List<UsageLog> dayList = usageLogsByDay.computeIfAbsent(dayKey, k -> Collections.synchronizedList(new ArrayList<>()));
@@ -531,6 +479,7 @@ public class FileStorageService {
         saveUsageLogsByDay(dayKey);
     }
 
+    @Override
     public List<UsageLog> getAllUsageLogs() {
         List<UsageLog> all = new ArrayList<>();
         for (List<UsageLog> dayList : usageLogsByDay.values()) {
@@ -539,12 +488,14 @@ public class FileStorageService {
         return all;
     }
 
+    @Override
     public List<UsageLog> getUsageLogsByUser(String userId) {
         return getAllUsageLogs().stream()
                 .filter(l -> l.getUserId().equals(userId))
                 .collect(Collectors.toList());
     }
 
+    @Override
     public void updateUsageLog(UsageLog updatedLog) {
         String dayKey = updatedLog.getTimestamp() != null ? updatedLog.getTimestamp().substring(0, 10) : null;
         if (dayKey == null) return;
@@ -568,24 +519,26 @@ public class FileStorageService {
         }
     }
 
-    /** 获取所有已记录的日期列表（用于查询） */
+    @Override
     public List<String> getUsageLogDates() {
         return usageLogsByDay.keySet().stream().sorted().collect(Collectors.toList());
     }
 
     // ========== 文件读写 ==========
 
+    /** 加载用户列表 */
     private void loadUsers() {
         users = loadList("users.json", new TypeReference<List<User>>() {});
     }
 
+    /** 保存用户列表 */
     private void saveUsers() {
         saveToFile("users.json", users);
     }
 
+    /** 加载模型配置列表（含旧数据兼容补全） */
     private void loadModelConfigs() {
         modelConfigs = loadList("models.json", new TypeReference<List<ModelConfig>>() {});
-        // 兼容旧数据：自动补全 providerName、providerIcon、thinkingParamType
         boolean needSave = false;
         for (ModelConfig config : modelConfigs) {
             if (config.getProviderId() != null && !"custom".equals(config.getProviderId())) {
@@ -614,12 +567,13 @@ public class FileStorageService {
         }
     }
 
+    /** 保存模型配置列表 */
     private void saveModelConfigs() {
         saveToFile("models.json", modelConfigs);
     }
 
+    /** 从 classpath 加载内置厂商 providers.json */
     private void loadProviders() {
-        // providers.json从classpath加载（内置的）
         try {
             java.io.InputStream is = getClass().getClassLoader().getResourceAsStream("providers.json");
             if (is != null) {
@@ -636,27 +590,23 @@ public class FileStorageService {
         }
     }
 
+    /** 加载使用记录（兼容旧单文件格式，自动迁移到按天存储） */
     private void loadUsageLogs() {
-        // 兼容旧的单文件 usage_logs.json
         File oldFile = dataDir.resolve("usage_logs.json").toFile();
         if (oldFile.exists()) {
             try {
                 List<UsageLog> oldLogs = objectMapper.readValue(oldFile, new TypeReference<List<UsageLog>>() {});
-                // 迁移到按天存储
                 Map<String, List<UsageLog>> migrated = oldLogs.stream()
                         .collect(Collectors.groupingBy(l ->
                                 l.getTimestamp() != null ? l.getTimestamp().substring(0, 10) : "unknown"));
                 usageLogsByDay.putAll(migrated);
-                // 保存拆分后的文件
                 migrated.keySet().forEach(this::saveUsageLogsByDay);
-                // 重命名旧文件为备份
                 oldFile.renameTo(dataDir.resolve("usage_logs.json.bak").toFile());
                 log.info("已迁移旧 usage_logs.json 到按天存储格式");
             } catch (Exception e) {
                 log.error("迁移旧 usage_logs.json 失败", e);
             }
         }
-        // 加载所有 usage_logs_YYYY-MM-DD.json 文件
         File dataDirFile = dataDir.toFile();
         File[] dayFiles = dataDirFile.listFiles((dir, name) -> name.startsWith("usage_logs_") && name.endsWith(".json"));
         if (dayFiles != null) {
@@ -672,12 +622,14 @@ public class FileStorageService {
         }
     }
 
+    /** 保存指定日期的使用记录 */
     private void saveUsageLogsByDay(String dayKey) {
         List<UsageLog> dayList = usageLogsByDay.get(dayKey);
         if (dayList == null) return;
         saveToFile("usage_logs_" + dayKey + ".json", dayList);
     }
 
+    /** 加载 IP 注册计数 */
     private void loadIpRegisterMap() {
         File file = dataDir.resolve("ip_register.json").toFile();
         if (file.exists()) {
@@ -691,10 +643,12 @@ public class FileStorageService {
         }
     }
 
+    /** 保存 IP 注册计数 */
     private void saveIpRegisterMap() {
         saveToFile("ip_register.json", ipRegisterMap);
     }
 
+    /** 通用列表加载 */
     private <T> List<T> loadList(String fileName, TypeReference<List<T>> typeRef) {
         File file = dataDir.resolve(fileName).toFile();
         if (file.exists()) {
@@ -707,6 +661,7 @@ public class FileStorageService {
         return Collections.synchronizedList(new ArrayList<>());
     }
 
+    /** 通用对象保存到 JSON 文件 */
     private void saveToFile(String fileName, Object data) {
         try {
             objectMapper.writeValue(dataDir.resolve(fileName).toFile(), data);
@@ -717,6 +672,11 @@ public class FileStorageService {
 
     // ========== 工具方法 ==========
 
+    /**
+     * SHA-256 密码哈希（加盐）
+     * @param password 明文密码
+     * @return 哈希后的十六进制字符串
+     */
     public static String hashPassword(String password) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
@@ -731,8 +691,8 @@ public class FileStorageService {
         }
     }
 
+    /** 获取当前时间字符串 yyyy-MM-dd HH:mm:ss */
     private String nowString() {
         return LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
     }
 }
-

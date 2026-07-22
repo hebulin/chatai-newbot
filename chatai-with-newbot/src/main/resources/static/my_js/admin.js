@@ -131,6 +131,7 @@ layui.use(['table', 'form', 'layer', 'laypage', 'element', 'jquery'], function()
         else if (idx === 1) { loadModels(); }
         else if (idx === 2) { loadProviderMgmt(); }
         else if (idx === 3) { loadUsers(); }
+        else if (idx === 4) { loadSettings(); }
     });
 
     loadProviders(); loadModels();
@@ -1247,6 +1248,91 @@ function doLogout() {
         localStorage.removeItem('token');
         window._layer.close(idx);
         window.location.href = '/login.html';
+    });
+}
+
+
+// ===== 系统设置 =====
+
+/**
+ * 加载存储模式设置
+ */
+function loadSettings() {
+    api('/api/admin/settings/storage').then(function(data) {
+        if (data && data.success) {
+            var info = data.data || {};
+            var useSqlite = info.useSqlite;
+            var modeEl = document.getElementById('currentStorageMode');
+            var sizeEl = document.getElementById('dbFileSize');
+            var toggleBtn = document.getElementById('sqliteToggleBtn');
+            var migrateBtn = document.getElementById('migrateBtn');
+            if (modeEl) modeEl.textContent = useSqlite ? 'SQLite 数据库' : 'JSON 文件';
+            if (modeEl) modeEl.style.color = useSqlite ? '#10b981' : '#f59e0b';
+            if (sizeEl) sizeEl.textContent = info.dbFileSize || '-';
+            if (toggleBtn) toggleBtn.textContent = useSqlite ? '切换到 JSON 文件' : '切换到 SQLite';
+            // 已在 SQLite 模式下隐藏迁移按钮
+            if (migrateBtn) migrateBtn.style.display = useSqlite ? 'none' : '';
+        }
+    });
+}
+
+/**
+ * 切换存储模式（JSON ↔ SQLite）
+ */
+function toggleStorageMode() {
+    var layer = window._layer;
+    // 先获取当前状态
+    api('/api/admin/settings/storage').then(function(data) {
+        if (!data || !data.success) return;
+        var currentSqlite = data.data && data.data.useSqlite;
+        var targetSqlite = !currentSqlite;
+        var msg = targetSqlite
+            ? '确定切换到 SQLite 存储吗？首次切换会自动迁移现有 JSON 数据。'
+            : '确定切换回 JSON 文件存储吗？切换后将读取 JSON 文件中的旧数据。';
+        layer.confirm(msg, {icon: 3, title: '切换存储模式'}, function(idx) {
+            layer.close(idx);
+            var loadIdx = layer.load(1, {shade: [0.3, '#000']});
+            api('/api/admin/settings/storage', {
+                method: 'PUT',
+                body: JSON.stringify({ useSqlite: targetSqlite })
+            }).then(function(res) {
+                layer.close(loadIdx);
+                if (res && res.success) {
+                    layer.msg(res.message || '切换成功', {icon: 1});
+                    loadSettings();
+                } else {
+                    layer.msg(res.message || '切换失败', {icon: 2});
+                }
+            }).catch(function() {
+                layer.close(loadIdx);
+                layer.msg('请求失败', {icon: 2});
+            });
+        });
+    });
+}
+
+/**
+ * 一键迁移：将全部 JSON 数据写入 SQLite
+ */
+function migrateToSqlite() {
+    var layer = window._layer;
+    layer.confirm('确定将全部 JSON 数据迁移到 SQLite 吗？此操作不会删除 JSON 文件。', {icon: 3, title: '一键迁移到 SQLite'}, function(idx) {
+        layer.close(idx);
+        var loadIdx = layer.load(1, {shade: [0.3, '#000']});
+        api('/api/admin/settings/storage/migrate', {
+            method: 'POST'
+        }).then(function(res) {
+            layer.close(loadIdx);
+            if (res && res.success) {
+                layer.msg(res.message || '迁移完成', {icon: 1, time: 3000});
+                loadSettings();
+            } else {
+                layer.msg(res.message || '迁移失败', {icon: 2});
+            }
+        }).catch(function() {
+            layer.close(loadIdx);
+            layer.msg('请求失败', {icon: 2});
+        });
     });
 }
 

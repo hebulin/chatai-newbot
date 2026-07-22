@@ -22,10 +22,10 @@ import java.util.concurrent.atomic.AtomicReference;
 @Service
 public class UnifiedChatService {
     private static final Logger log = LoggerFactory.getLogger(UnifiedChatService.class);
-    private final FileStorageService storageService;
+    private final StorageManager storageService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public UnifiedChatService(FileStorageService storageService) {
+    public UnifiedChatService(StorageManager storageService) {
         this.storageService = storageService;
     }
 

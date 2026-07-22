@@ -1,7 +1,8 @@
 package com.chatai.newbot.controller;
 
 import com.chatai.newbot.model.*;
-import com.chatai.newbot.service.FileStorageService;
+import com.chatai.newbot.service.JsonFileStorageService;
+import com.chatai.newbot.service.StorageManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
@@ -17,9 +18,9 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/admin")
 public class AdminController {
     private static final Logger log = LoggerFactory.getLogger(AdminController.class);
-    private final FileStorageService storageService;
+    private final StorageManager storageService;
 
-    public AdminController(FileStorageService storageService) {
+    public AdminController(StorageManager storageService) {
         this.storageService = storageService;
     }
 
@@ -426,7 +427,7 @@ public class AdminController {
         }
         String password = (String) body.get("password");
         if (password != null && !password.trim().isEmpty()) {
-            user.setPassword(FileStorageService.hashPassword(password));
+            user.setPassword(JsonFileStorageService.hashPassword(password));
         }
         storageService.updateUser(user);
         result.put("success", true);
@@ -669,6 +670,97 @@ public class AdminController {
             result.put("page", page);
             result.put("size", size);
             result.put("totalPages", totalPages);
+        }
+        return result;
+    }
+
+    // ========== 系统设置（存储模式） ==========
+
+    /**
+     * 获取当前存储模式
+     * 返回: { "success": true, "data": { "useSqlite": false, "dbFileSize": "2.3MB" } }
+     */
+    @GetMapping("/settings/storage")
+    public Map<String, Object> getStorageSettings(HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("useSqlite", storageService.isUseSqlite());
+        data.put("dbFileSize", storageService.getDbFileSize());
+        result.put("success", true);
+        result.put("data", data);
+        return result;
+    }
+
+    /**
+     * 切换存储模式
+     * 请求体: { "useSqlite": true }
+     * 首次开启 SQLite 时自动执行数据迁移
+     */
+    @PutMapping("/settings/storage")
+    public Map<String, Object> setStorageMode(@RequestBody Map<String, Object> body,
+                                               HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        Boolean useSqlite = (Boolean) body.get("useSqlite");
+        if (useSqlite == null) {
+            result.put("success", false);
+            result.put("message", "请指定 useSqlite 参数");
+            return result;
+        }
+        try {
+            if (useSqlite && !storageService.isUseSqlite()) {
+                // 首次开启 SQLite → 自动迁移数据
+                String migrationDone = null;
+                try {
+                    migrationDone = storageService.getSetting("migration_done");
+                } catch (Exception ignored) {}
+                if (!"true".equals(migrationDone)) {
+                    log.info("首次开启SQLite，自动执行数据迁移...");
+                    storageService.migrateJsonToSqlite();
+                }
+            }
+            storageService.setUseSqlite(useSqlite);
+            result.put("success", true);
+            result.put("message", useSqlite ? "已切换到 SQLite 存储" : "已切换到 JSON 文件存储");
+        } catch (Exception e) {
+            log.error("切换存储模式失败", e);
+            result.put("success", false);
+            result.put("message", "切换失败: " + e.getMessage());
+        }
+        return result;
+    }
+
+    /**
+     * 手动触发数据迁移（JSON → SQLite）
+     * 返回: { "success": true, "message": "迁移完成：users=12, models=8, logs=1523" }
+     */
+    @PostMapping("/settings/storage/migrate")
+    public Map<String, Object> migrateData(HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        try {
+            Map<String, Object> stats = storageService.migrateJsonToSqlite();
+            result.put("success", true);
+            result.put("message", String.format("迁移完成：users=%s, models=%s, logs=%s, chatHistories=%s",
+                    stats.get("users"), stats.get("models"), stats.get("logs"), stats.get("chatHistories")));
+            result.put("stats", stats);
+        } catch (Exception e) {
+            log.error("数据迁移失败", e);
+            result.put("success", false);
+            result.put("message", "迁移失败: " + e.getMessage());
         }
         return result;
     }
