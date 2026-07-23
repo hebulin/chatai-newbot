@@ -266,16 +266,17 @@
                             </div>
                         </div>
                         <div class="settings-actions">
-                            <button class="primary-btn" id="sqliteToggleBtn" onclick="toggleStorageMode()">
-                                切换到 SQLite
-                            </button>
                             <button class="cancel-btn" id="migrateBtn" onclick="migrateToSqlite()">
                                 一键迁移到 SQLite
                             </button>
+                            <button class="primary-btn" id="sqliteToggleBtn" onclick="toggleStorageMode()">
+                                切换到 SQLite
+                            </button>
                         </div>
                         <p class="settings-hint">
+                            <b style="color:#f56c6c">重要：切换到 SQLite 前请务必先「一键迁移」。</b>
+                            若未迁移直接切换，SQLite 中可能没有用户账号，将导致所有人（含管理员）无法登录。页面已强制「先迁移、后切换」。<br>
                             切换后新数据将写入 SQLite 数据库文件 (data/chatai.db)。<br>
-                            首次切换会自动迁移现有 JSON 数据。也可点击「一键迁移」手动将全部 JSON 数据写入 SQLite。<br>
                             切换回 JSON 模式后，将读取 JSON 文件中的旧数据（迁移后新增的数据不会回写）。
                         </p>
                     </div>

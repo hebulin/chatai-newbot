@@ -9,8 +9,14 @@ import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PostConstruct;
 import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -424,7 +430,8 @@ public class StorageManager implements StorageService {
             Path dataDir = Paths.get(System.getProperty("user.dir"), "data");
             File file = dataDir.resolve("ip_register.json").toFile();
             if (file.exists()) {
-                String content = new String(java.nio.file.Files.readAllBytes(file.toPath()));
+                // 显式以 UTF-8 读取，避免使用平台默认字符集（Windows 下为 GBK）导致内容损坏
+                String content = new String(java.nio.file.Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
                 sqliteStorage.setSetting("ip_register", content);
                 log.info("迁移IP注册计数完成");
             }
@@ -433,7 +440,14 @@ public class StorageManager implements StorageService {
         }
     }
 
-    /** 迁移聊天记录（读取 data/chat_history/*.json） */
+    /**
+     * 迁移聊天记录（读取 data/chat_history/*.json）
+     * 与 JSON 模式读取逻辑保持一致：按 userId 合并主文件（userId.json）与归档文件
+     * （userId_时间戳.json），并剔除 deletedChatIds 中已删除的会话，最终以 UTF-8 写入 SQLite。
+     * 仅迁移现存用户（SQLite 用户表）的聊天记录；无对应用户的孤儿文件将被忽略。
+     * 注意：必须显式使用 UTF-8 读取文件，否则在 Windows（默认 GBK）下中文会变成乱码。
+     * @return 成功迁移的用户数量
+     */
     private int migrateChatHistories() {
         int count = 0;
         try {
@@ -442,30 +456,116 @@ public class StorageManager implements StorageService {
             if (!dir.exists()) return 0;
 
             File[] files = dir.listFiles((d, name) -> name.endsWith(".json"));
-            if (files == null) return 0;
+            if (files == null || files.length == 0) return 0;
 
+            // 按 userId 分组：userId.json 为主文件，userId_时间戳.json 为归档文件
+            // 用户ID为 UUID（只含连字符不含下划线），故取首个下划线前的部分作为 userId
+            Map<String, List<File>> filesByUser = new LinkedHashMap<>();
             for (File file : files) {
-                try {
-                    // 提取 userId（文件名格式: userId.json 或 userId_timestamp.json）
-                    String fileName = file.getName();
-                    String userId;
-                    if (fileName.contains("_")) {
-                        // 归档文件: userId_timestamp.json → 跳过（只迁移主文件）
-                        continue;
-                    }
-                    userId = fileName.replace(".json", "");
+                String name = file.getName();
+                String base = name.substring(0, name.length() - ".json".length());
+                int sep = base.indexOf('_');
+                String userId = (sep > 0) ? base.substring(0, sep) : base;
+                filesByUser.computeIfAbsent(userId, k -> new ArrayList<>()).add(file);
+            }
 
-                    String chatData = new String(java.nio.file.Files.readAllBytes(file.toPath()));
-                    sqliteStorage.saveChatData(userId, chatData, null, file.lastModified());
+            // 构建现存用户ID集合（取自 SQLite 用户表，迁移第1步已写入全部用户），用于过滤孤儿聊天记录
+            Set<String> validUserIds = new HashSet<>();
+            for (User u : sqliteStorage.getAllUsers()) {
+                if (u != null && u.getId() != null) {
+                    validUserIds.add(u.getId());
+                }
+            }
+
+            for (Map.Entry<String, List<File>> entry : filesByUser.entrySet()) {
+                String userId = entry.getKey();
+                // 校验：聊天记录对应的用户必须现存（SQLite 用户表），否则忽略该孤儿文件
+                if (!validUserIds.contains(userId)) {
+                    log.info("忽略孤儿聊天记录文件（无对应用户）: userId={}", userId);
+                    continue;
+                }
+                try {
+                    Map<String, Object> merged = mergeChatHistoryFiles(userId, entry.getValue());
+                    if (merged == null) continue;
+                    String json = objectMapper.writeValueAsString(merged);
+                    long updatedAtTs = ((Number) merged.get("updatedAtTs")).longValue();
+                    String updatedAt = LocalDateTime.ofInstant(
+                            Instant.ofEpochMilli(updatedAtTs), ZoneId.systemDefault())
+                            .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+                    sqliteStorage.saveChatData(userId, json, updatedAt, updatedAtTs);
                     count++;
                 } catch (Exception e) {
-                    log.warn("迁移聊天记录文件失败: {}", file.getName(), e);
+                    log.warn("迁移聊天记录失败: userId={}", userId, e);
                 }
             }
         } catch (Exception e) {
             log.warn("迁移聊天记录失败（非致命）", e);
         }
         return count;
+    }
+
+    /**
+     * 合并同一用户的多个聊天记录文件（主文件 + 归档文件），逻辑与 JSON 模式加载保持一致。
+     * 按文件最后修改时间升序合并 chats，剔除 deletedChatIds 中的会话，并取最新文件的 lastChatId。
+     * @param userId 用户ID
+     * @param files 该用户的全部聊天记录文件
+     * @return 合并后的会话数据 Map（含 userId、lastChatId、chats、updatedAtTs），无有效数据时返回 null
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> mergeChatHistoryFiles(String userId, List<File> files) {
+        // 按最后修改时间升序排序，保证后写入的文件覆盖先写入的同名会话
+        List<File> sorted = new ArrayList<>(files);
+        sorted.sort(Comparator.comparingLong(File::lastModified));
+
+        Map<String, Object> mergedChats = new LinkedHashMap<>();
+        String lastChatId = null;
+        long latestUpdateTime = 0;
+
+        for (File file : sorted) {
+            try {
+                // 显式以 UTF-8 读取，避免平台默认字符集（Windows 下 GBK）导致中文乱码
+                String content = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
+                Map<String, Object> data = objectMapper.readValue(content,
+                        new TypeReference<Map<String, Object>>() {});
+
+                Map<String, Object> fileChats = (Map<String, Object>) data.get("chats");
+                if (fileChats != null) {
+                    mergedChats.putAll(fileChats);
+                }
+                List<String> deletedIds = (List<String>) data.get("deletedChatIds");
+                if (deletedIds != null) {
+                    for (String deletedId : deletedIds) {
+                        mergedChats.remove(deletedId);
+                    }
+                }
+                String fileLastChatId = (String) data.get("lastChatId");
+                Object updatedAtObj = data.get("updatedAtTs");
+                long fileUpdateTime = (updatedAtObj instanceof Number)
+                        ? ((Number) updatedAtObj).longValue() : 0L;
+                if (fileUpdateTime >= latestUpdateTime) {
+                    latestUpdateTime = fileUpdateTime;
+                    lastChatId = fileLastChatId;
+                }
+            } catch (Exception e) {
+                log.warn("读取聊天记录文件失败: {}", file.getName(), e);
+            }
+        }
+
+        // 无有效会话数据则跳过，避免写入空记录
+        if (mergedChats.isEmpty()) {
+            return null;
+        }
+
+        // updatedAtTs 取文件内最新时间戳；缺失时回退为最新文件的修改时间
+        long updatedAtTs = latestUpdateTime > 0 ? latestUpdateTime
+                : sorted.get(sorted.size() - 1).lastModified();
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("userId", userId);
+        result.put("lastChatId", lastChatId);
+        result.put("chats", mergedChats);
+        result.put("updatedAtTs", updatedAtTs);
+        return result;
     }
 
     /**
