@@ -1037,7 +1037,9 @@ body::before {
 }
 
 /* ============================================
-   LAYUI MODAL OVERRIDES
+   LAYUI MODAL OVERRIDES — 全局弹窗统一风格
+   核心：弹窗始终居中且不超出视口，内容区可滚动，
+        底部操作栏固定不随内容滚动。
    ============================================ */
 .layui-layer-shade {
     backdrop-filter: blur(4px) !important;
@@ -1047,10 +1049,27 @@ body::before {
 .layui-layer {
     background: var(--paper) !important;
     border: none !important;
-    border-radius: var(--radius) !important;
-    box-shadow: var(--shadow-elevated) !important;
+    border-radius: var(--radius-lg) !important;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.45), 0 4px 16px rgba(0,0,0,0.3) !important;
     color: var(--ink) !important;
 }
+[data-theme="light"] .layui-layer {
+    box-shadow: 0 24px 64px rgba(15,23,42,0.18), 0 4px 16px rgba(15,23,42,0.10) !important;
+}
+
+/* type:1 页面弹窗：flex 纵向布局 + 最大高度约束，保证不超出视口 */
+.layui-layer-page {
+    display: flex !important;
+    flex-direction: column !important;
+    max-height: calc(100vh - 48px) !important;
+    overflow: hidden !important;
+    animation: dialogIn 0.26s var(--ease) backwards;
+}
+@keyframes dialogIn {
+    from { opacity: 0; transform: translateY(16px) scale(0.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 .layui-layer-title {
     background: transparent !important;
     color: var(--ink) !important;
@@ -1058,12 +1077,125 @@ body::before {
     font-family: var(--sans) !important;
     font-size: 16px !important;
     font-weight: 600 !important;
-    padding: 0 20px !important;
-    height: 52px !important;
-    line-height: 52px !important;
-    border-radius: var(--radius) var(--radius) 0 0 !important;
+    padding: 0 24px !important;
+    height: 54px !important;
+    line-height: 54px !important;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0 !important;
+    flex-shrink: 0 !important;
+    padding-right: 56px !important; /* 给关闭按钮让位，避免长标题与其重叠 */
+}
+
+/* 关闭按钮：主题自适应（修复深色模式下不可见），垂直居中于标题栏，悬停圆形反馈 */
+.layui-layer-setwin {
+    top: 11px !important;
+    right: 14px !important;
+    font-size: 0 !important;
+}
+.layui-layer-setwin .layui-icon-close {
+    display: inline-block !important;
+    vertical-align: middle !important;
+    width: 32px !important;
+    height: 32px !important;
+    line-height: 32px !important;
+    margin-left: 0 !important;
+    text-align: center !important;
+    font-size: 16px !important;
+    color: var(--ink-2) !important;
+    border-radius: 50% !important;
+    cursor: pointer !important;
+    transition: color 0.2s var(--ease), background-color 0.2s var(--ease), transform 0.3s var(--ease) !important;
+}
+.layui-layer-setwin .layui-icon-close:hover {
+    color: var(--ink) !important;
+    background: var(--paper-2) !important;
+    transform: rotate(90deg);
+}
+
+/* 内容容器：撑满剩余空间，自身不滚动（由 .dialog-body 滚动） */
+.layui-layer-page .layui-layer-content {
+    color: var(--ink) !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
 }
 .layui-layer-content { color: var(--ink) !important; }
+
+/* 弹窗主体：可滚动区域 */
+.dialog-body {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    padding: 20px 24px 8px !important;
+    overscroll-behavior: contain;
+}
+/* 弹窗底部操作栏：固定，不随内容滚动 */
+.dialog-footer {
+    flex-shrink: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    gap: 10px !important;
+    padding: 14px 24px 18px !important;
+    border-top: 1px solid var(--border) !important;
+    background: var(--paper) !important;
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg) !important;
+}
+
+/* 弹窗按钮：主按钮 / 幽灵按钮 */
+.dialog-btn {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 6px !important;
+    height: 36px !important;
+    padding: 0 20px !important;
+    border-radius: var(--radius) !important;
+    font-family: var(--sans) !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    letter-spacing: 0 !important;
+    text-transform: none !important;
+    cursor: pointer !important;
+    border: 1px solid transparent !important;
+    line-height: 1 !important;
+    transition: all 0.2s var(--ease) !important;
+    margin: 0 !important;
+}
+.dialog-btn-primary {
+    background: var(--primary) !important;
+    border-color: var(--primary) !important;
+    color: #ffffff !important;
+}
+.dialog-btn-primary:hover {
+    background: var(--primary-hover) !important;
+    border-color: var(--primary-hover) !important;
+    color: #ffffff !important;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(66,133,244,0.35);
+}
+.dialog-btn-ghost {
+    background: transparent !important;
+    border-color: var(--border) !important;
+    color: var(--ink-2) !important;
+}
+.dialog-btn-ghost:hover {
+    color: var(--ink) !important;
+    border-color: var(--ink-2) !important;
+    background: var(--paper-2) !important;
+}
+
+/* 弹窗主体内的自定义滚动条 */
+.dialog-body::-webkit-scrollbar { width: 8px; }
+.dialog-body::-webkit-scrollbar-track { background: transparent; }
+.dialog-body::-webkit-scrollbar-thumb {
+    background: var(--paper-3) !important;
+    border-radius: 4px;
+}
+.dialog-body::-webkit-scrollbar-thumb:hover { background: var(--ink-4) !important; }
+
+/* layer 内置按钮区（confirm/alert 等 type:0 弹窗） */
 .layui-layer-btn {
     background: transparent !important;
     border-top: 1px solid var(--border) !important;

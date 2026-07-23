@@ -10,6 +10,7 @@
 
     var S = {
         layerIndex: null,
+        onResize: null,
         isAdmin: false,
         laypage: null,
         usernames: [],
@@ -627,6 +628,38 @@
         search(prefix);
     }
 
+    /* ---------- 弹窗尺寸：按实际视口动态计算（平板/竖屏自动收缩，永不超出屏幕） ---------- */
+    // 期望尺寸 920x660；视口不足时自动收缩，最小不低于 300x360
+    function calcModalSize() {
+        var vw = window.innerWidth, vh = window.innerHeight;
+        return {
+            w: Math.max(300, Math.min(920, vw - 32)),
+            h: Math.max(360, Math.min(660, vh - 48))
+        };
+    }
+
+    // 将弹窗居中于视口（不越界）
+    function centerLayer(layero) {
+        try {
+            var w = layero.outerWidth(), h = layero.outerHeight();
+            layero.css({
+                top: Math.max((window.innerHeight - h) / 2, 16) + 'px',
+                left: Math.max((window.innerWidth - w) / 2, 16) + 'px'
+            });
+        } catch (e) { }
+    }
+
+    // 按当前视口重设弹窗外层与内容区尺寸，并重新居中（内容区高度需扣除标题栏）
+    function resizeModal(layero) {
+        try {
+            var s = calcModalSize();
+            var titleH = layero.find('.layui-layer-title').outerHeight() || 0;
+            layero.css({ width: s.w + 'px', height: s.h + 'px' });
+            layero.find('.layui-layer-content').css({ height: (s.h - titleH) + 'px' });
+            centerLayer(layero);
+        } catch (e) { }
+    }
+
     /* ---------- 入口 ---------- */
     function openUsageStatsModal() {
         var menu = document.getElementById('userMenu');
@@ -641,23 +674,27 @@
         S.statsTableLoaded = false;
         S.chartData = [];
 
-        var isMobile = window.innerWidth <= 768;
+        var size = calcModalSize();
         S.layerIndex = window._layer.open({
             type: 1,
             title: '数据统计',
-            area: isMobile ? ['96%', '90%'] : ['920px', '660px'],
+            area: [size.w + 'px', size.h + 'px'],
             shadeClose: false,
             maxmin: false,
             content: buildModalHtml(),
-            success: function (layero) {
+            success: function (layero, index) {
                 try {
                     var contentEl = layero.find('.layui-layer-content')[0];
                     if (contentEl) {
                         contentEl.style.padding = '0';
                         contentEl.style.overflow = 'hidden';
                     }
-                    if (isMobile) layero.css({ 'max-width': '100vw', 'max-height': '100vh' });
                 } catch (e) { }
+                centerLayer(layero);
+                // 窗口缩放 / 旋转（平板横竖屏切换）时，按实际屏幕尺寸动态调整并居中
+                S.onResize = function () { resizeModal(layero); };
+                window.addEventListener('resize', S.onResize);
+                window.addEventListener('orientationchange', S.onResize);
                 document.addEventListener('click', onDocClick);
                 loadFilters();
                 loadUsage();
@@ -665,6 +702,11 @@
             },
             end: function () {
                 S.layerIndex = null;
+                if (S.onResize) {
+                    window.removeEventListener('resize', S.onResize);
+                    window.removeEventListener('orientationchange', S.onResize);
+                    S.onResize = null;
+                }
                 document.removeEventListener('click', onDocClick);
             }
         });

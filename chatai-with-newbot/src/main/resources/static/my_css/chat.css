@@ -1515,7 +1515,7 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
 .settings-modal {
     display: flex;
     height: 100%;
-    min-height: 380px;
+    min-height: 0; /* 由 calcSettingsSize 控制最小尺寸，避免超出内容区被裁剪 */
     background: var(--surface);
 }
 .settings-sidebar {
@@ -1744,7 +1744,35 @@ textarea.settings-textarea {
     padding: 0 20px !important;
     height: 52px !important;
     line-height: 52px !important;
+    padding-right: 56px !important; /* 给关闭按钮让位，避免长标题与其重叠 */
 }
+
+/* 关闭按钮：主题自适应（修复深色模式下不可见），垂直居中于标题栏，悬停圆形反馈 */
+.layui-layer-setwin {
+    top: 10px !important;
+    right: 14px !important;
+    font-size: 0 !important;
+}
+.layui-layer-setwin .layui-icon-close {
+    display: inline-block !important;
+    vertical-align: middle !important;
+    width: 32px !important;
+    height: 32px !important;
+    line-height: 32px !important;
+    margin-left: 0 !important;
+    text-align: center !important;
+    font-size: 16px !important;
+    color: var(--fg-2) !important;
+    border-radius: 50% !important;
+    cursor: pointer !important;
+    transition: color 0.2s var(--ease), background-color 0.2s var(--ease), transform 0.3s var(--ease) !important;
+}
+.layui-layer-setwin .layui-icon-close:hover {
+    color: var(--fg) !important;
+    background: var(--surface-2) !important;
+    transform: rotate(90deg);
+}
+
 .layui-layer-content { color: var(--fg) !important; }
 .layui-layer-btn {
     background: transparent !important;
