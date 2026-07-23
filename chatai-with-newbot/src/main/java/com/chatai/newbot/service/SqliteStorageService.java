@@ -93,8 +93,12 @@ public class SqliteStorageService implements StorageService {
                 "last_login_at TEXT," +
                 "last_login_ip TEXT," +
                 "last_login_browser TEXT," +
-                "allowed_model_ids TEXT DEFAULT '[]'" +
+                "allowed_model_ids TEXT DEFAULT '[]'," +
+                "system_prompt TEXT" +
                 ")");
+
+        // 老数据库补充 system_prompt 列（幂等迁移）
+        ensureUserSystemPromptColumn();
 
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_model_config (" +
                 "id TEXT PRIMARY KEY," +
@@ -146,6 +150,20 @@ public class SqliteStorageService implements StorageService {
         log.info("SQLite: 数据表已就绪");
     }
 
+    /**
+     * 为 t_user 表补充 system_prompt 列（幂等迁移）。
+     * 老版本数据库没有该列时自动执行 ALTER TABLE；已存在则跳过，保证重复启动安全。
+     */
+    private void ensureUserSystemPromptColumn() {
+        List<Map<String, Object>> columns = jdbcTemplate.queryForList("PRAGMA table_info(t_user)");
+        boolean hasColumn = columns.stream()
+                .anyMatch(c -> "system_prompt".equals(String.valueOf(c.get("name"))));
+        if (!hasColumn) {
+            jdbcTemplate.execute("ALTER TABLE t_user ADD COLUMN system_prompt TEXT");
+            log.info("SQLite: t_user 表已补充 system_prompt 列");
+        }
+    }
+
     // ========== t_setting 键值操作 ==========
 
     /**
@@ -185,6 +203,7 @@ public class SqliteStorageService implements StorageService {
         u.setLastLoginIp(rs.getString("last_login_ip"));
         u.setLastLoginBrowser(rs.getString("last_login_browser"));
         u.setAllowedModelIds(parseJsonArray(rs.getString("allowed_model_ids")));
+        u.setSystemPrompt(rs.getString("system_prompt"));
         return u;
     };
 
@@ -207,10 +226,10 @@ public class SqliteStorageService implements StorageService {
     /** 插入用户记录 */
     private void insertUser(User u) {
         jdbcTemplate.update(
-                "INSERT INTO t_user (id, username, password, role, created_at, last_login_at, last_login_ip, last_login_browser, allowed_model_ids) VALUES (?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO t_user (id, username, password, role, created_at, last_login_at, last_login_ip, last_login_browser, allowed_model_ids, system_prompt) VALUES (?,?,?,?,?,?,?,?,?,?)",
                 u.getId(), u.getUsername(), u.getPassword(), u.getRole(), u.getCreatedAt(),
                 u.getLastLoginAt(), u.getLastLoginIp(), u.getLastLoginBrowser(),
-                toJsonArray(u.getAllowedModelIds()));
+                toJsonArray(u.getAllowedModelIds()), u.getSystemPrompt());
     }
 
     @Override
@@ -286,10 +305,10 @@ public class SqliteStorageService implements StorageService {
     @Override
     public void updateUser(User user) {
         jdbcTemplate.update(
-                "UPDATE t_user SET username=?, password=?, role=?, created_at=?, last_login_at=?, last_login_ip=?, last_login_browser=?, allowed_model_ids=? WHERE id=?",
+                "UPDATE t_user SET username=?, password=?, role=?, created_at=?, last_login_at=?, last_login_ip=?, last_login_browser=?, allowed_model_ids=?, system_prompt=? WHERE id=?",
                 user.getUsername(), user.getPassword(), user.getRole(), user.getCreatedAt(),
                 user.getLastLoginAt(), user.getLastLoginIp(), user.getLastLoginBrowser(),
-                toJsonArray(user.getAllowedModelIds()), user.getId());
+                toJsonArray(user.getAllowedModelIds()), user.getSystemPrompt(), user.getId());
     }
 
     @Override

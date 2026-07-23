@@ -4,6 +4,7 @@ import com.chatai.newbot.model.ChatRequest;
 import com.chatai.newbot.model.ModelConfig;
 import com.chatai.newbot.model.NewBotMessage;
 import com.chatai.newbot.model.UsageLog;
+import com.chatai.newbot.model.User;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,6 +23,8 @@ import java.util.concurrent.atomic.AtomicReference;
 @Service
 public class UnifiedChatService {
     private static final Logger log = LoggerFactory.getLogger(UnifiedChatService.class);
+    /** 用户未自定义全局提示词时使用的系统默认提示词 */
+    private static final String DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant.";
     private final StorageManager storageService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -54,10 +57,33 @@ public class UnifiedChatService {
         streamOptions.put("include_usage", true);
         requestBody.put("stream_options", streamOptions);
 
+        // 解析当前用户的全局提示词（System Prompt）：
+        // 优先级最高，永远置于消息列表起始位置（system role），时间顺序上先于对话历史与当前用户输入。
+        // 由后端统一注入，客户端无法伪造或遗漏，从而保证每次 API 调用都必然携带。
+        String systemPrompt = DEFAULT_SYSTEM_PROMPT;
+        if (usageLog != null && usageLog.getUserId() != null) {
+            User currentUser = storageService.getUserById(usageLog.getUserId());
+            if (currentUser != null && currentUser.getSystemPrompt() != null
+                    && !currentUser.getSystemPrompt().trim().isEmpty()) {
+                systemPrompt = currentUser.getSystemPrompt().trim();
+            }
+        }
+
         // 构建消息列表（支持多模态：当消息含图片时，content转为数组格式）
         List<Object> messages = new ArrayList<>();
+        // 1) 全局提示词始终占据 messages[0]（即便将来增加上下文截断/压缩也不会被挤掉）
+        Map<String, Object> systemMsg = new HashMap<>();
+        systemMsg.put("role", "system");
+        systemMsg.put("content", systemPrompt);
+        messages.add(systemMsg);
+
+        // 2) 追加对话历史与当前用户输入（忽略客户端自带的 system 消息，统一由后端注入）
         if (request.getMessages() != null) {
             for (NewBotMessage msg : request.getMessages()) {
+                // 跳过客户端携带的 system 消息，避免与后端注入的全局提示词重复或冲突
+                if ("system".equals(msg.getRole())) {
+                    continue;
+                }
                 // 过滤掉content为空的assistant消息，避免API报400错误
                 if ("assistant".equals(msg.getRole()) && (msg.getContent() == null || msg.getContent().trim().isEmpty())) {
                     continue;
