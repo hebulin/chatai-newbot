@@ -2289,6 +2289,10 @@ function buildSettingsModalHtml() {
         '      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>' +
         '      <span>全局提示词</span>' +
         '    </div>' +
+        '    <div class="settings-menu-item" data-tab="dataManagement" onclick="switchSettingsTab(\'dataManagement\')">' +
+        '      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>' +
+        '      <span>数据管理</span>' +
+        '    </div>' +
         '  </div>' +
         '  <div class="settings-content" id="settingsContent">' +
         '    ' + buildChangePasswordPanel() +
@@ -2342,6 +2346,8 @@ function switchSettingsTab(tab) {
         content.innerHTML = buildSystemPromptPanel();
         // 渲染后拉取当前已保存的全局提示词进行回填
         loadSystemPrompt();
+    } else if (tab === 'dataManagement') {
+        content.innerHTML = buildDataManagementPanel();
     }
 }
 
@@ -2362,6 +2368,93 @@ function buildSystemPromptPanel() {
         '  </div>' +
         '  <div class="settings-form-note">每次对话调用都会携带该提示词，并始终置于消息列表最前面（优先级最高，先于对话历史与当前输入）。对所有会话生效。</div>' +
         '</div>';
+}
+
+// 统计当前包含用户消息的有效会话数量（空白的"新会话"不计入）
+function countValidChats() {
+    var count = 0;
+    Object.keys(chats).forEach(function(id) {
+        var msgs = chats[id] || [];
+        for (var i = 0; i < msgs.length; i++) {
+            if (msgs[i].role === 'user') { count++; break; }
+        }
+    });
+    return count;
+}
+
+// 构建「数据管理」设置面板（导出全部历史对话 / 删除全部对话）
+function buildDataManagementPanel() {
+    var count = countValidChats();
+    return '' +
+        '<div class="settings-panel" id="panel-dataManagement">' +
+        '  <h3 class="settings-panel-title">数据管理</h3>' +
+        '  <div class="data-mgmt-rows">' +
+        '    <div class="data-mgmt-row">' +
+        '      <div class="data-mgmt-icon">' +
+        '        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>' +
+        '      </div>' +
+        '      <div class="data-mgmt-info">' +
+        '        <div class="data-mgmt-title">导出全部历史对话</div>' +
+        '        <div class="data-mgmt-desc">将当前账号下的全部会话记录（' + count + ' 条）导出为 TXT 文本文件</div>' +
+        '      </div>' +
+        '      <button type="button" class="settings-btn settings-btn-primary" onclick="confirmExportAllChats()">导出</button>' +
+        '    </div>' +
+        '    <div class="data-mgmt-row data-mgmt-row-danger">' +
+        '      <div class="data-mgmt-icon data-mgmt-icon-danger">' +
+        '        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>' +
+        '      </div>' +
+        '      <div class="data-mgmt-info">' +
+        '        <div class="data-mgmt-title">删除全部对话</div>' +
+        '        <div class="data-mgmt-desc">清空当前账号下的全部聊天记录，删除后无法恢复</div>' +
+        '      </div>' +
+        '      <button type="button" class="settings-btn settings-btn-danger" onclick="confirmDeleteAllChats()">删除</button>' +
+        '    </div>' +
+        '  </div>' +
+        '  <div class="settings-form-note">导出文件由浏览器保存到本地；删除操作会同步清除服务端数据，多端立即生效。</div>' +
+        '</div>';
+}
+
+// 数据管理 - 导出全部历史对话：二次确认后复用现有导出逻辑
+function confirmExportAllChats() {
+    var count = countValidChats();
+    if (count === 0) {
+        showToast('当前没有可导出的会话');
+        return;
+    }
+    showConfirmDialog('确定导出当前账号下的全部 ' + count + ' 条历史对话吗？', '导出确认', function() {
+        exportChats();
+    });
+}
+
+// 数据管理 - 删除全部对话：二次确认后清空本地与服务端全部会话数据，并刷新侧边栏会话列表
+function confirmDeleteAllChats() {
+    if (isStreamActive) {
+        showToast('请等待回答完成');
+        return;
+    }
+    var ids = Object.keys(chats);
+    var count = countValidChats();
+    if (count === 0) {
+        showToast('当前没有可删除的会话');
+        return;
+    }
+    showConfirmDialog('此操作将删除当前账号下全部 ' + count + ' 条会话及其聊天记录，删除后无法恢复。确定继续？', '删除全部对话', function() {
+        // 记录全部被删除的会话ID，随同步请求一并提交服务端删除
+        ids.forEach(function(id) {
+            deletedChatIds.push(id);
+        });
+        // 清空本地全部会话数据
+        chats = {};
+        currentChatId = null;
+        // 新建空白会话：内部会同步服务端、刷新侧边栏列表并重置视图
+        newChat();
+        // 重新渲染当前面板，刷新会话数量显示
+        if (_currentSettingsTab === 'dataManagement') {
+            var content = document.getElementById('settingsContent');
+            if (content) content.innerHTML = buildDataManagementPanel();
+        }
+        showToast('已删除全部对话');
+    });
 }
 
 // 拉取并回填当前用户已保存的全局提示词
