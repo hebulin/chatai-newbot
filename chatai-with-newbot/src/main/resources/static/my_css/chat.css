@@ -1588,6 +1588,13 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
 }
 .settings-input:focus { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-soft); }
 .settings-input::placeholder { color: var(--fg-4); }
+/* 多行文本域（全局提示词）：可纵向拖拽调整高度 */
+textarea.settings-textarea {
+    resize: vertical;
+    min-height: 140px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+}
 .settings-form-tip { font-size: 11px; color: var(--fg-3); margin-top: 6px; min-height: 14px; }
 .settings-form-tip.error { color: var(--danger); }
 .settings-form-actions { margin-top: 16px; display: flex; gap: 8px; justify-content: flex-end; }

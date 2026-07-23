@@ -49,16 +49,35 @@ public class StorageManager implements StorageService {
     public void init() {
         try {
             String mode = sqliteStorage.getSetting("storage_mode");
-            if ("sqlite".equals(mode)) {
-                this.useSqlite = true;
-                log.info("存储模式: SQLite（从上次配置恢复）");
-            } else {
+            // 仅当管理员显式切换为 JSON 模式时才使用 JSON；否则一律默认使用 SQLite
+            if ("json".equals(mode)) {
                 this.useSqlite = false;
-                log.info("存储模式: JSON文件（默认）");
+                log.info("存储模式: JSON文件（从上次配置恢复）");
+                return;
             }
+            // 默认使用 SQLite：首次启用时自动执行 JSON → SQLite 数据迁移，确保已有数据不丢失
+            // （已迁移过则 migration_done=true，会跳过，不会重复迁移或影响现有数据）
+            String migrationDone = sqliteStorage.getSetting("migration_done");
+            if (!"true".equals(migrationDone)) {
+                log.info("首次启用 SQLite 存储，自动执行 JSON → SQLite 数据迁移...");
+                try {
+                    Map<String, Object> stats = migrateJsonToSqlite();
+                    log.info("自动数据迁移完成: {}", stats);
+                } catch (Exception e) {
+                    log.error("自动数据迁移失败（仍切换到 SQLite，可在后台手动重试迁移）", e);
+                }
+            }
+            this.useSqlite = true;
+            // 持久化存储模式为 sqlite
+            try {
+                sqliteStorage.setSetting("storage_mode", "sqlite");
+            } catch (Exception ignored) {
+                // 持久化失败不影响本次运行
+            }
+            log.info("存储模式: SQLite（默认）");
         } catch (Exception e) {
             this.useSqlite = false;
-            log.warn("读取存储模式失败，回退到JSON模式", e);
+            log.warn("初始化存储模式失败，回退到JSON模式", e);
         }
     }
 

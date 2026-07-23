@@ -1031,18 +1031,17 @@ function sendMessage(fromButton) {
     console.log('发送消息，深度思考:', actualDeepThinking);
     var requestBody = {
         modelConfigId: currentModelId,
-        messages: [{ role: 'system', content: 'You are a helpful assistant.' }].concat(
-            chats[currentChatId].filter(function(m) {
-                // 过滤掉content为空的assistant消息，避免API报400错误
-                return m.role === 'user' || (m.role === 'assistant' && m.content && m.content.trim());
-            }).map(function(m) {
-                // 将用户消息中的images字段传递给后端
-                if (m.role === 'user' && m.images && m.images.length > 0) {
-                    return { role: m.role, content: m.content, images: m.images };
-                }
-                return { role: m.role, content: m.content };
-            })
-        ),
+        // 全局提示词（system 消息）由后端根据当前登录用户统一注入到消息列表首位，前端不再携带
+        messages: chats[currentChatId].filter(function(m) {
+            // 过滤掉content为空的assistant消息，避免API报400错误
+            return m.role === 'user' || (m.role === 'assistant' && m.content && m.content.trim());
+        }).map(function(m) {
+            // 将用户消息中的images字段传递给后端
+            if (m.role === 'user' && m.images && m.images.length > 0) {
+                return { role: m.role, content: m.content, images: m.images };
+            }
+            return { role: m.role, content: m.content };
+        }),
         stream: true,
         deepThinking: actualDeepThinking,
         temperature: 0.7
@@ -2286,6 +2285,10 @@ function buildSettingsModalHtml() {
         '      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>' +
         '      <span>修改密码</span>' +
         '    </div>' +
+        '    <div class="settings-menu-item" data-tab="systemPrompt" onclick="switchSettingsTab(\'systemPrompt\')">' +
+        '      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>' +
+        '      <span>全局提示词</span>' +
+        '    </div>' +
         '  </div>' +
         '  <div class="settings-content" id="settingsContent">' +
         '    ' + buildChangePasswordPanel() +
@@ -2335,7 +2338,97 @@ function switchSettingsTab(tab) {
     if (!content) return;
     if (tab === 'changePassword') {
         content.innerHTML = buildChangePasswordPanel();
+    } else if (tab === 'systemPrompt') {
+        content.innerHTML = buildSystemPromptPanel();
+        // 渲染后拉取当前已保存的全局提示词进行回填
+        loadSystemPrompt();
     }
+}
+
+// 构建「全局提示词」设置面板
+function buildSystemPromptPanel() {
+    return '' +
+        '<div class="settings-panel" id="panel-systemPrompt">' +
+        '  <h3 class="settings-panel-title">全局提示词</h3>' +
+        '  <div class="settings-form-group">' +
+        '    <label>自定义全局提示词（System Prompt）</label>' +
+        '    <textarea id="sp_content" class="settings-input settings-textarea" rows="8" ' +
+        '       placeholder="例如：你是一名严谨的中文技术顾问，回答简洁、准确，并使用 Markdown 排版。留空则使用系统默认提示词。" ' +
+        '       autocomplete="off" data-lpignore="true" data-form-type="other"></textarea>' +
+        '    <div class="settings-form-tip" id="sp_tip"></div>' +
+        '  </div>' +
+        '  <div class="settings-form-actions">' +
+        '    <button type="button" class="settings-btn settings-btn-primary" onclick="saveSystemPrompt()">保存</button>' +
+        '  </div>' +
+        '  <div class="settings-form-note">每次对话调用都会携带该提示词，并始终置于消息列表最前面（优先级最高，先于对话历史与当前输入）。对所有会话生效。</div>' +
+        '</div>';
+}
+
+// 拉取并回填当前用户已保存的全局提示词
+function loadSystemPrompt() {
+    var tipEl = document.getElementById('sp_tip');
+    fetch('/api/user/system-prompt', {
+        method: 'GET',
+        headers: authHeaders()
+    }).then(function(r) {
+        if (r.status === 401) {
+            showToast(authFailMsg(r));
+            setTimeout(function() { doLogout(); }, 1000);
+            return null;
+        }
+        return r.json();
+    }).then(function(data) {
+        if (!data) return;
+        var el = document.getElementById('sp_content');
+        if (el && data.success) {
+            el.value = data.systemPrompt || '';
+        } else if (el && data.message && tipEl) {
+            tipEl.textContent = data.message;
+            tipEl.classList.add('error');
+        }
+    }).catch(function(err) {
+        if (tipEl) {
+            tipEl.textContent = '加载失败：' + (err && err.message ? err.message : '网络异常');
+            tipEl.classList.add('error');
+        }
+    });
+}
+
+// 保存当前用户的全局提示词
+function saveSystemPrompt() {
+    var el = document.getElementById('sp_content');
+    var tipEl = document.getElementById('sp_tip');
+    if (tipEl) { tipEl.textContent = ''; tipEl.classList.remove('error'); }
+    var prompt = el ? el.value : '';
+    if (prompt.length > 20000) {
+        if (tipEl) { tipEl.textContent = '全局提示词过长（最多 20000 字符）'; tipEl.classList.add('error'); }
+        return;
+    }
+    fetch('/api/user/system-prompt', {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: JSON.stringify({ systemPrompt: prompt })
+    }).then(function(r) {
+        if (r.status === 401) {
+            showToast(authFailMsg(r));
+            setTimeout(function() { doLogout(); }, 1000);
+            return null;
+        }
+        return r.json();
+    }).then(function(data) {
+        if (!data) return;
+        if (data.success) {
+            showToast('全局提示词已保存');
+            if (tipEl) { tipEl.textContent = '已保存，立即对所有新对话生效。'; }
+        } else {
+            if (tipEl) { tipEl.textContent = data.message || '保存失败'; tipEl.classList.add('error'); }
+        }
+    }).catch(function(err) {
+        if (tipEl) {
+            tipEl.textContent = '保存失败：' + (err && err.message ? err.message : '网络异常');
+            tipEl.classList.add('error');
+        }
+    });
 }
 
 function submitChangePassword() {
