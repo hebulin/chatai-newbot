@@ -175,6 +175,11 @@ public class AdminController {
             m.put("defaultName", raw != null ? raw.getName() : p.getName());
             m.put("icon", p.getIcon());
             m.put("type", "preset");
+            // 预设厂商的默认 API 地址/协议/思考参数类型：供前端"添加模型"选完厂商后自动填充 baseurl，
+            // 以及提交时兜底 apiUrl/protocol（fillProviderInfo 不兜底这两个字段）
+            m.put("defaultApiUrl", p.getDefaultApiUrl());
+            m.put("protocol", p.getProtocol());
+            m.put("thinkingParamType", p.getThinkingParamType());
             m.put("modelCount", p.getModels() == null ? 0 : p.getModels().size());
             // 预置模型列表：供前端"快速接入"勾选、"添加模型"预设下拉、计算"已全部接入"状态
             m.put("models", p.getModels() == null ? Collections.emptyList() : p.getModels());
