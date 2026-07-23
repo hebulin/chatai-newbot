@@ -1632,6 +1632,90 @@ textarea.settings-textarea {
     border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 }
 
+/* ---------- 数据管理面板 ---------- */
+.data-mgmt-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.data-mgmt-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface-2);
+    transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease), transform 0.15s var(--ease);
+}
+.data-mgmt-row:hover {
+    border-color: var(--border-2);
+    box-shadow: var(--shadow-sm);
+    transform: translateY(-1px);
+}
+.data-mgmt-row-danger:hover {
+    border-color: var(--danger);
+    box-shadow: 0 0 0 3px var(--danger-soft);
+}
+.data-mgmt-icon {
+    width: 38px;
+    height: 38px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-sm);
+    background: var(--primary-soft);
+    color: var(--primary);
+}
+.data-mgmt-icon-danger {
+    background: var(--danger-soft);
+    color: var(--danger);
+}
+.data-mgmt-info {
+    flex: 1;
+    min-width: 0;
+}
+.data-mgmt-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--fg);
+    font-family: var(--sans);
+    letter-spacing: 0;
+    margin-bottom: 3px;
+}
+.data-mgmt-desc {
+    font-size: 11px;
+    color: var(--fg-2);
+    font-family: var(--mono);
+    letter-spacing: 0.02em;
+}
+.data-mgmt-row .settings-btn { flex-shrink: 0; }
+
+/* 危险操作按钮（删除全部对话） */
+.settings-btn-danger {
+    background: transparent;
+    color: var(--danger);
+    border-color: var(--danger);
+}
+.settings-btn-danger:hover {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: #ffffff;
+    box-shadow: 0 2px 8px var(--danger-soft);
+}
+
+/* 移动端：数据管理行允许换行，按钮靠右 */
+@media (max-width: 480px) {
+    .data-mgmt-row {
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    .data-mgmt-row .settings-btn {
+        margin-left: auto;
+    }
+}
+
 .layui-layer-content:has(.settings-modal) { padding: 0 !important; }
 .layui-layer-content .settings-modal { margin: 0; }
 
