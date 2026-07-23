@@ -1,7 +1,57 @@
-function getDialogArea(maxWidth) {
-    var w = window.innerWidth;
-    if (w <= maxWidth + 20) return ['92%', 'auto'];
-    return [maxWidth + 'px', 'auto'];
+/**
+ * 全局弹窗助手：统一封装 layer.open(type:1)。
+ * 解决两个核心问题：
+ *   1. 弹窗弹出后不居中 —— 在内容渲染（form.render）完成后重新计算并强制居中；
+ *   2. 大弹窗下半部分超出屏幕 —— 通过 CSS 约束弹窗最大高度并让内容区滚动，
+ *      同时在窗口尺寸变化时重新居中，保证弹窗始终完整位于视口中央。
+ * @param opts.title   标题
+ * @param opts.width   弹窗宽度（px），小屏自动降级为 92%
+ * @param opts.content 主体内容 HTML（放入可滚动的 .dialog-body）
+ * @param opts.footer  底部按钮 HTML（放入固定的 .dialog-footer，不随内容滚动）
+ * @param opts.success 渲染成功回调（先执行，内部可做 form.render）
+ * @param opts.shadeClose 是否允许点击遮罩关闭
+ */
+function openDialog(opts) {
+    var layer = window._layer, $ = window._$;
+    opts = opts || {};
+    var width = opts.width || 480;
+    var areaWidth = (window.innerWidth <= width + 32) ? '92%' : (width + 'px');
+    var userSuccess = opts.success;
+
+    // 组装结构：可滚动主体 + 固定底栏
+    var inner = '<div class="dialog-body">' + (opts.content || '') + '</div>';
+    if (opts.footer) inner += '<div class="dialog-footer">' + opts.footer + '</div>';
+
+    // 强制将弹窗置于视口正中，并保证不越界
+    function recenter(layero) {
+        var el = $(layero);
+        if (!el || !el.length) return;
+        var winW = $(window).width(), winH = $(window).height();
+        var w = el.outerWidth(), h = el.outerHeight();
+        var top = Math.max((winH - h) / 2, 16);
+        var left = Math.max((winW - w) / 2, 16);
+        el.css({ top: Math.round(top) + 'px', left: Math.round(left) + 'px' });
+    }
+
+    var dlgIndex = null;
+    return layer.open({
+        type: 1,
+        title: opts.title,
+        area: [areaWidth, 'auto'],
+        content: inner,
+        shadeClose: opts.shadeClose === true,
+        anim: -1, // 关闭 layer 自带动画，改用 CSS 统一入场动画
+        success: function(layero, index) {
+            dlgIndex = index;
+            // 先执行调用方回调（form.render 等会改变内容高度），再重新居中
+            if (typeof userSuccess === 'function') userSuccess(layero, index);
+            recenter(layero);
+            if (window.requestAnimationFrame) requestAnimationFrame(function() { recenter(layero); });
+            // 窗口缩放时保持居中
+            $(window).on('resize.dlg' + index, function() { recenter(layero); });
+        },
+        end: function() { if (dlgIndex !== null) $(window).off('resize.dlg' + dlgIndex); }
+    });
 }
 
 /* Admin JS - Layui Refactored */
@@ -359,16 +409,15 @@ function showQuickAdd(providerId) {
         }
     });
     if (!modelCheckboxes) { layer.msg('该厂商所有模型已接入', {icon: 0}); return; }
-    var html = '<div class="layui-form" lay-filter="quickAddForm" style="padding:20px 20px 0;">';
+    var html = '<div class="layui-form" lay-filter="quickAddForm">';
     html += '<div class="form-group"><label class="form-label">厂商</label><div class="form-value">' + getProviderSmallIconHtml(providerId) + esc(provider.name) + '</div></div>';
     html += '<div class="form-group"><label class="form-label">API Key</label><div class="form-value"><input type="text" id="qaApiKey" class="layui-input" placeholder="sk-..." /></div></div>';
     html += '<div class="form-group"><label class="form-label">选择模型</label><div class="form-value model-checkbox-group">' + modelCheckboxes + '</div></div>';
     html += '<div class="form-group"><div class="form-value" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">可见性</span><input type="checkbox" id="qaVisibleToAll" lay-skin="switch" checked></div></div>';
-    html += '<div style="text-align:right;padding:10px 0;">';
-    html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
-    html += '<button type="button" class="layui-btn" onclick="submitQuickAdd()">确认接入</button>';
-    html += '</div></div>';
-    layer.open({ type:1, title:'快速接入 - ' + provider.name, area:getDialogArea(480), content:html,
+    html += '</div>';
+    var footer = '<button type="button" class="dialog-btn dialog-btn-ghost" onclick="window._layer.closeAll()">取消</button>'
+        + '<button type="button" class="dialog-btn dialog-btn-primary" onclick="submitQuickAdd()">确认接入</button>';
+    openDialog({ title:'快速接入 - ' + provider.name, width:480, content:html, footer:footer,
         success: function(layero) { form.render(null,'quickAddForm'); }
     });
 }
@@ -464,7 +513,7 @@ function editModel(id) {
     // 从模型自身数据读取能力（管理员可手动设置）
     var isPresetThinking = model.supportsThinking || false;
     var isPresetMm = model.supportsMultimodal || false;
-    var html = '<div class="layui-form" lay-filter="editModelForm" style="padding:20px 20px 0;">';
+    var html = '<div class="layui-form" lay-filter="editModelForm">';
     html += '<div class="form-group"><label class="form-label">厂商</label><div class="form-value">' + getModelProviderIconHtml(model, 20) + esc(model.providerName || model.providerId) + '</div></div>';
     html += '<div class="form-group"><label class="form-label">显示名</label><div class="form-value"><input type="text" id="emDisplayName" class="layui-input" value="' + esc(model.displayName||'') + '"/></div></div>';
     html += '<div class="form-group"><label class="form-label">模型ID</label><div class="form-value"><input type="text" id="emModelId" class="layui-input" value="' + esc(model.modelId||'') + '" readonly style="opacity:0.6"/></div></div>';
@@ -475,11 +524,10 @@ function editModel(id) {
     // 能力开关（可手动设置）
     html += '<div class="form-group"><div class="form-value" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">思考模式</span><input type="checkbox" id="emSupportsThinking" lay-skin="switch"' + (isPresetThinking?' checked':'') + '></div></div>';
     html += '<div class="form-group"><div class="form-value" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">多模态</span><input type="checkbox" id="emSupportsMultimodal" lay-skin="switch"' + (isPresetMm?' checked':'') + '></div></div>';
-    html += '<div style="text-align:right;padding:10px 0;">';
-    html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
-    html += '<button type="button" class="layui-btn" onclick="saveModel(\'' + esc(id) + '\')">保存</button>';
-    html += '</div></div>';
-    layer.open({ type:1, title:'编辑模型 - '+(model.displayName||model.modelId), area:getDialogArea(500), content:html,
+    html += '</div>';
+    var footer = '<button type="button" class="dialog-btn dialog-btn-ghost" onclick="window._layer.closeAll()">取消</button>'
+        + '<button type="button" class="dialog-btn dialog-btn-primary" onclick="saveModel(\'' + esc(id) + '\')">保存</button>';
+    openDialog({ title:'编辑模型 - '+(model.displayName||model.modelId), width:500, content:html, footer:footer,
         success: function(layero) { form.render(null,'editModelForm'); }
     });
 }
@@ -614,7 +662,7 @@ function showRenameProvider(encodedId, isCustom, currentName, currentIcon) {
     var layer = window._layer, form = window._form;
     var providerId = decodeURIComponent(encodedId);
     var title = isCustom ? '修改自定义厂商' : '修改预置厂商';
-    var html = '<div class="layui-form" lay-filter="renameProviderForm" style="padding:20px 20px 0;">';
+    var html = '<div class="layui-form" lay-filter="renameProviderForm">';
     html += '<div class="form-group"><label class="form-label">厂商ID</label><div class="form-value"><input type="text" class="layui-input" value="' + esc(providerId) + '" readonly style="opacity:0.6"/></div></div>';
     if (!isCustom) {
         html += '<div class="form-group"><label class="form-label">预设名称（来自 providers.json）</label><div class="form-value" style="color:#94a3b8">' + esc(currentName) + '</div></div>';
@@ -637,11 +685,10 @@ function showRenameProvider(encodedId, isCustom, currentName, currentIcon) {
         html += '<input type="hidden" id="rpOldName" value="' + esc(currentName) + '"/>';
     }
     html += '<div class="form-tip" style="font-size:12px;color:#94a3b8;margin:4px 0 12px;">' + (isCustom ? '修改后将同步更新所有该自定义厂商下的模型（仅匹配当前原名）' : '修改后预置厂商的显示名将立即更新，并同步至所有关联模型（ID/协议/默认URL等不可改）') + '</div>';
-    html += '<div style="text-align:right;padding:10px 0;">';
-    html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
-    html += '<button type="button" class="layui-btn" onclick="submitRenameProvider(\'' + encodedId + '\',' + (isCustom ? 'true' : 'false') + ')">保存</button>';
-    html += '</div></div>';
-    layer.open({ type: 1, title: title, area: getDialogArea(520), content: html,
+    html += '</div>';
+    var footer = '<button type="button" class="dialog-btn dialog-btn-ghost" onclick="window._layer.closeAll()">取消</button>'
+        + '<button type="button" class="dialog-btn dialog-btn-primary" onclick="submitRenameProvider(\'' + encodedId + '\',' + (isCustom ? 'true' : 'false') + ')">保存</button>';
+    openDialog({ title: title, width: 520, content: html, footer: footer,
         success: function(layero) {
             form.render(null, 'renameProviderForm');
             // 绑定图标选择事件（使用 window._$ 避免 $ 未定义）
@@ -712,7 +759,7 @@ function showAddModel() {
         providerOptions += '<option value="' + esc(p.id) + '">' + esc(p.name) + '</option>';
     });
     providerOptions += '<option value="__custom__">自定义厂商...</option>';
-    var html = '<div class="layui-form" lay-filter="addModelForm" style="padding:20px 20px 0;">';
+    var html = '<div class="layui-form" lay-filter="addModelForm">';
     // 厂商选择
     html += '<div class="form-group"><label class="form-label">厂商</label><div class="form-value"><select id="amProviderId" lay-filter="amProviderId">' + providerOptions + '</select></div></div>';
     // 自定义厂商名称（选择自定义厂商时显示）
@@ -742,11 +789,10 @@ function showAddModel() {
     html += '<div class="form-group"><div class="form-value" id="amThinkingValue" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">思考模式</span><input type="checkbox" id="amSupportsThinking" lay-skin="switch"></div></div>';
     html += '<div class="form-group"><div class="form-value" id="amMultimodalValue" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">多模态</span><input type="checkbox" id="amSupportsMultimodal" lay-skin="switch"></div></div>';
     html += '</div>';
-    html += '<div style="text-align:right;padding:10px 0;">';
-    html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
-    html += '<button type="button" class="layui-btn" onclick="submitAddModel()">添加</button>';
-    html += '</div></div>';
-    layer.open({ type:1, title:'添加模型', area:getDialogArea(500), content:html,
+    html += '</div>';
+    var footer = '<button type="button" class="dialog-btn dialog-btn-ghost" onclick="window._layer.closeAll()">取消</button>'
+        + '<button type="button" class="dialog-btn dialog-btn-primary" onclick="submitAddModel()">添加</button>';
+    openDialog({ title:'添加模型', width:500, content:html, footer:footer,
         success: function(layero) {
             form.render(null,'addModelForm');
             // 初始化：触发厂商选择
@@ -1015,17 +1061,16 @@ function renderUsersList(users) {
 
 function showAddUser() {
     var layer = window._layer, form = window._form;
-    var html = '<div class="layui-form" lay-filter="addUserForm" style="padding:20px 20px 0;">';
+    var html = '<div class="layui-form" lay-filter="addUserForm">';
     html += '<div class="form-group"><label class="form-label">用户名</label><div class="form-value"><input type="text" id="auUsername" class="layui-input" placeholder="请输入用户名"/></div></div>';
     html += '<div class="form-group"><label class="form-label">密码</label><div class="form-value"><input type="password" id="auPassword" class="layui-input" placeholder="请输入密码"/></div></div>';
     html += '<div class="form-group"><label class="form-label">角色</label><div class="form-value"><select id="auRole">';
     html += '<option value="user">普通用户</option><option value="admin">管理员</option>';
     html += '</select></div></div>';
-    html += '<div style="text-align:right;padding:10px 0;">';
-    html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
-    html += '<button type="button" class="layui-btn" onclick="submitAddUser()">添加</button>';
-    html += '</div></div>';
-    layer.open({ type:1, title:'添加用户', area:getDialogArea(420), content:html,
+    html += '</div>';
+    var footer = '<button type="button" class="dialog-btn dialog-btn-ghost" onclick="window._layer.closeAll()">取消</button>'
+        + '<button type="button" class="dialog-btn dialog-btn-primary" onclick="submitAddUser()">添加</button>';
+    openDialog({ title:'添加用户', width:420, content:html, footer:footer,
         success: function(layero) { form.render('select','addUserForm'); }
     });
 }
@@ -1049,7 +1094,7 @@ function editUser(id) {
     var layer = window._layer, form = window._form;
     var user = allUsers.find(function(u) { return u.id === id; });
     if (!user) return;
-    var html = '<div class="layui-form" lay-filter="editUserForm" style="padding:20px 20px 0;">';
+    var html = '<div class="layui-form" lay-filter="editUserForm">';
     html += '<div class="form-group"><label class="form-label">用户名</label><div class="form-value"><input type="text" id="euUsername" name="euName_' + Date.now() + '" class="layui-input" value="' + esc(user.username) + '" readonly style="opacity:0.6" autocomplete="off" data-lpignore="true" data-form-type="other" /></div></div>';
     html += '<div class="form-group"><label class="form-label">新密码</label><div class="form-value"><input type="password" id="euPassword" class="layui-input" placeholder="不修改则留空"/></div></div>';
     if (user.username === 'admin') {
@@ -1060,11 +1105,10 @@ function editUser(id) {
         html += '<option value="admin"' + (user.role==='admin'?' selected':'') + '>管理员</option>';
         html += '</select></div></div>';
     }
-    html += '<div style="text-align:right;padding:10px 0;">';
-    html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
-    html += '<button type="button" class="layui-btn" onclick="saveUser(\'' + esc(id) + '\')">保存</button>';
-    html += '</div></div>';
-    layer.open({ type:1, title:'编辑用户 - ' + user.username, area:getDialogArea(420), content:html,
+    html += '</div>';
+    var footer = '<button type="button" class="dialog-btn dialog-btn-ghost" onclick="window._layer.closeAll()">取消</button>'
+        + '<button type="button" class="dialog-btn dialog-btn-primary" onclick="saveUser(\'' + esc(id) + '\')">保存</button>';
+    openDialog({ title:'编辑用户 - ' + user.username, width:420, content:html, footer:footer,
         success: function(layero) { if (user.username !== 'admin') form.render('select','editUserForm'); }
     });
 }
@@ -1111,15 +1155,13 @@ function showPerms(userId) {
         modelCheckboxes += '<label>' + getModelProviderIconHtml(m, 18) + esc(m.displayName||m.modelId) + '</label></div>';
     });
     if (!modelCheckboxes) { layer.msg('暂无模型', {icon:0}); return; }
-    var html = '<div class="layui-form" lay-filter="permsForm" style="padding:20px 20px 0;">';
+    var html = '<div class="layui-form" lay-filter="permsForm">';
     html += '<div class="form-group"><label class="form-label">用户</label><div class="form-value">' + esc(user.username) + '</div></div>';
     html += '<div class="form-group"><label class="form-label">允许的模型</label><div class="form-value model-checkbox-group">' + modelCheckboxes + '</div></div>';
-    html += '<div style="text-align:right;padding:10px 0;">';
-    html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
-    html += '<button type="button" class="layui-btn" onclick="savePermissions(\'' + esc(userId) + '\')">保存</button>';
-    html += '</div></div>';
-
-    layer.open({ type:1, title:'用户权限 - ' + user.username, area:getDialogArea(520), content:html,
+    html += '</div>';
+    var footer = '<button type="button" class="dialog-btn dialog-btn-ghost" onclick="window._layer.closeAll()">取消</button>'
+        + '<button type="button" class="dialog-btn dialog-btn-primary" onclick="savePermissions(\'' + esc(userId) + '\')">保存</button>';
+    openDialog({ title:'用户权限 - ' + user.username, width:520, content:html, footer:footer,
         success: function(layero) { form.render(null,'permsForm'); }
     });
 }

@@ -2212,7 +2212,36 @@ function openAboutModal() {
 
 // ===== 设置弹窗（带侧边栏） =====
 var _settingsLayerIndex = null;
+var _settingsOnResize = null;
 var _currentSettingsTab = 'changePassword';
+
+// 设置弹窗尺寸：按实际视口动态计算（平板/竖屏自动收缩，永不超出屏幕）
+function calcSettingsSize() {
+    var vw = window.innerWidth, vh = window.innerHeight;
+    return {
+        w: Math.max(300, Math.min(720, vw - 32)),
+        h: Math.max(320, Math.min(480, vh - 48))
+    };
+}
+// 将设置弹窗居中于视口（不越界）
+function centerSettingsLayer(layero) {
+    try {
+        layero.css({
+            top: Math.max((window.innerHeight - layero.outerHeight()) / 2, 16) + 'px',
+            left: Math.max((window.innerWidth - layero.outerWidth()) / 2, 16) + 'px'
+        });
+    } catch (e) {}
+}
+// 按当前视口重设设置弹窗外层与内容区尺寸并居中（内容区高度需扣除标题栏）
+function resizeSettingsModal(layero) {
+    try {
+        var s = calcSettingsSize();
+        var titleH = layero.find('.layui-layer-title').outerHeight() || 0;
+        layero.css({ width: s.w + 'px', height: s.h + 'px' });
+        layero.find('.layui-layer-content').css({ height: (s.h - titleH) + 'px' });
+        centerSettingsLayer(layero);
+    } catch (e) {}
+}
 
 function openSettingsModal() {
     var menu = document.getElementById('userMenu');
@@ -2236,14 +2265,12 @@ function openSettingsModal() {
     scheduleRestore();
 
     var content = buildSettingsModalHtml();
-    // 移动端使用响应式尺寸，避免弹窗超出视口
-    var isMobile = window.innerWidth <= 768;
-    var areaWidth = isMobile ? '95%' : '720px';
-    var areaHeight = isMobile ? '85%' : '480px';
+    // 按实际视口动态计算尺寸，避免平板/竖屏超出屏幕
+    var size = calcSettingsSize();
     _settingsLayerIndex = window._layer.open({
         type: 1,
         title: '设置',
-        area: [areaWidth, areaHeight],
+        area: [size.w + 'px', size.h + 'px'],
         shadeClose: false,
         maxmin: false,
         content: content,
@@ -2255,14 +2282,12 @@ function openSettingsModal() {
                     contentEl.style.padding = '0';
                     contentEl.style.overflow = 'hidden';
                 }
-                // 移动端：确保弹窗不超出视口
-                if (isMobile) {
-                    layero.css({
-                        'max-width': '100vw',
-                        'max-height': '100vh'
-                    });
-                }
             } catch(e) {}
+            centerSettingsLayer(layero);
+            // 窗口缩放 / 旋转（平板横竖屏切换）时，按实际屏幕尺寸动态调整并居中
+            _settingsOnResize = function() { resizeSettingsModal(layero); };
+            window.addEventListener('resize', _settingsOnResize);
+            window.addEventListener('orientationchange', _settingsOnResize);
             // 默认选中第一个菜单项
             switchSettingsTab('changePassword');
             // 再次保险还原搜索框值（在表单渲染后）
@@ -2270,6 +2295,11 @@ function openSettingsModal() {
         },
         end: function() {
             _settingsLayerIndex = null;
+            if (_settingsOnResize) {
+                window.removeEventListener('resize', _settingsOnResize);
+                window.removeEventListener('orientationchange', _settingsOnResize);
+                _settingsOnResize = null;
+            }
             // 清理定时器
             restoreTimers.forEach(function(t) { clearTimeout(t); });
             restoreTimers = [];
