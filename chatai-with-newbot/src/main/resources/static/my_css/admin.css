@@ -1065,6 +1065,10 @@ body::before {
     overflow: hidden !important;
     animation: dialogIn 0.26s var(--ease) backwards;
 }
+/* 当弹窗内有 layui select 展开时，最外层也需取消裁剪 */
+.layui-layer-page:has(.layui-form-selected) {
+    overflow: visible !important;
+}
 @keyframes dialogIn {
     from { opacity: 0; transform: translateY(16px) scale(0.97); }
     to   { opacity: 1; transform: translateY(0) scale(1); }
@@ -1120,6 +1124,10 @@ body::before {
     flex-direction: column !important;
     overflow: hidden !important;
 }
+/* 当弹窗内有 layui select 展开时，外层容器也需取消裁剪 */
+.layui-layer-page .layui-layer-content:has(.layui-form-selected) {
+    overflow: visible !important;
+}
 .layui-layer-content { color: var(--ink) !important; }
 
 /* 弹窗主体：可滚动区域 */
@@ -1129,6 +1137,10 @@ body::before {
     overflow-y: auto !important;
     padding: 20px 24px 8px !important;
     overscroll-behavior: contain;
+}
+/* 当弹窗内有 layui 原生 select 展开时，临时取消裁剪，让下拉浮层可见 */
+.dialog-body:has(.layui-form-selected) {
+    overflow: visible !important;
 }
 /* 弹窗底部操作栏：固定，不随内容滚动 */
 .dialog-footer {
@@ -1400,7 +1412,7 @@ body::before {
 @media (max-width: 1024px) {
     .admin-main { padding: 24px 20px 48px; }
     .admin-nav { padding: 0 20px; }
-    .provider-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+    .provider-grid { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
 }
 @media (max-width: 768px) {
     .admin-nav { padding: 0 16px; }
@@ -1422,6 +1434,14 @@ body::before {
     .nav-btn { padding: 7px 12px; font-size: 12px; }
     /* 吸附首列限宽，避免长名称占满整行；超出部分省略 */
     .data-table th:first-child, .data-table td:first-child { max-width: min(50vw, 240px); }
+    /* 快速接入：强制两列布局，优化卡片内部空间 */
+    .provider-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .provider-card { padding: 14px 12px; gap: 10px; }
+    .provider-card-icon { width: 36px; height: 36px; }
+    .provider-card-name { font-size: 13px; }
+    .provider-card-count { font-size: 10px; }
+    .provider-card-btn { padding: 6px 10px; font-size: 11px; }
+    .provider-card-done { padding: 5px 8px; font-size: 11px; }
 }
 @media (max-width: 480px) {
     .admin-nav {
