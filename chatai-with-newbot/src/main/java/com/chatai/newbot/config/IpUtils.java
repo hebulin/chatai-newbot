@@ -1,6 +1,6 @@
 package com.chatai.newbot.config;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 
 /**
  * 客户端 IP 解析工具。
@@ -29,3 +29,4 @@ public final class IpUtils {
         return ip;
     }
 }
+

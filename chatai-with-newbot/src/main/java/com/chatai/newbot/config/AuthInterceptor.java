@@ -1,19 +1,19 @@
 package com.chatai.newbot.config;
 
 import com.chatai.newbot.model.User;
-import com.chatai.newbot.service.FileStorageService;
+import com.chatai.newbot.service.StorageManager;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 
 @Component
 public class AuthInterceptor implements HandlerInterceptor {
 
-    private final FileStorageService storageService;
+    private final StorageManager storageService;
 
-    public AuthInterceptor(FileStorageService storageService) {
+    public AuthInterceptor(StorageManager storageService) {
         this.storageService = storageService;
     }
 
@@ -26,7 +26,7 @@ public class AuthInterceptor implements HandlerInterceptor {
         // 也从cookie获取
         if (token == null || token.isEmpty()) {
             if (request.getCookies() != null) {
-                for (javax.servlet.http.Cookie cookie : request.getCookies()) {
+                for (jakarta.servlet.http.Cookie cookie : request.getCookies()) {
                     if ("token".equals(cookie.getName())) {
                         token = cookie.getValue();
                         break;
@@ -62,3 +62,4 @@ public class AuthInterceptor implements HandlerInterceptor {
         return true;
     }
 }
+

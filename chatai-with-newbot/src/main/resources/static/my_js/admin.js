@@ -1,7 +1,57 @@
-function getDialogArea(maxWidth) {
-    var w = window.innerWidth;
-    if (w <= maxWidth + 20) return ['92%', 'auto'];
-    return [maxWidth + 'px', 'auto'];
+/**
+ * 全局弹窗助手：统一封装 layer.open(type:1)。
+ * 解决两个核心问题：
+ *   1. 弹窗弹出后不居中 —— 在内容渲染（form.render）完成后重新计算并强制居中；
+ *   2. 大弹窗下半部分超出屏幕 —— 通过 CSS 约束弹窗最大高度并让内容区滚动，
+ *      同时在窗口尺寸变化时重新居中，保证弹窗始终完整位于视口中央。
+ * @param opts.title   标题
+ * @param opts.width   弹窗宽度（px），小屏自动降级为 92%
+ * @param opts.content 主体内容 HTML（放入可滚动的 .dialog-body）
+ * @param opts.footer  底部按钮 HTML（放入固定的 .dialog-footer，不随内容滚动）
+ * @param opts.success 渲染成功回调（先执行，内部可做 form.render）
+ * @param opts.shadeClose 是否允许点击遮罩关闭
+ */
+function openDialog(opts) {
+    var layer = window._layer, $ = window._$;
+    opts = opts || {};
+    var width = opts.width || 480;
+    var areaWidth = (window.innerWidth <= width + 32) ? '92%' : (width + 'px');
+    var userSuccess = opts.success;
+
+    // 组装结构：可滚动主体 + 固定底栏
+    var inner = '<div class="dialog-body">' + (opts.content || '') + '</div>';
+    if (opts.footer) inner += '<div class="dialog-footer">' + opts.footer + '</div>';
+
+    // 强制将弹窗置于视口正中，并保证不越界
+    function recenter(layero) {
+        var el = $(layero);
+        if (!el || !el.length) return;
+        var winW = $(window).width(), winH = $(window).height();
+        var w = el.outerWidth(), h = el.outerHeight();
+        var top = Math.max((winH - h) / 2, 16);
+        var left = Math.max((winW - w) / 2, 16);
+        el.css({ top: Math.round(top) + 'px', left: Math.round(left) + 'px' });
+    }
+
+    var dlgIndex = null;
+    return layer.open({
+        type: 1,
+        title: opts.title,
+        area: [areaWidth, 'auto'],
+        content: inner,
+        shadeClose: opts.shadeClose === true,
+        anim: -1, // 关闭 layer 自带动画，改用 CSS 统一入场动画
+        success: function(layero, index) {
+            dlgIndex = index;
+            // 先执行调用方回调（form.render 等会改变内容高度），再重新居中
+            if (typeof userSuccess === 'function') userSuccess(layero, index);
+            recenter(layero);
+            if (window.requestAnimationFrame) requestAnimationFrame(function() { recenter(layero); });
+            // 窗口缩放时保持居中
+            $(window).on('resize.dlg' + index, function() { recenter(layero); });
+        },
+        end: function() { if (dlgIndex !== null) $(window).off('resize.dlg' + dlgIndex); }
+    });
 }
 
 /* Admin JS - Layui Refactored */
@@ -9,10 +59,7 @@ var providers = [], allModels = [], allUsers = [];
 var allProvidersFull = []; // 厂商管理 Tab 使用：预置 + 自定义
 var defaultModelId = null; // 全局默认模型ID（新会话自动选中）
 var quickAddProviderId = null;
-var filterUsernames = [], filterModelNames = [];
-var usagePage = 1, usageSize = 10, statsPage = 1, statsSize = 10;
 var _authRedirecting = false; // 防止多个 401 并发时重复弹窗/跳转
-var dataSubTab = 'usage';
 
 var providerIconMap = {
     'deepseek': '/icons/deepseek-icon.svg',
@@ -24,31 +71,31 @@ var providerIconMap = {
 };
 
 function esc(s) { if (!s) return ''; var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-// 千分位格式化token数量
-function fmtToken(n) {
-    if (n === undefined || n === null || n === 0) return '0';
-    return Number(n).toLocaleString('en-US');
-}
 
 function getProviderIconHtml(pid, size) {
     size = size || 24;
     var icon = providerIconMap[pid];
-    if (icon) return '<img src="' + icon + '" style="width:' + size + 'px;height:' + size + 'px;object-fit:contain;border-radius:4px;flex-shrink:0;" onerror="this.style.display=\'none\'"/>';
-    return '<div style="width:' + size + 'px;height:' + size + 'px;border-radius:4px;background:#334155;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:' + Math.round(size*0.5) + 'px;flex-shrink:0;">' + (pid ? pid[0].toUpperCase() : '?') + '</div>';
+    if (icon) return '<span class="cso-icon" style="width:' + size + 'px;height:' + size + 'px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;"><img src="' + icon + '" class="cso-icon-img" style="width:' + size + 'px;height:' + size + 'px;object-fit:contain;border-radius:4px;flex-shrink:0;" onerror="this.style.display=\'none\'"/></span>';
+    return '<span class="cso-icon" style="width:' + size + 'px;height:' + size + 'px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;background:#334155;border-radius:4px;color:#94a3b8;font-size:' + Math.round(size*0.5) + 'px;">' + (pid ? pid[0].toUpperCase() : '?') + '</span>';
 }
 function getProviderSmallIconHtml(pid) { return getProviderIconHtml(pid, 20); }
 
-// 厂商/模型图标：预设厂商及其模型用预设 SVG 图标；自定义厂商及其模型用可设置的 emoji 图标，未设置则显示空占位
+// 厂商/模型图标：预设厂商及其模型用预设 SVG 图标；自定义厂商及其模型用可设置的 emoji 图标
+// 返回带 .cso-icon 类的固定尺寸 span，确保下拉选中所有选项布局一致
 function getEntityIconHtml(providerId, icon, size) {
     size = size || 20;
-    if (providerId && providerId !== '__custom__') {
-        return getProviderIconHtml(providerId, size);
+    var inner;
+    if (providerId && providerId !== '__custom__' && providerIconMap[providerId]) {
+        // 预置厂商：使用 SVG 图标
+        inner = '<img src="' + providerIconMap[providerId] + '" class="cso-icon-img" style="width:' + size + 'px;height:' + size + 'px;object-fit:contain;border-radius:4px;flex-shrink:0;" onerror="this.style.display=\'none\'"/>';
+    } else if (icon) {
+        // 自定义厂商/有 emoji 图标
+        inner = '<span style="font-size:' + size + 'px;line-height:1;display:inline-flex;align-items:center;justify-content:center;width:' + size + 'px;height:' + size + 'px;flex-shrink:0;">' + esc(icon) + '</span>';
+    } else {
+        // 无图标：占位（保持布局一致）
+        inner = '';
     }
-    var ic = icon || '';
-    if (ic) {
-        return '<span style="font-size:' + size + 'px;line-height:1;display:inline-flex;align-items:center;justify-content:center;width:' + size + 'px;height:' + size + 'px;flex-shrink:0;">' + esc(ic) + '</span>';
-    }
-    return '<span style="display:inline-block;width:' + size + 'px;height:' + size + 'px;flex-shrink:0;"></span>';
+    return '<span class="cso-icon" style="width:' + size + 'px;height:' + size + 'px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;">' + inner + '</span>';
 }
 function getModelProviderIconHtml(model, size) {
     return getEntityIconHtml(model && model.providerId, model && model.providerIcon, size);
@@ -56,21 +103,26 @@ function getModelProviderIconHtml(model, size) {
 
 function getUsageModelIconHtml(modelName) {
     if (!modelName) return '';
-    // 优先按 displayName 匹配当前已配置模型，使用其厂商图标（自定义模型也能显示设置的 emoji 图标）
+    // 1) 优先按 displayName 精确匹配
     var model = null;
     if (allModels && allModels.length) {
         model = allModels.find(function(m) { return (m.displayName || '') === modelName; });
+        // 2) 回退按 modelId 匹配（兼容某些场景下 log 存的是 modelId 而非 displayName）
+        if (!model) {
+            model = allModels.find(function(m) { return (m.modelId || '') === modelName; });
+        }
     }
     if (model) {
+        // 自定义厂商的 emoji 图标由 ModelConfig.providerIcon 提供（renameProvider 时已同步）
         return getEntityIconHtml(model.providerId, model.providerIcon, 18);
     }
-    // 回退1：按模型名推断预设厂商（显示预设 SVG 图标）
+    // 3) 仍找不到则按模型名关键字推断预设厂商（SVG 图标）
     var pid = inferProviderId(modelName);
     if (pid) {
         return getProviderIconHtml(pid, 18);
     }
-    // 回退2：无法识别（如已删除的自定义模型）：显示空占位，不再显示首字母色块
-    return '<span style="display:inline-block;width:18px;height:18px;flex-shrink:0;"></span>';
+    // 4) 实在没有：返回空占位（与正常选项结构一致，避免排版错位）
+    return '<span class="cso-icon cso-icon-empty" style="width:18px;height:18px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;"></span>';
 }
 
 function inferProviderId(modelName) {
@@ -129,7 +181,7 @@ layui.use(['table', 'form', 'layer', 'laypage', 'element', 'jquery'], function()
         else if (idx === 1) { loadModels(); }
         else if (idx === 2) { loadProviderMgmt(); }
         else if (idx === 3) { loadUsers(); }
-        else if (idx === 4) { loadFilterOptions(); switchDataSubTab(dataSubTab); }
+        else if (idx === 4) { loadSettings(); }
     });
 
     loadProviders(); loadModels();
@@ -183,34 +235,44 @@ function populateModelFilterOptions() {
     allModels.forEach(function(m) {
         var pid = m.providerId || '__custom__';
         var pname = m.providerName || pid;
-        if (!providerMap[pid]) providerMap[pid] = pname;
+        // 自定义厂商的图标来自 ModelConfig.providerIcon（renameProvider 时已同步）
+        var picon = m.providerIcon || '';
+        if (!providerMap[pid]) {
+            providerMap[pid] = { name: pname, icon: picon };
+        } else if (!providerMap[pid].icon && picon) {
+            // 同一厂商多个模型时取第一个非空图标
+            providerMap[pid].icon = picon;
+        }
     });
-    var providerSel = $('#mfProvider');
-    if (providerSel.length) {
-        var prevP = providerSel.val();
-        providerSel.empty();
-        providerSel.append('<option value="">全部厂商</option>');
-        Object.keys(providerMap).sort().forEach(function(pid) {
-            providerSel.append('<option value="' + esc(pid) + '">' + esc(providerMap[pid]) + '</option>');
-        });
-        if (prevP) providerSel.val(prevP);
-    }
-    // 模型ID下拉：使用模型 modelId 列表
-    var modelSel = $('#mfModelId');
-    if (modelSel.length) {
-        var prevM = modelSel.val();
-        modelSel.empty();
-        modelSel.append('<option value="">全部模型</option>');
-        var seen = {};
-        allModels.forEach(function(m) {
-            var mid = m.modelId || '';
-            if (mid && !seen[mid]) {
-                seen[mid] = true;
-                modelSel.append('<option value="' + esc(mid) + '">' + esc(mid) + '</option>');
-            }
-        });
-        if (prevM) modelSel.val(prevM);
-    }
+    // 填充厂商自定义下拉选
+    var providerOptions = Object.keys(providerMap).sort().map(function(pid) {
+        return { value: pid, text: providerMap[pid].name, icon: providerMap[pid].icon };
+    });
+    populateCustomSelectOptions('mfProviderArea', 'mfProviderDropdown', 'mfProviderValue', 'mfProvider', providerOptions, '全部厂商', applyModelFilter, function(value, text) {
+        // 厂商图标（用预存的 opt.icon，避免再次推断）
+        var opt = providerOptions.find(function(o) { return o.value === value; });
+        return getEntityIconHtml(value, opt ? opt.icon : null, 18);
+    });
+
+    // 填充模型ID自定义下拉选：value=modelId（保持筛选逻辑兼容），text=displayName（更友好）
+    var modelOptions = [];
+    var seen = {};
+    allModels.forEach(function(m) {
+        var mid = m.modelId || '';
+        if (mid && !seen[mid]) {
+            seen[mid] = true;
+            modelOptions.push({
+                value: mid,
+                text: m.displayName || mid,
+                icon: getEntityIconHtml(m.providerId, m.providerIcon, 18)
+            });
+        }
+    });
+    populateCustomSelectOptions('mfModelIdArea', 'mfModelIdDropdown', 'mfModelIdValue', 'mfModelId', modelOptions, '全部模型', applyModelFilter, function(value, text) {
+        // 通过 value 找回该模型的 icon（避免 iconFn 收到的是 displayName 时按 modelId 找不到）
+        var opt = modelOptions.find(function(o) { return o.value === value; });
+        return opt && opt.icon ? opt.icon : getUsageModelIconHtml(value);
+    });
 }
 
 function applyModelFilter() {
@@ -254,13 +316,28 @@ function applyModelFilter() {
 function resetModelFilter() {
     var $ = window._$;
     $('#mfName').val('');
-    $('#mfProvider').val('');
-    $('#mfModelId').val('');
-    $('#mfThinking').val('');
-    $('#mfMm').val('');
-    $('#mfEnabled').val('');
-    $('#mfVisible').val('');
+    // 重置自定义下拉选
+    resetCustomSelect('mfProviderArea', 'mfProviderValue', 'mfProvider', '全部厂商');
+    resetCustomSelect('mfModelIdArea', 'mfModelIdValue', 'mfModelId', '全部模型');
+    resetCustomSelect('mfThinkingArea', 'mfThinkingValue', 'mfThinking', '全部');
+    resetCustomSelect('mfMmArea', 'mfMmValue', 'mfMm', '全部');
+    resetCustomSelect('mfEnabledArea', 'mfEnabledValue', 'mfEnabled', '全部');
+    resetCustomSelect('mfVisibleArea', 'mfVisibleValue', 'mfVisible', '全部');
     applyModelFilter();
+}
+
+// 重置自定义下拉选
+function resetCustomSelect(areaId, valueId, hiddenId, defaultText) {
+    var $ = window._$;
+    var valueSpan = $('#' + valueId);
+    var hiddenInput = $('#' + hiddenId);
+    var area = $('#' + areaId);
+    var dropdown = area.find('.custom-select-dropdown');
+    
+    valueSpan.text(defaultText);
+    hiddenInput.val('');
+    dropdown.find('.custom-select-option').removeClass('selected');
+    dropdown.find('.custom-select-option[data-value=""]').addClass('selected');
 }
 
 // ===== User Filter =====
@@ -332,16 +409,15 @@ function showQuickAdd(providerId) {
         }
     });
     if (!modelCheckboxes) { layer.msg('该厂商所有模型已接入', {icon: 0}); return; }
-    var html = '<div class="layui-form" lay-filter="quickAddForm" style="padding:20px 20px 0;">';
+    var html = '<div class="layui-form" lay-filter="quickAddForm">';
     html += '<div class="form-group"><label class="form-label">厂商</label><div class="form-value">' + getProviderSmallIconHtml(providerId) + esc(provider.name) + '</div></div>';
     html += '<div class="form-group"><label class="form-label">API Key</label><div class="form-value"><input type="text" id="qaApiKey" class="layui-input" placeholder="sk-..." /></div></div>';
     html += '<div class="form-group"><label class="form-label">选择模型</label><div class="form-value model-checkbox-group">' + modelCheckboxes + '</div></div>';
-    html += '<div class="form-group"><label class="form-label">可见性</label><div class="form-value"><input type="checkbox" id="qaVisibleToAll" lay-skin="switch" lay-text="所有人|仅管理员" checked></div></div>';
-    html += '<div style="text-align:right;padding:10px 0;">';
-    html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
-    html += '<button type="button" class="layui-btn" onclick="submitQuickAdd()">确认接入</button>';
-    html += '</div></div>';
-    layer.open({ type:1, title:'快速接入 - ' + provider.name, area:getDialogArea(480), content:html,
+    html += '<div class="form-group"><div class="form-value" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">可见性</span><input type="checkbox" id="qaVisibleToAll" lay-skin="switch" checked></div></div>';
+    html += '</div>';
+    var footer = '<button type="button" class="dialog-btn dialog-btn-ghost" onclick="window._layer.closeAll()">取消</button>'
+        + '<button type="button" class="dialog-btn dialog-btn-primary" onclick="submitQuickAdd()">确认接入</button>';
+    openDialog({ title:'快速接入 - ' + provider.name, width:480, content:html, footer:footer,
         success: function(layero) { form.render(null,'quickAddForm'); }
     });
 }
@@ -437,22 +513,29 @@ function editModel(id) {
     // 从模型自身数据读取能力（管理员可手动设置）
     var isPresetThinking = model.supportsThinking || false;
     var isPresetMm = model.supportsMultimodal || false;
-    var html = '<div class="layui-form" lay-filter="editModelForm" style="padding:20px 20px 0;">';
+    var html = '<div class="layui-form" lay-filter="editModelForm">';
+    // ===== 厂商部分 =====
     html += '<div class="form-group"><label class="form-label">厂商</label><div class="form-value">' + getModelProviderIconHtml(model, 20) + esc(model.providerName || model.providerId) + '</div></div>';
-    html += '<div class="form-group"><label class="form-label">显示名</label><div class="form-value"><input type="text" id="emDisplayName" class="layui-input" value="' + esc(model.displayName||'') + '"/></div></div>';
-    html += '<div class="form-group"><label class="form-label">模型ID</label><div class="form-value"><input type="text" id="emModelId" class="layui-input" value="' + esc(model.modelId||'') + '" readonly style="opacity:0.6"/></div></div>';
+    // 割线：厂商 / API设置
+    html += '<div class="form-section-divider"></div>';
+    // ===== API设置部分 =====
+    html += '<div class="form-group"><label class="form-label">协议格式</label><div class="form-value"><span style="font-size:12px;color:#ef4444;">' + formatProtocolLabel(model.protocol) + '</span></div></div>';
     html += '<div class="form-group"><label class="form-label">API 地址</label><div class="form-value"><input type="text" id="emApiUrl" class="layui-input" value="' + esc(model.apiUrl||'') + '"/></div></div>';
     html += '<div class="form-group"><label class="form-label">API Key</label><div class="form-value"><input type="text" id="emApiKey" class="layui-input" value="' + esc(model.apiKey||'') + '" placeholder="不修改则留空"/></div></div>';
-    html += '<div class="form-group"><label class="form-label">状态</label><div class="form-value"><input type="checkbox" id="emEnabled" lay-skin="switch" lay-text="启用|禁用"' + (model.enabled?' checked':'') + '></div></div>';
-    html += '<div class="form-group"><label class="form-label">可见性</label><div class="form-value"><input type="checkbox" id="emVisibleToAll" lay-skin="switch" lay-text="所有人|仅管理员"' + (model.visibleToAll?' checked':'') + '></div></div>';
+    html += '<div class="form-group"><label class="form-label">模型名称</label><div class="form-value"><input type="text" id="emDisplayName" class="layui-input" value="' + esc(model.displayName||'') + '"/></div></div>';
+    html += '<div class="form-group"><label class="form-label">模型ID</label><div class="form-value"><input type="text" id="emModelId" class="layui-input" value="' + esc(model.modelId||'') + '" readonly style="opacity:0.6"/></div></div>';
+    // 割线：API设置 / 模型设置
+    html += '<div class="form-section-divider"></div>';
+    // ===== 模型设置部分 =====
+    html += '<div class="form-group"><div class="form-value" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">状态</span><input type="checkbox" id="emEnabled" lay-skin="switch"' + (model.enabled?' checked':'') + '></div></div>';
+    html += '<div class="form-group"><div class="form-value" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">可见性</span><input type="checkbox" id="emVisibleToAll" lay-skin="switch"' + (model.visibleToAll?' checked':'') + '></div></div>';
     // 能力开关（可手动设置）
-    html += '<div class="form-group"><label class="form-label">思考模式</label><div class="form-value"><input type="checkbox" id="emSupportsThinking" lay-skin="switch" lay-text="支持|不支持"' + (isPresetThinking?' checked':'') + '></div></div>';
-    html += '<div class="form-group"><label class="form-label">多模态</label><div class="form-value"><input type="checkbox" id="emSupportsMultimodal" lay-skin="switch" lay-text="支持|不支持"' + (isPresetMm?' checked':'') + '></div></div>';
-    html += '<div style="text-align:right;padding:10px 0;">';
-    html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
-    html += '<button type="button" class="layui-btn" onclick="saveModel(\'' + esc(id) + '\')">保存</button>';
-    html += '</div></div>';
-    layer.open({ type:1, title:'编辑模型 - '+(model.displayName||model.modelId), area:getDialogArea(500), content:html,
+    html += '<div class="form-group"><div class="form-value" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">思考模式</span><input type="checkbox" id="emSupportsThinking" lay-skin="switch"' + (isPresetThinking?' checked':'') + '></div></div>';
+    html += '<div class="form-group"><div class="form-value" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">多模态</span><input type="checkbox" id="emSupportsMultimodal" lay-skin="switch"' + (isPresetMm?' checked':'') + '></div></div>';
+    html += '</div>';
+    var footer = '<button type="button" class="dialog-btn dialog-btn-ghost" onclick="window._layer.closeAll()">取消</button>'
+        + '<button type="button" class="dialog-btn dialog-btn-primary" onclick="saveModel(\'' + esc(id) + '\')">保存</button>';
+    openDialog({ title:'编辑模型 - '+(model.displayName||model.modelId), width:500, content:html, footer:footer,
         success: function(layero) { form.render(null,'editModelForm'); }
     });
 }
@@ -524,7 +607,7 @@ function applyProviderFilter() {
 function resetProviderFilter() {
     var $ = window._$;
     $('#pfName').val('');
-    $('#pfType').val('');
+    resetCustomSelect('pfTypeArea', 'pfTypeValue', 'pfType', '全部');
     applyProviderFilter();
 }
 
@@ -587,7 +670,7 @@ function showRenameProvider(encodedId, isCustom, currentName, currentIcon) {
     var layer = window._layer, form = window._form;
     var providerId = decodeURIComponent(encodedId);
     var title = isCustom ? '修改自定义厂商' : '修改预置厂商';
-    var html = '<div class="layui-form" lay-filter="renameProviderForm" style="padding:20px 20px 0;">';
+    var html = '<div class="layui-form" lay-filter="renameProviderForm">';
     html += '<div class="form-group"><label class="form-label">厂商ID</label><div class="form-value"><input type="text" class="layui-input" value="' + esc(providerId) + '" readonly style="opacity:0.6"/></div></div>';
     if (!isCustom) {
         html += '<div class="form-group"><label class="form-label">预设名称（来自 providers.json）</label><div class="form-value" style="color:#94a3b8">' + esc(currentName) + '</div></div>';
@@ -610,11 +693,10 @@ function showRenameProvider(encodedId, isCustom, currentName, currentIcon) {
         html += '<input type="hidden" id="rpOldName" value="' + esc(currentName) + '"/>';
     }
     html += '<div class="form-tip" style="font-size:12px;color:#94a3b8;margin:4px 0 12px;">' + (isCustom ? '修改后将同步更新所有该自定义厂商下的模型（仅匹配当前原名）' : '修改后预置厂商的显示名将立即更新，并同步至所有关联模型（ID/协议/默认URL等不可改）') + '</div>';
-    html += '<div style="text-align:right;padding:10px 0;">';
-    html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
-    html += '<button type="button" class="layui-btn" onclick="submitRenameProvider(\'' + encodedId + '\',' + (isCustom ? 'true' : 'false') + ')">保存</button>';
-    html += '</div></div>';
-    layer.open({ type: 1, title: title, area: getDialogArea(520), content: html,
+    html += '</div>';
+    var footer = '<button type="button" class="dialog-btn dialog-btn-ghost" onclick="window._layer.closeAll()">取消</button>'
+        + '<button type="button" class="dialog-btn dialog-btn-primary" onclick="submitRenameProvider(\'' + encodedId + '\',' + (isCustom ? 'true' : 'false') + ')">保存</button>';
+    openDialog({ title: title, width: 520, content: html, footer: footer,
         success: function(layero) {
             form.render(null, 'renameProviderForm');
             // 绑定图标选择事件（使用 window._$ 避免 $ 未定义）
@@ -678,6 +760,12 @@ function submitRenameProvider(encodedId, isCustom) {
     });
 }
 
+// 协议类型显示标签
+function formatProtocolLabel(protocol) {
+    if (protocol === 'anthropic') return 'Anthropic';
+    return 'OpenAI 兼容';
+}
+
 function showAddModel() {
     var layer = window._layer, form = window._form, $ = window._$;
     var providerOptions = '';
@@ -685,8 +773,8 @@ function showAddModel() {
         providerOptions += '<option value="' + esc(p.id) + '">' + esc(p.name) + '</option>';
     });
     providerOptions += '<option value="__custom__">自定义厂商...</option>';
-    var html = '<div class="layui-form" lay-filter="addModelForm" style="padding:20px 20px 0;">';
-    // 厂商选择
+    var html = '<div class="layui-form" lay-filter="addModelForm">';
+    // ===== 厂商部分 =====
     html += '<div class="form-group"><label class="form-label">厂商</label><div class="form-value"><select id="amProviderId" lay-filter="amProviderId">' + providerOptions + '</select></div></div>';
     // 自定义厂商名称（选择自定义厂商时显示）
     html += '<div id="amCustomProviderFields" style="display:none;">';
@@ -696,30 +784,42 @@ function showAddModel() {
     html += '<div id="amModelSelectGroup" style="display:none;">';
     html += '<div class="form-group"><label class="form-label">模型</label><div class="form-value" id="amModelSelectContainer"></div></div>';
     html += '</div>';
+    // 割线：厂商 / API设置
+    html += '<div class="form-section-divider"></div>';
+    // ===== API设置部分 =====
+    // 协议格式下拉（仅自定义厂商显示）
+    html += '<div id="amProtocolGroup" style="display:none;">';
+    html += '<div class="form-group"><label class="form-label">协议格式</label><div class="form-value"><select id="amProtocol" lay-filter="amProtocol"><option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic</option></select></div></div>';
+    html += '</div>';
     // 预设模型字段区域（选择内置厂商+预设模型时显示）
     html += '<div id="amPresetFields" style="display:none;">';
-    html += '<div class="form-group"><label class="form-label">显示名</label><div class="form-value"><input type="text" id="amPresetDisplayName" class="layui-input" placeholder="显示名称"/></div></div>';
-    html += '<div class="form-group"><label class="form-label">模型ID</label><div class="form-value"><input type="text" id="amPresetModelId" class="layui-input" placeholder="模型标识" readonly style="opacity:0.6"/></div></div>';
+    html += '<div class="form-group"><label class="form-label">协议格式</label><div class="form-value"><span id="amPresetProtocolHint" style="font-size:12px;color:#ef4444;"></span></div></div>';
     html += '<div class="form-group"><label class="form-label">API 地址</label><div class="form-value"><input type="text" id="amPresetApiUrl" class="layui-input" placeholder="API地址"/></div></div>';
     html += '<div class="form-group"><label class="form-label">API Key</label><div class="form-value"><input type="text" id="amPresetApiKey" class="layui-input" placeholder="sk-..."/></div></div>';
-    html += '<div class="form-group"><label class="form-label">可见性</label><div class="form-value"><input type="checkbox" id="amPresetVisibleToAll" lay-skin="switch" lay-text="所有人|仅管理员" checked></div></div>';
+    html += '<div class="form-group"><label class="form-label">模型名称</label><div class="form-value"><input type="text" id="amPresetDisplayName" class="layui-input" placeholder="模型名称"/></div></div>';
+    html += '<div class="form-group"><label class="form-label">模型ID</label><div class="form-value"><input type="text" id="amPresetModelId" class="layui-input" placeholder="模型标识" readonly style="opacity:0.6"/></div></div>';
+    // 割线：API设置 / 模型设置
+    html += '<div class="form-section-divider"></div>';
+    html += '<div class="form-group"><div class="form-value" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">可见性</span><input type="checkbox" id="amPresetVisibleToAll" lay-skin="switch" checked></div></div>';
     html += '<div id="amPresetThinkingInfo"></div>';
     html += '</div>';
     // 自定义模型字段区域（选择内置厂商+自定义模型 或 选择自定义厂商时显示）
     html += '<div id="amCustomFields" style="display:none;">';
-    html += '<div class="form-group"><label class="form-label">显示名</label><div class="form-value"><input type="text" id="amDisplayName" class="layui-input" placeholder="可选，默认使用模型ID"/></div></div>';
-    html += '<div class="form-group"><label class="form-label">模型ID</label><div class="form-value"><input type="text" id="amModelId" class="layui-input" placeholder="如 gpt-4o"/></div></div>';
+    html += '<div id="amCustomProtocolHintGroup" class="form-group" style="display:none;"><label class="form-label">协议格式</label><div class="form-value"><span id="amCustomProtocolHint" style="font-size:12px;color:#ef4444;"></span></div></div>';
     html += '<div class="form-group"><label class="form-label">API 地址</label><div class="form-value"><input type="text" id="amApiUrl" class="layui-input" placeholder="API地址"/></div></div>';
     html += '<div class="form-group"><label class="form-label">API Key</label><div class="form-value"><input type="text" id="amApiKey" class="layui-input" placeholder="sk-..."/></div></div>';
-    html += '<div class="form-group"><label class="form-label">可见性</label><div class="form-value"><input type="checkbox" id="amVisibleToAll" lay-skin="switch" lay-text="所有人|仅管理员" checked></div></div>';
-    html += '<div class="form-group"><label class="form-label">思考模式</label><div class="form-value" id="amThinkingValue"><input type="checkbox" id="amSupportsThinking" lay-skin="switch" lay-text="支持|不支持"></div></div>';
-    html += '<div class="form-group"><label class="form-label">多模态</label><div class="form-value" id="amMultimodalValue"><input type="checkbox" id="amSupportsMultimodal" lay-skin="switch" lay-text="支持|不支持"></div></div>';
+    html += '<div class="form-group"><label class="form-label">模型名称</label><div class="form-value"><input type="text" id="amDisplayName" class="layui-input" placeholder="可选，默认使用模型ID"/></div></div>';
+    html += '<div class="form-group"><label class="form-label">模型ID</label><div class="form-value"><input type="text" id="amModelId" class="layui-input" placeholder="如 gpt-4o"/></div></div>';
+    // 割线：API设置 / 模型设置
+    html += '<div class="form-section-divider"></div>';
+    html += '<div class="form-group"><div class="form-value" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">可见性</span><input type="checkbox" id="amVisibleToAll" lay-skin="switch" checked></div></div>';
+    html += '<div class="form-group"><div class="form-value" id="amThinkingValue" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">思考模式</span><input type="checkbox" id="amSupportsThinking" lay-skin="switch"></div></div>';
+    html += '<div class="form-group"><div class="form-value" id="amMultimodalValue" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">多模态</span><input type="checkbox" id="amSupportsMultimodal" lay-skin="switch"></div></div>';
     html += '</div>';
-    html += '<div style="text-align:right;padding:10px 0;">';
-    html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
-    html += '<button type="button" class="layui-btn" onclick="submitAddModel()">添加</button>';
-    html += '</div></div>';
-    layer.open({ type:1, title:'添加模型', area:getDialogArea(500), content:html,
+    html += '</div>';
+    var footer = '<button type="button" class="dialog-btn dialog-btn-ghost" onclick="window._layer.closeAll()">取消</button>'
+        + '<button type="button" class="dialog-btn dialog-btn-primary" onclick="submitAddModel()">添加</button>';
+    openDialog({ title:'添加模型', width:500, content:html, footer:footer,
         success: function(layero) {
             form.render(null,'addModelForm');
             // 初始化：触发厂商选择
@@ -748,16 +848,20 @@ function onAddModelProviderChange() {
         $('#amModelSelectGroup').hide();
         $('#amPresetFields').hide();
         $('#amCustomFields').show();
+        // 自定义厂商：显示协议格式下拉，隐藏只读协议提示
+        $('#amProtocolGroup').show();
+        $('#amCustomProtocolHintGroup').hide();
         // 清空自定义厂商的预填URL
         $('#amApiUrl').val('');
         // 重置思考模式/多模态为开关
-        $('#amThinkingValue').html('<input type="checkbox" id="amSupportsThinking" lay-skin="switch" lay-text="支持|不支持">');
-        $('#amMultimodalValue').html('<input type="checkbox" id="amSupportsMultimodal" lay-skin="switch" lay-text="支持|不支持">');
+        $('#amThinkingValue').html('<span style="min-width:60px;">思考模式</span><input type="checkbox" id="amSupportsThinking" lay-skin="switch">');
+        $('#amMultimodalValue').html('<span style="min-width:60px;">多模态</span><input type="checkbox" id="amSupportsMultimodal" lay-skin="switch">');
         // 只渲染checkbox，避免重新渲染select导致下拉框损坏
         form.render('checkbox', 'addModelForm');
     } else {
-        // 内置厂商：隐藏自定义厂商名称，显示模型选择
+        // 内置厂商：隐藏自定义厂商名称和协议下拉，显示模型选择
         $('#amCustomProviderFields').hide();
+        $('#amProtocolGroup').hide();
         $('#amModelSelectGroup').show();
         // 更新模型下拉列表
         updateAddModelSelect();
@@ -828,6 +932,9 @@ function showAddModelPresetFields(provider, modelId) {
         $('#amPresetModelId').val(pm.id);
         $('#amPresetApiUrl').val(provider ? provider.defaultApiUrl : '');
     }
+    // 显示协议类型（只读，跟随厂商）
+    var protocol = provider ? provider.protocol : 'openai';
+    $('#amPresetProtocolHint').text(formatProtocolLabel(protocol));
     // 能力提示：预设模型只标注，不可设置
     var capInfo = $('#amPresetThinkingInfo');
     var capHtml = '<div class="form-group"><label class="form-label">能力</label><div class="form-value" style="display:flex;gap:8px;flex-wrap:wrap;">';
@@ -844,13 +951,20 @@ function showAddModelCustomModelFields(provider) {
     var $ = window._$, form = window._form;
     $('#amPresetFields').hide();
     $('#amCustomFields').show();
-    // 预填厂商默认URL
     if (provider) {
+        // 内置厂商+自定义模型：协议只读，跟随厂商
         $('#amApiUrl').val(provider.defaultApiUrl || '');
+        $('#amProtocolGroup').hide();
+        $('#amCustomProtocolHintGroup').show();
+        $('#amCustomProtocolHint').text(formatProtocolLabel(provider.protocol));
+    } else {
+        // 自定义厂商：协议使用下拉框（由 onAddModelProviderChange 显示）
+        $('#amProtocolGroup').show();
+        $('#amCustomProtocolHintGroup').hide();
     }
     // 重置思考模式/多模态为开关
-    $('#amThinkingValue').html('<input type="checkbox" id="amSupportsThinking" lay-skin="switch" lay-text="支持|不支持">');
-    $('#amMultimodalValue').html('<input type="checkbox" id="amSupportsMultimodal" lay-skin="switch" lay-text="支持|不支持">');
+    $('#amThinkingValue').html('<span style="min-width:60px;">思考模式</span><input type="checkbox" id="amSupportsThinking" lay-skin="switch">');
+    $('#amMultimodalValue').html('<span style="min-width:60px;">多模态</span><input type="checkbox" id="amSupportsMultimodal" lay-skin="switch">');
     // 只渲染checkbox，避免重新渲染select导致下拉框损坏
     form.render('checkbox', 'addModelForm');
 }
@@ -881,6 +995,7 @@ function submitAddModel() {
             providerName: customProviderName,
             apiUrl: $('#amApiUrl').val().trim(),
             apiKey: apiKey,
+            protocol: $('#amProtocol').val() || 'openai',
             visibleToAll: $('#amVisibleToAll').is(':checked'),
             supportsThinking: supportsThinking,
             supportsMultimodal: supportsMultimodal,
@@ -970,7 +1085,7 @@ function renderUsersList(users) {
             : '<span class="status-badge vis-admin">普通用户</span>';
         var actions = '<div class="action-btns">';
         actions += '<button class="action-btn edit-btn" onclick="editUser(\'' + esc(u.id) + '\')"><i class="layui-icon layui-icon-edit"></i></button>';
-        actions += '<button class="action-btn del-btn" onclick="deleteUser(\'' + esc(u.id) + '\')"><i class="layui-icon layui-icon-delete"></i></button>';
+        if (u.username !== 'admin') actions += '<button class="action-btn del-btn" onclick="deleteUser(\'' + esc(u.id) + '\')"><i class="layui-icon layui-icon-delete"></i></button>';
         if (u.role !== 'admin') actions += '<button class="action-btn perm-btn" onclick="showPerms(\'' + esc(u.id) + '\')" title="权限"><i class="layui-icon layui-icon-auz"></i></button>';
         actions += '</div>';
         var tr = '<tr>'
@@ -988,17 +1103,16 @@ function renderUsersList(users) {
 
 function showAddUser() {
     var layer = window._layer, form = window._form;
-    var html = '<div class="layui-form" lay-filter="addUserForm" style="padding:20px 20px 0;">';
+    var html = '<div class="layui-form" lay-filter="addUserForm">';
     html += '<div class="form-group"><label class="form-label">用户名</label><div class="form-value"><input type="text" id="auUsername" class="layui-input" placeholder="请输入用户名"/></div></div>';
     html += '<div class="form-group"><label class="form-label">密码</label><div class="form-value"><input type="password" id="auPassword" class="layui-input" placeholder="请输入密码"/></div></div>';
     html += '<div class="form-group"><label class="form-label">角色</label><div class="form-value"><select id="auRole">';
     html += '<option value="user">普通用户</option><option value="admin">管理员</option>';
     html += '</select></div></div>';
-    html += '<div style="text-align:right;padding:10px 0;">';
-    html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
-    html += '<button type="button" class="layui-btn" onclick="submitAddUser()">添加</button>';
-    html += '</div></div>';
-    layer.open({ type:1, title:'添加用户', area:getDialogArea(420), content:html,
+    html += '</div>';
+    var footer = '<button type="button" class="dialog-btn dialog-btn-ghost" onclick="window._layer.closeAll()">取消</button>'
+        + '<button type="button" class="dialog-btn dialog-btn-primary" onclick="submitAddUser()">添加</button>';
+    openDialog({ title:'添加用户', width:420, content:html, footer:footer,
         success: function(layero) { form.render('select','addUserForm'); }
     });
 }
@@ -1022,8 +1136,8 @@ function editUser(id) {
     var layer = window._layer, form = window._form;
     var user = allUsers.find(function(u) { return u.id === id; });
     if (!user) return;
-    var html = '<div class="layui-form" lay-filter="editUserForm" style="padding:20px 20px 0;">';
-    html += '<div class="form-group"><label class="form-label">用户名</label><div class="form-value"><input type="text" id="euUsername" class="layui-input" value="' + esc(user.username) + '" readonly style="opacity:0.6"/></div></div>';
+    var html = '<div class="layui-form" lay-filter="editUserForm">';
+    html += '<div class="form-group"><label class="form-label">用户名</label><div class="form-value"><input type="text" id="euUsername" name="euName_' + Date.now() + '" class="layui-input" value="' + esc(user.username) + '" readonly style="opacity:0.6" autocomplete="off" data-lpignore="true" data-form-type="other" /></div></div>';
     html += '<div class="form-group"><label class="form-label">新密码</label><div class="form-value"><input type="password" id="euPassword" class="layui-input" placeholder="不修改则留空"/></div></div>';
     if (user.username === 'admin') {
         html += '<div class="form-group"><label class="form-label">角色</label><div class="form-value" style="color:#818cf8;font-weight:500;">管理员（内置用户不可修改）</div></div>';
@@ -1033,11 +1147,10 @@ function editUser(id) {
         html += '<option value="admin"' + (user.role==='admin'?' selected':'') + '>管理员</option>';
         html += '</select></div></div>';
     }
-    html += '<div style="text-align:right;padding:10px 0;">';
-    html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
-    html += '<button type="button" class="layui-btn" onclick="saveUser(\'' + esc(id) + '\')">保存</button>';
-    html += '</div></div>';
-    layer.open({ type:1, title:'编辑用户 - ' + user.username, area:getDialogArea(420), content:html,
+    html += '</div>';
+    var footer = '<button type="button" class="dialog-btn dialog-btn-ghost" onclick="window._layer.closeAll()">取消</button>'
+        + '<button type="button" class="dialog-btn dialog-btn-primary" onclick="saveUser(\'' + esc(id) + '\')">保存</button>';
+    openDialog({ title:'编辑用户 - ' + user.username, width:420, content:html, footer:footer,
         success: function(layero) { if (user.username !== 'admin') form.render('select','editUserForm'); }
     });
 }
@@ -1064,6 +1177,7 @@ function saveUser(id) {
 function deleteUser(id) {
     var user = allUsers.find(function(u) { return u.id === id; });
     if (!user) return;
+    if (user.username === 'admin') { window._layer.msg('内置管理员账号不可删除', {icon:0}); return; }
     window._layer.confirm('确定删除用户 "' + user.username + '" 吗？', {icon:3, title:'确认删除'}, function(idx) {
         api('/api/admin/users/' + id, { method:'DELETE' }).then(function(data) {
             if (data && data.success) { window._layer.close(idx); window._layer.msg('已删除',{icon:1}); loadUsers(); }
@@ -1084,15 +1198,13 @@ function showPerms(userId) {
         modelCheckboxes += '<label>' + getModelProviderIconHtml(m, 18) + esc(m.displayName||m.modelId) + '</label></div>';
     });
     if (!modelCheckboxes) { layer.msg('暂无模型', {icon:0}); return; }
-    var html = '<div class="layui-form" lay-filter="permsForm" style="padding:20px 20px 0;">';
+    var html = '<div class="layui-form" lay-filter="permsForm">';
     html += '<div class="form-group"><label class="form-label">用户</label><div class="form-value">' + esc(user.username) + '</div></div>';
     html += '<div class="form-group"><label class="form-label">允许的模型</label><div class="form-value model-checkbox-group">' + modelCheckboxes + '</div></div>';
-    html += '<div style="text-align:right;padding:10px 0;">';
-    html += '<button type="button" class="layui-btn layui-btn-primary" onclick="window._layer.closeAll()">取消</button>';
-    html += '<button type="button" class="layui-btn" onclick="savePermissions(\'' + esc(userId) + '\')">保存</button>';
-    html += '</div></div>';
-
-    layer.open({ type:1, title:'用户权限 - ' + user.username, area:getDialogArea(520), content:html,
+    html += '</div>';
+    var footer = '<button type="button" class="dialog-btn dialog-btn-ghost" onclick="window._layer.closeAll()">取消</button>'
+        + '<button type="button" class="dialog-btn dialog-btn-primary" onclick="savePermissions(\'' + esc(userId) + '\')">保存</button>';
+    openDialog({ title:'用户权限 - ' + user.username, width:520, content:html, footer:footer,
         success: function(layero) { form.render(null,'permsForm'); }
     });
 }
@@ -1111,211 +1223,107 @@ function savePermissions(userId) {
 }
 
 
-// ===== Data Statistics =====
-function switchDataSubTab(tab, el) {
-    dataSubTab = tab;
-    var $ = window._$;
-    $('.data-sub-tab-item').removeClass('active');
-    $('.data-sub-content').removeClass('active').hide();
-    if (tab === 'usage') {
-        $(el || '.data-sub-tab-item:first').addClass('active');
-        $('#data-sub-usage').addClass('active').show();
-        loadUsage();
-    } else {
-        $(el || '.data-sub-tab-item:last').addClass('active');
-        $('#data-sub-stats').addClass('active').show();
-        loadUsageStats();
-    }
-}
 
-function loadFilterOptions() {
-    api('/api/admin/usage/filters').then(function(data) {
-        if (data && data.success) {
-            // API返回 {success, usernames, modelNames} 而非 {success, data: {usernames, modelNames}}
-            filterUsernames = data.usernames || [];
-            filterModelNames = data.modelNames || [];
-            renderUserFilter();
-            renderModelFilterDropdown('usageModelSelectArea', 'usageSearchModel', filterModelNames);
-            renderModelFilterDropdown('statsModelSelectArea', 'statsSearchModel', filterModelNames);
-        }
-    });
-}
-
-function renderUserFilter() {
-    var $ = window._$;
-    ['usageSearchUser', 'statsSearchUser'].forEach(function(id) {
-        var sel = $('#' + id);
-        sel.empty();
-        sel.append('<option value="">全部用户</option>');
-        filterUsernames.forEach(function(u) { sel.append('<option value="' + esc(u) + '">' + esc(u) + '</option>'); });
-    });
-    if (window._form) window._form.render('select');
-}
-
-function loadUsage() {
-    var $ = window._$;
-    var username = $('#usageSearchUser').val() || '';
-    var modelName = $('#usageSearchModel').val() || '';
-    var date = $('#usageSearchDate').val() || '';
-    var url = '/api/admin/usage?page=' + usagePage + '&size=' + usageSize;
-    if (username) url += '&username=' + encodeURIComponent(username);
-    if (modelName) url += '&modelName=' + encodeURIComponent(modelName);
-    if (date) url += '&date=' + encodeURIComponent(date);
-    api(url).then(function(data) {
-        if (data && data.success) {
-            // API返回 {success, data: [...], total, page, size}
-            var items = data.data || [];
-            var total = data.total || 0;
-            renderUsageTable(items);
-            renderPagination('usagePagination', total, usagePage, usageSize, function(p) { usagePage = p; loadUsage(); });
-        }
-    });
-}
-
-function loadUsageStats() {
-    var $ = window._$;
-    var username = $('#statsSearchUser').val() || '';
-    var modelName = $('#statsSearchModel').val() || '';
-    var date = $('#statsSearchDate').val() || '';
-    var url = '/api/admin/usage/stats?page=' + statsPage + '&size=' + statsSize;
-    if (username) url += '&username=' + encodeURIComponent(username);
-    if (modelName) url += '&modelName=' + encodeURIComponent(modelName);
-    if (date) url += '&date=' + encodeURIComponent(date);
-    api(url).then(function(data) {
-        if (data && data.success) {
-            // API返回 {success, data: [...], total, page, size}
-            var items = data.data || [];
-            var total = data.total || 0;
-            renderStatsTable(items);
-            renderPagination('statsPagination', total, statsPage, statsSize, function(p) { statsPage = p; loadUsageStats(); });
-        }
-    });
-}
-
-function renderUsageTable(items) {
-    var $ = window._$, tbody = $('#usageTableBody');
-    tbody.empty();
-    if (!items || items.length === 0) {
-        tbody.html('<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:40px;">暂无使用记录</td></tr>');
-        return;
-    }
-    items.forEach(function(r) {
-        var tr = '<tr>'
-            + '<td>' + esc(r.timestamp || '-') + '</td>'
-            + '<td>' + esc(r.username || '-') + '</td>'
-            + '<td><div class="model-name-cell">' + getUsageModelIconHtml(r.modelName) + '<span>' + esc(r.modelName || '-') + '</span></div></td>'
-            + '<td>' + fmtToken(r.promptTokens) + '</td>'
-            + '<td>' + fmtToken(r.completionTokens) + '</td>'
-            + '<td>' + fmtToken(r.reasoningTokens) + '</td>'
-            + '<td>' + fmtToken(r.cachedTokens) + '</td>'
-            + '<td>' + (r.deepThinking ? '<span class="think-badge">思考</span>' : '-') + '</td>'
-            + '</tr>';
-        tbody.append(tr);
-    });
-}
-
-function renderStatsTable(items) {
-    var $ = window._$, tbody = $('#statsTableBody');
-    tbody.empty();
-    if (!items || items.length === 0) {
-        tbody.html('<tr><td colspan="9" style="text-align:center;color:#94a3b8;padding:40px;">暂无统计数据</td></tr>');
-        return;
-    }
-    items.forEach(function(r) {
-        var tr = '<tr>'
-            + '<td>' + esc(r.username || '-') + '</td>'
-            + '<td>' + esc(r.date || '-') + '</td>'
-            + '<td><div class="model-name-cell">' + getUsageModelIconHtml(r.modelName) + '<span>' + esc(r.modelName || '-') + '</span></div></td>'
-            + '<td>' + (r.count || 0) + '</td>'
-            + '<td>' + fmtToken(r.promptTokens) + '</td>'
-            + '<td>' + fmtToken(r.completionTokens) + '</td>'
-            + '<td>' + fmtToken(r.reasoningTokens) + '</td>'
-            + '<td>' + fmtToken(r.cachedTokens) + '</td>'
-            + '<td>' + (r.thinkingCount || 0) + '</td>'
-            + '</tr>';
-        tbody.append(tr);
-    });
-}
-
-function renderPagination(elemId, total, current, size, callback) {
-    if (!window._laypage) return;
-    var isMobile = window.innerWidth <= 480;
-    window._laypage.render({ 
-        elem: elemId, 
-        count: total, 
-        limit: size, 
-        curr: current, 
-        theme: '#6366f1',
-        groups: isMobile ? 3 : 5,  // Mobile: show 3 page buttons, Desktop: 5
-        layout: isMobile ? ['prev', 'page', 'next'] : ['prev', 'page', 'next', 'count'],
-        jump: function(obj, first) { if (!first) callback(obj.curr); }
-    });
-}
-
-function searchUsage() { usagePage = 1; loadUsage(); }
-function searchUsageStats() { statsPage = 1; loadUsageStats(); }
-function resetUsage() {
-    var $ = window._$;
-    $('#usageSearchUser').val('');
-    $('#usageSearchModel').val('');
-    $('#usageSearchDate').val('');
-    // 重置自定义下拉框显示文本
-    $('#usageModelSelectValue').text('全部模型');
-    // 重置layui渲染的select
-    if (window._form) window._form.render('select');
-    usagePage = 1;
-    loadUsage();
-}
-function resetUsageStats() {
-    var $ = window._$;
-    $('#statsSearchUser').val('');
-    $('#statsSearchModel').val('');
-    $('#statsSearchDate').val('');
-    // 重置自定义下拉框显示文本
-    $('#statsModelSelectValue').text('全部模型');
-    // 重置layui渲染的select
-    if (window._form) window._form.render('select');
-    statsPage = 1;
-    loadUsageStats();
-}
-
-
-// ===== Custom Model Filter Dropdown =====
-function renderModelFilterDropdown(areaId, hiddenId, modelNames) {
+function toggleCustomDropdown(areaId, e) {
+    if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
     var $ = window._$;
     var area = $('#' + areaId);
     if (!area.length) return;
-    var trigger = area.find('.custom-select-trigger');
-    var dropdown = area.find('.custom-select-dropdown');
-    dropdown.empty();
-    dropdown.append('<div class="custom-select-option" data-value="" onclick="selectModelFilter(\'' + areaId + '\',\'' + hiddenId + '\',\'\',\'全部模型\')">全部模型</div>');
-    modelNames.forEach(function(mn) {
-        var iconHtml = getUsageModelIconHtml(mn);
-        dropdown.append('<div class="custom-select-option" data-value="' + esc(mn) + '" onclick="selectModelFilter(\'' + areaId + '\',\'' + hiddenId + '\',\'' + esc(mn).replace(/'/g, "\\'") + '\',\'' + esc(mn).replace(/'/g, "\\'") + '\')">' + iconHtml + '<span>' + esc(mn) + '</span></div>');
-    });
-}
-
-function selectModelFilter(areaId, hiddenId, value, label) {
-    var $ = window._$;
-    $('#' + hiddenId).val(value);
-    var area = $('#' + areaId);
-    area.find('.custom-select-value').text(label || '全部模型');
-    area.find('.custom-select-dropdown').removeClass('active');
-    area.find('.custom-select-trigger').removeClass('active');
-}
-
-function toggleCustomDropdown(areaId) {
-    var $ = window._$;
-    var area = $('#' + areaId);
     var dropdown = area.find('.custom-select-dropdown');
     var trigger = area.find('.custom-select-trigger');
     var isOpen = dropdown.hasClass('active');
     // Close all dropdowns first
     $('.custom-select-dropdown').removeClass('active');
     $('.custom-select-trigger').removeClass('active');
+    $('.custom-select-area').removeClass('active');
     if (!isOpen) {
         dropdown.addClass('active');
         trigger.addClass('active');
+        area.addClass('active'); // 关键：给 area 也添加 active，触发 .custom-select-area.active .custom-select-dropdown { display: block }
+    }
+}
+
+// 通用自定义下拉选选项选择函数
+function selectCustomOption(areaId, dropdownId, valueId, value, text, callback, e) {
+    if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
+    var $ = window._$;
+    var area = $('#' + areaId);
+    var dropdown = $('#' + dropdownId);
+    var valueSpan = $('#' + valueId);
+    var hiddenInput = area.siblings('input[type="hidden"]').first();
+
+    // 更新显示文本
+    valueSpan.text(text);
+
+    // 更新隐藏 input 的值
+    if (hiddenInput.length) {
+        hiddenInput.val(value);
+    }
+
+    // 更新选中状态 - 通过遍历而非选择器，避免特殊字符转义问题
+    dropdown.find('.custom-select-option').removeClass('selected');
+    dropdown.find('.custom-select-option').each(function() {
+        if ($(this).attr('data-value') === value) {
+            $(this).addClass('selected');
+        }
+    });
+
+    // 关闭下拉 - 同步移除 area、trigger、dropdown 的 active
+    area.removeClass('active');
+    area.find('.custom-select-trigger').removeClass('active');
+    dropdown.removeClass('active');
+
+    // 执行回调
+    if (typeof callback === 'function') {
+        callback();
+    }
+}
+
+// 动态填充自定义下拉选选项
+function populateCustomSelectOptions(areaId, dropdownId, valueId, hiddenId, options, defaultText, callback, iconFn) {
+    var $ = window._$;
+    var dropdown = $('#' + dropdownId);
+    var valueSpan = $('#' + valueId);
+    var hiddenInput = $('#' + hiddenId);
+    var cbName = (callback && typeof callback === 'function') ? callback.name : '';
+
+    // 清空现有选项
+    dropdown.empty();
+
+    // 统一结构：每个 option 都用 [icon][text] 布局，避免无图标时结构不一致导致排版错位
+    function buildOption(value, text, rawIcon) {
+        var iconHtml = rawIcon;
+        if (!iconHtml && typeof iconFn === 'function') {
+            iconHtml = iconFn(value, text) || '';
+        }
+        // iconHtml 已经是带 .cso-icon 类的 span 字符串；空时补一个透明占位
+        var iconSpan = iconHtml || '<span class="cso-icon cso-icon-empty"></span>';
+        return '<div class="custom-select-option" data-value="' + esc(value) + '" onclick="selectCustomOption(\'' + areaId + '\',\'' + dropdownId + '\',\'' + valueId + '\',\'' + esc(value).replace(/'/g, '&#39;') + '\',\'' + esc(text).replace(/'/g, '&#39;') + '\',\'' + cbName + '\',event)">' + iconSpan + '<span class="cso-text">' + esc(text) + '</span></div>';
+    }
+
+    // 添加默认选项
+    dropdown.append(buildOption('', defaultText, ''));
+
+    // 添加其他选项
+    options.forEach(function(opt) {
+        // 优先使用 opt.icon（避免 iconFn 内部因参数不足查不到图标）
+        dropdown.append(buildOption(opt.value, opt.text, opt.icon || ''));
+    });
+
+    // 同步初始化：根据当前隐藏 input 的值标记对应项为 selected
+    var currentVal = hiddenInput.val() || '';
+    var matchOpt = options.find(function(o) { return o.value === currentVal; });
+    if (currentVal && matchOpt) {
+        valueSpan.text(matchOpt.text);
+        dropdown.find('.custom-select-option').removeClass('selected');
+        dropdown.find('.custom-select-option[data-value="' + esc(currentVal).replace(/"/g, '\\"') + '"]').addClass('selected');
+    } else {
+        // 重置为默认值
+        valueSpan.text(defaultText);
+        hiddenInput.val('');
+        dropdown.find('.custom-select-option').removeClass('selected');
+        dropdown.find('.custom-select-option[data-value=""]').addClass('selected');
     }
 }
 
@@ -1325,6 +1333,147 @@ function doLogout() {
         localStorage.removeItem('token');
         window._layer.close(idx);
         window.location.href = '/login.html';
+    });
+}
+
+
+// ===== 系统设置 =====
+
+/**
+ * 加载存储模式设置
+ */
+function loadSettings() {
+    api('/api/admin/settings/storage').then(function(data) {
+        if (data && data.success) {
+            var info = data.data || {};
+            var useSqlite = info.useSqlite;
+            var modeEl = document.getElementById('currentStorageMode');
+            var sizeEl = document.getElementById('dbFileSize');
+            var toggleBtn = document.getElementById('sqliteToggleBtn');
+            var migrateBtn = document.getElementById('migrateBtn');
+            if (modeEl) modeEl.textContent = useSqlite ? 'SQLite 数据库' : 'JSON 文件';
+            if (modeEl) modeEl.style.color = useSqlite ? '#10b981' : '#f59e0b';
+            if (sizeEl) sizeEl.textContent = info.dbFileSize || '-';
+            if (toggleBtn) toggleBtn.textContent = useSqlite ? '切换到 JSON 文件' : '切换到 SQLite';
+            // 迁移按钮在两种模式下均可见：SQLite 模式下也可重新迁移，用于修复历史数据
+            if (migrateBtn) migrateBtn.style.display = '';
+        }
+    });
+}
+
+/**
+ * 切换存储模式（JSON ↔ SQLite）
+ * 切换到 SQLite 时强制「先迁移、后切换」，避免 SQLite 中缺少用户账号而导致无法登录。
+ */
+function toggleStorageMode() {
+    var layer = window._layer;
+    // 先获取当前状态
+    api('/api/admin/settings/storage').then(function(data) {
+        if (!data || !data.success) return;
+        var currentSqlite = data.data && data.data.useSqlite;
+        var targetSqlite = !currentSqlite;
+        if (targetSqlite) {
+            // JSON → SQLite：必须先迁移再切换（含校验），否则可能无法登录
+            confirmMigrateThenSwitch();
+        } else {
+            // SQLite → JSON：常规确认即可
+            layer.confirm('确定切换回 JSON 文件存储吗？切换后将读取 JSON 文件中的旧数据。',
+                {icon: 3, title: '切换存储模式'}, function(idx) {
+                    layer.close(idx);
+                    doSwitchStorage(false);
+                });
+        }
+    });
+}
+
+/**
+ * 切换到 SQLite 前的确认与校验：自动「先执行一键迁移，迁移成功后再切换到 SQLite」。
+ * 若迁移失败则中止切换，防止 SQLite 中无用户账号导致所有人无法登录。
+ */
+function confirmMigrateThenSwitch() {
+    var layer = window._layer;
+    var msg = '切换到 SQLite 前必须先迁移数据。<br>' +
+              '若未迁移直接切换，SQLite 中可能没有用户账号，将导致' +
+              '<b style="color:#f56c6c">所有人（含管理员）无法登录</b>。<br><br>' +
+              '点击「先迁移再切换」将自动<b>先执行一键迁移，成功后再切换到 SQLite</b>（推荐且安全）。';
+    layer.confirm(msg, {icon: 3, title: '切换到 SQLite（需先迁移）', btn: ['先迁移再切换', '取消']},
+        function(idx) {
+            layer.close(idx);
+            var loadIdx = layer.load(1, {shade: [0.3, '#000']});
+            // 第一步：先迁移
+            api('/api/admin/settings/storage/migrate', {method: 'POST'}).then(function(res) {
+                // 校验：迁移失败则中止，绝不继续切换
+                if (!res || !res.success) {
+                    layer.close(loadIdx);
+                    layer.msg(((res && res.message) || '迁移失败') + '，已取消切换', {icon: 2, time: 3000});
+                    return;
+                }
+                // 第二步：迁移成功后再切换到 SQLite
+                return api('/api/admin/settings/storage', {
+                    method: 'PUT',
+                    body: JSON.stringify({useSqlite: true})
+                }).then(function(sw) {
+                    layer.close(loadIdx);
+                    if (sw && sw.success) {
+                        layer.msg('已迁移并切换到 SQLite', {icon: 1});
+                        loadSettings();
+                    } else {
+                        layer.msg((sw && sw.message) || '切换失败', {icon: 2});
+                    }
+                });
+            }).catch(function() {
+                layer.close(loadIdx);
+                layer.msg('请求失败，已取消切换', {icon: 2});
+            });
+        });
+}
+
+/**
+ * 执行存储模式切换（当前用于切换回 JSON 文件模式）
+ * @param useSqlite 目标模式：true=SQLite，false=JSON
+ */
+function doSwitchStorage(useSqlite) {
+    var layer = window._layer;
+    var loadIdx = layer.load(1, {shade: [0.3, '#000']});
+    api('/api/admin/settings/storage', {
+        method: 'PUT',
+        body: JSON.stringify({useSqlite: useSqlite})
+    }).then(function(res) {
+        layer.close(loadIdx);
+        if (res && res.success) {
+            layer.msg(res.message || '切换成功', {icon: 1});
+            loadSettings();
+        } else {
+            layer.msg((res && res.message) || '切换失败', {icon: 2});
+        }
+    }).catch(function() {
+        layer.close(loadIdx);
+        layer.msg('请求失败', {icon: 2});
+    });
+}
+
+/**
+ * 一键迁移：将全部 JSON 数据写入 SQLite
+ */
+function migrateToSqlite() {
+    var layer = window._layer;
+    layer.confirm('确定将全部 JSON 数据迁移到 SQLite 吗？此操作不会删除 JSON 文件。<br>聊天记录将以 JSON 文件内容为准写入（可重复执行，用于修复历史数据）。', {icon: 3, title: '一键迁移到 SQLite'}, function(idx) {
+        layer.close(idx);
+        var loadIdx = layer.load(1, {shade: [0.3, '#000']});
+        api('/api/admin/settings/storage/migrate', {
+            method: 'POST'
+        }).then(function(res) {
+            layer.close(loadIdx);
+            if (res && res.success) {
+                layer.msg(res.message || '迁移完成', {icon: 1, time: 3000});
+                loadSettings();
+            } else {
+                layer.msg(res.message || '迁移失败', {icon: 2});
+            }
+        }).catch(function() {
+            layer.close(loadIdx);
+            layer.msg('请求失败', {icon: 2});
+        });
     });
 }
 

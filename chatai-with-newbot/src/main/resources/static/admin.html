@@ -2,11 +2,11 @@
 <html lang="zh">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>AI Chat - 管理后台</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/layui/css/layui.css">
     <link rel="stylesheet" href="my_css/admin.css">
 </head>
@@ -15,15 +15,21 @@
     <!-- 顶部导航 -->
     <nav class="admin-nav">
         <div class="nav-brand">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2.5"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-            <span>管理后台</span>
+            <span class="nav-brand-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            </span>
+            <span class="nav-brand-text">
+                <span class="nav-brand-name">Atelier</span>
+                <span class="nav-brand-sub">管理后台 · ADMIN</span>
+            </span>
         </div>
         <div class="nav-actions">
-            <button class="theme-toggle-btn" id="themeToggleBtn" onclick="toggleTheme()" title="切换主题">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            <button class="theme-toggle-btn" id="themeToggleBtn" onclick="toggleTheme()" title="切换主题" aria-label="主题">
+                <span class="toggle-track"><span class="toggle-knob"></span></span>
             </button>
-            <button class="nav-btn" onclick="window.location.href='/index.html'">
-                <i class="layui-icon layui-icon-return"></i> 返回聊天
+            <button class="nav-btn" onclick="window.location.href='/index.html'" title="返回聊天">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                <span class="nav-btn-label">返回聊天</span>
             </button>
         </div>
     </nav>
@@ -35,13 +41,16 @@
                 <li>模型管理</li>
                 <li>厂商管理</li>
                 <li>用户管理</li>
-                <li>数据统计</li>
+                <li>系统设置</li>
             </ul>
             <div class="layui-tab-content">
                 <!-- 快速接入 -->
                 <div class="layui-tab-item layui-show">
                 <div class="section-header">
-                    <h2>快速接入模型</h2>
+                    <div class="section-title">
+                        <span class="section-eyebrow">01 / QUICK START · 快速接入</span>
+                        <h2>快速接入模型</h2>
+                    </div>
                     <span class="section-tip">选择厂商，填入 API Key 即可一键接入所有模型</span>
                 </div>
                 <div class="provider-grid" id="providerGrid">
@@ -52,76 +61,126 @@
             <!-- 模型管理 -->
             <div class="layui-tab-item">
                 <div class="section-header">
-                    <h2>模型管理</h2>
+                    <div class="section-title">
+                        <span class="section-eyebrow">02 / MODELS · 模型</span>
+                        <h2>模型管理</h2>
+                    </div>
                     <button class="primary-btn" onclick="showAddModel()">
                         <i class="layui-icon layui-icon-addition"></i> 添加模型
                     </button>
                 </div>
                 <div class="card">
-                    <div class="stats-search-bar">
+                    <div class="stats-search-bar stats-search-bar--model">
                         <div class="search-field">
                             <label class="search-label">名称</label>
                             <input type="text" id="mfName" class="stats-search-input" placeholder="模糊查询，忽略大小写" oninput="applyModelFilter()" autocomplete="off" />
                         </div>
                         <div class="search-field">
                             <label class="search-label">厂商</label>
-                            <select id="mfProvider" class="stats-search-select" onchange="applyModelFilter()">
-                                <option value="">全部厂商</option>
-                            </select>
+                            <div class="custom-select-area" id="mfProviderArea">
+                                <div class="custom-select-trigger" onclick="toggleCustomDropdown('mfProviderArea', event)">
+                                    <span class="custom-select-value" id="mfProviderValue">全部厂商</span>
+                                    <i class="layui-icon layui-icon-down custom-select-arrow"></i>
+                                </div>
+                                <div class="custom-select-dropdown" id="mfProviderDropdown">
+                                    <div class="custom-select-option" data-value="" onclick="selectCustomOption('mfProviderArea','mfProviderDropdown','mfProviderValue','','全部厂商',applyModelFilter,event)">全部厂商</div>
+                                </div>
+                            </div>
+                            <input type="hidden" id="mfProvider" value="">
                         </div>
                         <div class="search-field">
                             <label class="search-label">模型</label>
-                            <select id="mfModelId" class="stats-search-select" onchange="applyModelFilter()">
-                                <option value="">全部模型</option>
-                            </select>
+                            <div class="custom-select-area" id="mfModelIdArea">
+                                <div class="custom-select-trigger" onclick="toggleCustomDropdown('mfModelIdArea', event)">
+                                    <span class="custom-select-value" id="mfModelIdValue">全部模型</span>
+                                    <i class="layui-icon layui-icon-down custom-select-arrow"></i>
+                                </div>
+                                <div class="custom-select-dropdown" id="mfModelIdDropdown">
+                                    <div class="custom-select-option" data-value="" onclick="selectCustomOption('mfModelIdArea','mfModelIdDropdown','mfModelIdValue','','全部模型',applyModelFilter,event)">全部模型</div>
+                                </div>
+                            </div>
+                            <input type="hidden" id="mfModelId" value="">
                         </div>
-                        <div class="search-field">
+                        <div class="search-field search-field--group-start">
                             <label class="search-label">思考</label>
-                            <select id="mfThinking" class="stats-search-select" onchange="applyModelFilter()">
-                                <option value="">全部</option>
-                                <option value="1">支持</option>
-                                <option value="0">不支持</option>
-                            </select>
+                            <div class="custom-select-area" id="mfThinkingArea">
+                                <div class="custom-select-trigger" onclick="toggleCustomDropdown('mfThinkingArea', event)">
+                                    <span class="custom-select-value" id="mfThinkingValue">全部</span>
+                                    <i class="layui-icon layui-icon-down custom-select-arrow"></i>
+                                </div>
+                                <div class="custom-select-dropdown" id="mfThinkingDropdown">
+                                    <div class="custom-select-option" data-value="" onclick="selectCustomOption('mfThinkingArea','mfThinkingDropdown','mfThinkingValue','','全部',applyModelFilter,event)">全部</div>
+                                    <div class="custom-select-option" data-value="1" onclick="selectCustomOption('mfThinkingArea','mfThinkingDropdown','mfThinkingValue','1','支持',applyModelFilter,event)">支持</div>
+                                    <div class="custom-select-option" data-value="0" onclick="selectCustomOption('mfThinkingArea','mfThinkingDropdown','mfThinkingValue','0','不支持',applyModelFilter,event)">不支持</div>
+                                </div>
+                            </div>
+                            <input type="hidden" id="mfThinking" value="">
                         </div>
                         <div class="search-field">
                             <label class="search-label">多模态</label>
-                            <select id="mfMm" class="stats-search-select" onchange="applyModelFilter()">
-                                <option value="">全部</option>
-                                <option value="1">支持</option>
-                                <option value="0">不支持</option>
-                            </select>
+                            <div class="custom-select-area" id="mfMmArea">
+                                <div class="custom-select-trigger" onclick="toggleCustomDropdown('mfMmArea', event)">
+                                    <span class="custom-select-value" id="mfMmValue">全部</span>
+                                    <i class="layui-icon layui-icon-down custom-select-arrow"></i>
+                                </div>
+                                <div class="custom-select-dropdown" id="mfMmDropdown">
+                                    <div class="custom-select-option" data-value="" onclick="selectCustomOption('mfMmArea','mfMmDropdown','mfMmValue','','全部',applyModelFilter,event)">全部</div>
+                                    <div class="custom-select-option" data-value="1" onclick="selectCustomOption('mfMmArea','mfMmDropdown','mfMmValue','1','支持',applyModelFilter,event)">支持</div>
+                                    <div class="custom-select-option" data-value="0" onclick="selectCustomOption('mfMmArea','mfMmDropdown','mfMmValue','0','不支持',applyModelFilter,event)">不支持</div>
+                                </div>
+                            </div>
+                            <input type="hidden" id="mfMm" value="">
                         </div>
                         <div class="search-field">
                             <label class="search-label">状态</label>
-                            <select id="mfEnabled" class="stats-search-select" onchange="applyModelFilter()">
-                                <option value="">全部</option>
-                                <option value="1">已启用</option>
-                                <option value="0">已禁用</option>
-                            </select>
+                            <div class="custom-select-area" id="mfEnabledArea">
+                                <div class="custom-select-trigger" onclick="toggleCustomDropdown('mfEnabledArea', event)">
+                                    <span class="custom-select-value" id="mfEnabledValue">全部</span>
+                                    <i class="layui-icon layui-icon-down custom-select-arrow"></i>
+                                </div>
+                                <div class="custom-select-dropdown" id="mfEnabledDropdown">
+                                    <div class="custom-select-option" data-value="" onclick="selectCustomOption('mfEnabledArea','mfEnabledDropdown','mfEnabledValue','','全部',applyModelFilter,event)">全部</div>
+                                    <div class="custom-select-option" data-value="1" onclick="selectCustomOption('mfEnabledArea','mfEnabledDropdown','mfEnabledValue','1','已启用',applyModelFilter,event)">已启用</div>
+                                    <div class="custom-select-option" data-value="0" onclick="selectCustomOption('mfEnabledArea','mfEnabledDropdown','mfEnabledValue','0','已禁用',applyModelFilter,event)">已禁用</div>
+                                </div>
+                            </div>
+                            <input type="hidden" id="mfEnabled" value="">
                         </div>
                         <div class="search-field">
                             <label class="search-label">可见性</label>
-                            <select id="mfVisible" class="stats-search-select" onchange="applyModelFilter()">
-                                <option value="">全部</option>
-                                <option value="1">所有人</option>
-                                <option value="0">仅管理员</option>
-                            </select>
+                            <div class="custom-select-area" id="mfVisibleArea">
+                                <div class="custom-select-trigger" onclick="toggleCustomDropdown('mfVisibleArea', event)">
+                                    <span class="custom-select-value" id="mfVisibleValue">全部</span>
+                                    <i class="layui-icon layui-icon-down custom-select-arrow"></i>
+                                </div>
+                                <div class="custom-select-dropdown" id="mfVisibleDropdown">
+                                    <div class="custom-select-option" data-value="" onclick="selectCustomOption('mfVisibleArea','mfVisibleDropdown','mfVisibleValue','','全部',applyModelFilter,event)">全部</div>
+                                    <div class="custom-select-option" data-value="1" onclick="selectCustomOption('mfVisibleArea','mfVisibleDropdown','mfVisibleValue','1','所有人',applyModelFilter,event)">所有人</div>
+                                    <div class="custom-select-option" data-value="0" onclick="selectCustomOption('mfVisibleArea','mfVisibleDropdown','mfVisibleValue','0','仅管理员',applyModelFilter,event)">仅管理员</div>
+                                </div>
+                            </div>
+                            <input type="hidden" id="mfVisible" value="">
                         </div>
                         <div class="search-actions">
                             <button class="cancel-btn" onclick="resetModelFilter()">重置</button>
                         </div>
                     </div>
-                    <table class="layui-table data-table" id="modelTable" lay-skin="nob">
-                        <thead><tr><th>名称</th><th>厂商</th><th>模型</th><th>思考</th><th>多模态</th><th>状态</th><th>可见性</th><th>操作</th></tr></thead>
-                        <tbody id="modelTableBody"></tbody>
-                    </table>
+                    <div class="table-scroll-wrapper">
+                        <table class="layui-table data-table" id="modelTable" lay-skin="nob">
+                            <thead><tr><th>名称</th><th>厂商</th><th>模型</th><th>思考</th><th>多模态</th><th>状态</th><th>可见性</th><th>操作</th></tr></thead>
+                            <tbody id="modelTableBody"></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 
             <!-- 厂商管理 -->
             <div class="layui-tab-item">
                 <div class="section-header">
-                    <h2>厂商管理</h2>
+                    <div class="section-title">
+                        <span class="section-eyebrow">03 / PROVIDERS · 厂商</span>
+                        <h2>厂商管理</h2>
+                    </div>
                     <span class="section-tip">预置厂商仅可修改显示名，ID/协议/默认URL不可改；自定义厂商可修改显示名（同步至所有关联模型）</span>
                 </div>
                 <div class="card">
@@ -132,144 +191,98 @@
                         </div>
                         <div class="search-field">
                             <label class="search-label">类型</label>
-                            <select id="pfType" class="stats-search-select" onchange="applyProviderFilter()">
-                                <option value="">全部</option>
-                                <option value="preset">预置</option>
-                                <option value="custom">自定义</option>
-                            </select>
+                            <div class="custom-select-area" id="pfTypeArea">
+                                <div class="custom-select-trigger" onclick="toggleCustomDropdown('pfTypeArea', event)">
+                                    <span class="custom-select-value" id="pfTypeValue">全部</span>
+                                    <i class="layui-icon layui-icon-down custom-select-arrow"></i>
+                                </div>
+                                <div class="custom-select-dropdown" id="pfTypeDropdown">
+                                    <div class="custom-select-option" data-value="" onclick="selectCustomOption('pfTypeArea','pfTypeDropdown','pfTypeValue','','全部',applyProviderFilter,event)">全部</div>
+                                    <div class="custom-select-option" data-value="preset" onclick="selectCustomOption('pfTypeArea','pfTypeDropdown','pfTypeValue','preset','预置',applyProviderFilter,event)">预置</div>
+                                    <div class="custom-select-option" data-value="custom" onclick="selectCustomOption('pfTypeArea','pfTypeDropdown','pfTypeValue','custom','自定义',applyProviderFilter,event)">自定义</div>
+                                </div>
+                            </div>
+                            <input type="hidden" id="pfType" value="">
                         </div>
                         <div class="search-actions">
                             <button class="cancel-btn" onclick="resetProviderFilter()">重置</button>
                         </div>
                     </div>
-                    <table class="layui-table data-table" id="providerTable" lay-skin="nob">
-                        <thead><tr><th>厂商</th><th>类型</th><th>厂商ID</th><th>模型数</th><th>预设名称</th><th>显示名称</th><th>图标</th><th>操作</th></tr></thead>
-                        <tbody id="providerTableBody"></tbody>
-                    </table>
+                    <div class="table-scroll-wrapper">
+                        <table class="layui-table data-table" id="providerTable" lay-skin="nob">
+                            <thead><tr><th>厂商</th><th>类型</th><th>厂商ID</th><th>模型数</th><th>预设名称</th><th>显示名称</th><th>图标</th><th>操作</th></tr></thead>
+                            <tbody id="providerTableBody"></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 
             <!-- 用户管理 -->
             <div class="layui-tab-item">
                 <div class="section-header">
-                    <h2>用户管理</h2>
+                    <div class="section-title">
+                        <span class="section-eyebrow">04 / USERS · 用户</span>
+                        <h2>用户管理</h2>
+                    </div>
                 </div>
                 <div class="card">
                     <div class="stats-search-bar">
                         <div class="search-field">
                             <label class="search-label">用户名</label>
-                            <input type="text" id="ufUsername" class="stats-search-input" placeholder="模糊查询，忽略大小写" oninput="applyUserFilter()" autocomplete="off" />
+                            <input type="search" id="ufUsername" name="q_user" class="stats-search-input" placeholder="模糊查询，忽略大小写" oninput="applyUserFilter()" autocomplete="off" autocorrect="off" autocapitalize="off" data-lpignore="true" data-form-type="other" data-1p-ignore="true" spellcheck="false" readonly onfocus="this.removeAttribute('readonly')" />
                         </div>
                         <div class="search-actions">
                             <button class="cancel-btn" onclick="resetUserFilter()">重置</button>
                         </div>
                     </div>
-                    <table class="layui-table data-table" id="userTable" lay-skin="nob">
-                        <thead><tr><th>用户名</th><th>角色</th><th>注册时间</th><th>最近登录</th><th>登录IP</th><th>浏览器</th><th>操作</th></tr></thead>
-                        <tbody id="userTableBody"></tbody>
-                    </table>
+                    <div class="table-scroll-wrapper">
+                        <table class="layui-table data-table" id="userTable" lay-skin="nob">
+                            <thead><tr><th>用户名</th><th>角色</th><th>注册时间</th><th>最近登录</th><th>登录IP</th><th>浏览器</th><th>操作</th></tr></thead>
+                            <tbody id="userTableBody"></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 
-            <!-- 数据统计 -->
+            <!-- 系统设置 -->
             <div class="layui-tab-item">
                 <div class="section-header">
-                    <h2>数据统计</h2>
-                </div>
-                <!-- 子菜单导航 -->
-                <div class="data-sub-tab-nav">
-                    <div class="data-sub-tab-item active" onclick="switchDataSubTab('usage', this)">
-                        使用记录
-                    </div>
-                    <div class="data-sub-tab-item" onclick="switchDataSubTab('stats', this)">
-                        用户统计
+                    <div class="section-title">
+                        <span class="section-eyebrow">05 / SETTINGS · 设置</span>
+                        <h2>系统设置</h2>
                     </div>
                 </div>
-
-                <!-- 使用记录子页面 -->
-                <div id="data-sub-usage" class="data-sub-content active">
-                    <div class="stats-card">
-                        <div class="stats-search-bar">
-                            <div class="search-field">
-                                <label class="search-label">用户</label>
-                                <select id="usageSearchUser" class="stats-search-select">
-                                    <option value="">全部用户</option>
-                                </select>
+                <div class="card settings-card">
+                    <div class="settings-section">
+                        <h3 class="settings-section-title">存储模式</h3>
+                        <div class="settings-row">
+                            <div class="settings-info">
+                                <span class="settings-label">当前模式</span>
+                                <span class="settings-value" id="currentStorageMode">加载中...</span>
                             </div>
-                            <div class="search-field">
-                                <label class="search-label">模型</label>
-                                <div class="custom-select-area" id="usageModelSelectArea">
-                                    <div class="custom-select-trigger" id="usageModelSelectTrigger" onclick="toggleCustomDropdown('usageModelSelectArea')">
-                                        <span class="custom-select-value" id="usageModelSelectValue">全部模型</span>
-                                        <i class="layui-icon layui-icon-down custom-select-arrow"></i>
-                                    </div>
-                                    <div class="custom-select-dropdown" id="usageModelSelectDropdown"></div>
-                                </div>
-                                <input type="hidden" id="usageSearchModel" value="">
-                            </div>
-                            <div class="search-field">
-                                <label class="search-label">日期</label>
-                                <input type="date" id="usageSearchDate" class="stats-search-input">
-                            </div>
-                            <div class="search-actions">
-                                <button class="primary-btn" onclick="searchUsage()">
-                                    <i class="layui-icon layui-icon-search"></i> 搜索
-                                </button>
-                                <button class="cancel-btn" onclick="resetUsage()">重置</button>
+                            <div class="settings-info">
+                                <span class="settings-label">数据库文件大小</span>
+                                <span class="settings-value" id="dbFileSize">-</span>
                             </div>
                         </div>
-                        <div class="table-scroll-wrapper">
-                            <table class="layui-table data-table" id="usageTable" lay-skin="nob">
-                                <thead><tr><th>时间</th><th>用户</th><th>模型</th><th>输入Token</th><th>输出Token</th><th>思考Token</th><th>缓存Token</th><th>思考模式</th></tr></thead>
-                                <tbody id="usageTableBody"></tbody>
-                            </table>
+                        <div class="settings-actions">
+                            <button class="cancel-btn" id="migrateBtn" onclick="migrateToSqlite()">
+                                一键迁移到 SQLite
+                            </button>
+                            <button class="primary-btn" id="sqliteToggleBtn" onclick="toggleStorageMode()">
+                                切换到 SQLite
+                            </button>
                         </div>
-                        <div id="usagePagination"></div>
-                    </div>
-                </div>
-
-                <!-- 用户统计子页面 -->
-                <div id="data-sub-stats" class="data-sub-content">
-                    <div class="stats-card">
-                        <div class="stats-search-bar">
-                            <div class="search-field">
-                                <label class="search-label">用户</label>
-                                <select id="statsSearchUser" class="stats-search-select">
-                                    <option value="">全部用户</option>
-                                </select>
-                            </div>
-                            <div class="search-field">
-                                <label class="search-label">模型</label>
-                                <div class="custom-select-area" id="statsModelSelectArea">
-                                    <div class="custom-select-trigger" id="statsModelSelectTrigger" onclick="toggleCustomDropdown('statsModelSelectArea')">
-                                        <span class="custom-select-value" id="statsModelSelectValue">全部模型</span>
-                                        <i class="layui-icon layui-icon-down custom-select-arrow"></i>
-                                    </div>
-                                    <div class="custom-select-dropdown" id="statsModelSelectDropdown"></div>
-                                </div>
-                                <input type="hidden" id="statsSearchModel" value="">
-                            </div>
-                            <div class="search-field">
-                                <label class="search-label">日期</label>
-                                <input type="date" id="statsSearchDate" class="stats-search-input">
-                            </div>
-                            <div class="search-actions">
-                                <button class="primary-btn" onclick="searchUsageStats()">
-                                    <i class="layui-icon layui-icon-search"></i> 搜索
-                                </button>
-                                <button class="cancel-btn" onclick="resetUsageStats()">重置</button>
-                            </div>
-                        </div>
-                        <div class="table-scroll-wrapper">
-                            <table class="layui-table data-table" id="statsTable" lay-skin="nob">
-                                <thead><tr><th>用户</th><th>日期</th><th>模型</th><th>调用次数</th><th>输入Token</th><th>输出Token</th><th>思考Token</th><th>缓存Token</th><th>思考模式次数</th></tr></thead>
-                                <tbody id="statsTableBody"></tbody>
-                            </table>
-                        </div>
-                        <div id="statsPagination"></div>
+                        <p class="settings-hint">
+                            <b style="color:#f56c6c">重要：切换到 SQLite 前请务必先「一键迁移」。</b>
+                            若未迁移直接切换，SQLite 中可能没有用户账号，将导致所有人（含管理员）无法登录。页面已强制「先迁移、后切换」。<br>
+                            切换后新数据将写入 SQLite 数据库文件 (data/chatai.db)。<br>
+                            切换回 JSON 模式后，将读取 JSON 文件中的旧数据（迁移后新增的数据不会回写）。
+                        </p>
                     </div>
                 </div>
             </div>
+
         </div>
         </div>
     </main>
@@ -286,9 +299,27 @@ document.addEventListener('click', function(e) {
             var dropdown = area.querySelector('.custom-select-dropdown');
             if (trigger) trigger.classList.remove('active');
             if (dropdown) dropdown.classList.remove('active');
+            area.classList.remove('active');
         }
     });
 });
+</script>
+<!-- 表格横滑：滚动后给吸附首列加渐变阴影 -->
+<script>
+(function() {
+    function setup(w) {
+        function update() {
+            w.classList.toggle('is-scrolled', w.scrollLeft > 2);
+        }
+        w.addEventListener('scroll', update, { passive: true });
+        window.addEventListener('resize', update);
+        if (window.MutationObserver) {
+            new MutationObserver(update).observe(w, { subtree: true, childList: true, characterData: true });
+        }
+        update();
+    }
+    document.querySelectorAll('.table-scroll-wrapper').forEach(setup);
+})();
 </script>
 <script src="/layui/layui.js"></script>
 <script src="my_js/version.js"></script>

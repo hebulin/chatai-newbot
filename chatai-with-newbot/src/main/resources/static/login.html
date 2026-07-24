@@ -2,88 +2,267 @@
 <html lang="zh">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Chat - 登录</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Atelier · 智语</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/layui/css/layui.css">
     <link rel="stylesheet" href="/my_css/login.css">
 </head>
 <body>
-<div class="login-container">
-    <div class="login-card">
-        <div class="login-header">
-            <div class="logo">
-                <i class="layui-icon layui-icon-dialogue" style="font-size:32px;color:#818cf8;"></i>
-            </div>
-            <h1>AI Chat Platform</h1>
-            <p class="subtitle">智能对话，无限可能</p>
-        </div>
+    <!-- 纸张纹理层（保留开关，默认禁用） -->
+    <div class="paper-grain" aria-hidden="true"></div>
+    <!-- 环境背景层：两团极淡的径向光晕缓慢漂移，给居中面板提供纵深 -->
+    <div class="ambient" aria-hidden="true"></div>
 
-        <!-- 登录表单 -->
-        <div id="loginFormArea">
-            <form class="layui-form" lay-filter="loginForm">
-                <div class="layui-form-item">
-                    <label class="layui-form-label"><i class="layui-icon layui-icon-username"></i></label>
-                    <div class="layui-input-block">
-                        <input type="text" name="username" lay-verify="required" lay-reqtext="请输入用户名" placeholder="请输入用户名" autocomplete="username" class="layui-input">
-                    </div>
-                </div>
-                <div class="layui-form-item">
-                    <label class="layui-form-label"><i class="layui-icon layui-icon-password"></i></label>
-                    <div class="layui-input-block">
-                        <input type="password" name="password" lay-verify="required" lay-reqtext="请输入密码" placeholder="请输入密码" autocomplete="current-password" class="layui-input">
-                    </div>
-                </div>
-                <div class="layui-form-item btn-row">
-                    <div class="layui-input-block">
-                        <button class="layui-btn submit-btn" lay-submit lay-filter="loginSubmit" id="loginBtn">登录</button>
-                    </div>
-                </div>
-            </form>
-            <div class="form-switch-link">
-                还没有账号？<a href="javascript:;" onclick="showRegisterForm()">注册</a>
-            </div>
-        </div>
+    <!-- ============ 视图一 · 品牌介绍页 ============ -->
+    <section class="view view--brand" id="brandView" aria-label="品牌介绍">
+        <div class="view-inner brand-inner">
+            <article class="panel brand-panel">
+                <!-- 超大描边字母水印，纯装饰 -->
+                <span class="brand-watermark" aria-hidden="true">A</span>
 
-        <!-- 注册表单 -->
-        <div id="registerFormArea" style="display:none;">
-            <form class="layui-form" lay-filter="registerForm">
-                <div class="layui-form-item">
-                    <label class="layui-form-label"><i class="layui-icon layui-icon-username"></i></label>
-                    <div class="layui-input-block">
-                        <input type="text" name="username" lay-verify="required" lay-reqtext="请输入用户名" placeholder="2-20个字符" autocomplete="username" class="layui-input">
+                <header class="panel-top brand-top">
+                    <div class="brand-mark">
+                        <div class="mark-glyph">
+                            <span class="mark-line mark-line-1"></span>
+                            <span class="mark-line mark-line-2"></span>
+                            <span class="mark-line mark-line-3"></span>
+                        </div>
+                        <div class="mark-meta">
+                            <span class="mark-no">№ 001</span>
+                            <span class="mark-sep">/</span>
+                            <span class="mark-vol">VOL. II</span>
+                        </div>
                     </div>
-                </div>
-                <div class="layui-form-item">
-                    <label class="layui-form-label"><i class="layui-icon layui-icon-password"></i></label>
-                    <div class="layui-input-block">
-                        <input type="password" name="password" lay-verify="required|password" lay-reqtext="请输入密码" placeholder="至少4个字符" class="layui-input">
-                    </div>
-                </div>
-                <div class="layui-form-item">
-                    <label class="layui-form-label"><i class="layui-icon layui-icon-password"></i></label>
-                    <div class="layui-input-block">
-                        <input type="password" name="password2" lay-verify="required|confirmPassword" lay-reqtext="请确认密码" placeholder="再次输入密码" class="layui-input">
-                    </div>
-                </div>
-                <div class="layui-form-item btn-row">
-                    <div class="layui-input-block">
-                        <button class="layui-btn submit-btn" lay-submit lay-filter="registerSubmit" id="regBtn">注册</button>
-                    </div>
-                </div>
-            </form>
-            <div class="form-switch-link">
-                已有账号？<a href="javascript:;" onclick="showLoginForm()">登录</a>
-            </div>
-        </div>
-    </div>
+                    <button class="theme-toggle" type="button" onclick="toggleTheme()" aria-label="切换主题">
+                        <span class="toggle-track"><span class="toggle-knob"></span></span>
+                    </button>
+                </header>
 
-    <!-- 主题切换按钮 -->
-    <button class="theme-toggle-btn" id="themeToggleBtn" onclick="toggleTheme()" title="切换浅色主题"></button>
-    <footer class="login-footer app-version"></footer>
-</div>
+                <div class="brand-body">
+                    <span class="eyebrow">A WORKBENCH FOR</span>
+                    <h1 class="display">
+                        <span class="display-line">Conversations</span>
+                        <span class="display-line display-italic">that <em>think</em></span>
+                        <span class="display-line">alongside you.</span>
+                    </h1>
+
+                    <p class="brand-lede">
+                        Atelier 是一座安静的工坊。它把多家大语言模型收拢在同一张工作台上，让你用最少的仪式感，写下最值得说出口的话。
+                    </p>
+
+                    <div class="brand-foot">
+                        <div class="foot-stat">
+                            <span class="foot-stat-no">12</span>
+                            <span class="foot-stat-lbl">MODELS<br>CURATED</span>
+                        </div>
+                        <div class="foot-stat">
+                            <span class="foot-stat-no">∞</span>
+                            <span class="foot-stat-lbl">CONTEXT<br>WINDOW</span>
+                        </div>
+                        <div class="foot-stat">
+                            <span class="foot-stat-no">0</span>
+                            <span class="foot-stat-lbl">AD<br>NOISE</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="brand-cta-row">
+                    <button class="brand-cta" id="brandCta" type="button" onclick="enterFormView()">
+                        <span class="cta-text">立刻体验 · TRY NOW</span>
+                        <span class="cta-arrow">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                        </span>
+                    </button>
+                </div>
+            </article>
+        </div>
+    </section>
+
+    <!-- ============ 视图二 · 登录表单页 ============ -->
+    <main class="view view--form" id="formView" aria-label="登录">
+        <div class="view-inner form-inner">
+            <article class="panel form-panel">
+                <header class="panel-top form-top">
+                    <!-- 返回品牌介绍页 -->
+                    <button class="back-to-brand" id="backToBrandBtn" type="button" onclick="backToBrand()" aria-label="返回介绍页">
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                        <span class="back-label">返回</span>
+                    </button>
+                    <div class="top-date" id="topDate">—</div>
+                    <button class="theme-toggle" type="button" onclick="toggleTheme()" aria-label="切换主题">
+                        <span class="toggle-track">
+                            <span class="toggle-knob"></span>
+                        </span>
+                    </button>
+                </header>
+
+                <section class="form-stage">
+                    <div class="stage-head">
+                        <span class="stage-no" id="stageNo">A.</span>
+                        <span class="stage-eyebrow" id="stageEyebrow">SIGN IN · 登录</span>
+                    </div>
+
+                    <h2 class="stage-title" id="stageTitle">
+                        <span class="stage-title-1" id="stageTitle1">欢迎回来</span>
+                        <span class="stage-title-2 stage-italic" id="stageTitle2">Welcome back</span>
+                    </h2>
+
+                    <!-- 表单容器 - 登录/注册用绝对定位叠放，避免高度突变 -->
+                    <div class="forms-stack">
+                        <!-- 登录表单 -->
+                        <form class="atelier-form layui-form form-pane-active" id="loginFormArea" lay-filter="loginForm" autocomplete="off">
+                            <div class="field">
+                                <label class="field-label" for="login-username">
+                                    <span class="field-num">01</span>
+                                    <span class="field-name">用户名 · USERNAME</span>
+                                </label>
+                                <div class="field-input-wrap">
+                                    <input type="text" id="login-username" name="username" lay-verify="required" lay-reqtext="请输入用户名" placeholder="your.name" autocomplete="username" class="field-input" required>
+                                    <span class="field-bar"></span>
+                                </div>
+                            </div>
+
+                            <div class="field">
+                                <label class="field-label" for="login-password">
+                                    <span class="field-num">02</span>
+                                    <span class="field-name">密码 · PASSWORD</span>
+                                </label>
+                                <div class="field-input-wrap">
+                                    <input type="password" id="login-password" name="password" lay-verify="required" lay-reqtext="请输入密码" placeholder="••••••••" autocomplete="current-password" class="field-input" required>
+                                    <button type="button" class="field-eye" id="loginEye" tabindex="-1" aria-label="显示/隐藏密码">
+                                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+                                    </button>
+                                    <span class="field-bar"></span>
+                                </div>
+                            </div>
+
+                            <div class="form-row">
+                                <label class="check-rail" id="rememberMeRail">
+                                    <span class="check-box"><span class="check-tick"></span></span>
+                                    <span class="check-label">记住我 · REMEMBER</span>
+                                </label>
+                                <a href="javascript:;" class="link-quiet" onclick="showRegisterForm()">创建账号 →</a>
+                            </div>
+
+                            <button class="submit-cta" lay-submit lay-filter="loginSubmit" id="loginBtn" type="submit">
+                                <span class="cta-text">进入工坊 · ENTER</span>
+                                <span class="cta-arrow">
+                                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                                </span>
+                            </button>
+                        </form>
+
+                        <!-- 注册表单 -->
+                        <form class="atelier-form layui-form" id="registerFormArea" lay-filter="registerForm" autocomplete="off">
+                            <div class="field">
+                                <label class="field-label" for="reg-username">
+                                    <span class="field-num">01</span>
+                                    <span class="field-name">用户名 · USERNAME</span>
+                                </label>
+                                <div class="field-input-wrap">
+                                    <input type="text" id="reg-username" name="username" lay-verify="required" lay-reqtext="请输入用户名" placeholder="2-20个字符" autocomplete="username" class="field-input" required>
+                                    <span class="field-bar"></span>
+                                </div>
+                            </div>
+
+                            <div class="field">
+                                <label class="field-label" for="reg-password">
+                                    <span class="field-num">02</span>
+                                    <span class="field-name">密码 · PASSWORD</span>
+                                </label>
+                                <div class="field-input-wrap">
+                                    <input type="password" id="reg-password" name="password" lay-verify="required|password" lay-reqtext="请输入密码" placeholder="至少4个字符" autocomplete="new-password" class="field-input" required>
+                                    <span class="field-bar"></span>
+                                </div>
+                            </div>
+
+                            <div class="field">
+                                <label class="field-label" for="reg-password2">
+                                    <span class="field-num">03</span>
+                                    <span class="field-name">确认 · CONFIRM</span>
+                                </label>
+                                <div class="field-input-wrap">
+                                    <input type="password" id="reg-password2" name="password2" lay-verify="required|confirmPassword" lay-reqtext="请确认密码" placeholder="再次输入" autocomplete="new-password" class="field-input" required>
+                                    <span class="field-bar"></span>
+                                </div>
+                            </div>
+
+                            <button class="submit-cta" lay-submit lay-filter="registerSubmit" id="regBtn" type="submit">
+                                <span class="cta-text">创建账号 · CREATE</span>
+                                <span class="cta-arrow">
+                                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                                </span>
+                            </button>
+
+                            <div class="form-row form-row-end">
+                                <a href="javascript:;" class="link-quiet" onclick="showLoginForm()">← 返回登录</a>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="form-foot">
+                        <div class="foot-line"></div>
+                        <div class="foot-meta">
+                            <span class="meta-l">SECURE · TOKEN BASED</span>
+                            <span class="meta-c app-version">v—</span>
+                            <span class="meta-r">© ATELIER</span>
+                        </div>
+                    </div>
+                </section>
+            </article>
+        </div>
+    </main>
+
 <script src="/layui/layui.js"></script>
 <script src="/my_js/version.js"></script>
 <script src="/my_js/theme.js"></script>
 <script src="/my_js/login.js"></script>
+<script>
+    // 实时日期
+    (function(){
+        var d = new Date();
+        var days = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+        var pad = function(n){ return n < 10 ? '0' + n : '' + n; };
+        var s = days[d.getDay()] + ' · ' + d.getFullYear() + '.' + pad(d.getMonth()+1) + '.' + pad(d.getDate());
+        var el = document.getElementById('topDate');
+        if (el) el.textContent = s;
+    })();
+
+    // 密码显隐
+    (function(){
+        var eye = document.getElementById('loginEye');
+        var input = document.getElementById('login-password');
+        if (!eye || !input) return;
+        eye.addEventListener('click', function(){
+            input.type = input.type === 'password' ? 'text' : 'password';
+            eye.classList.toggle('on', input.type === 'text');
+        });
+    })();
+
+    // 复选框交互：用 label.check-rail 替代原生 input；defineProperty 让 rail.checked 兼容旧调用
+    (function(){
+        document.querySelectorAll('.check-rail').forEach(function(rail){
+            var checked = false;
+            Object.defineProperty(rail, 'checked', {
+                get: function(){ return checked; },
+                set: function(v){ checked = !!v; rail.classList.toggle('on', checked); }
+            });
+            rail.setAttribute('role', 'checkbox');
+            rail.setAttribute('tabindex', '0');
+            rail.addEventListener('click', function(e){ e.preventDefault(); rail.checked = !rail.checked; });
+            rail.addEventListener('keydown', function(e){ if (e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); rail.checked = !rail.checked; } });
+        });
+    })();
+
+    // 初始化"记住我" - 从 localStorage 恢复持久化的用户名
+    (function(){
+        if (typeof loadRememberedUsername === 'function') {
+            loadRememberedUsername();
+        }
+    })();
+</script>
 </body>
 </html>

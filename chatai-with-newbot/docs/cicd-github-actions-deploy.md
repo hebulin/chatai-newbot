@@ -1,4 +1,4 @@
-﻿# Windows 本地项目通过 GitHub Actions 自动部署 Spring Boot 到 Linux 服务器
+# Windows 本地项目通过 GitHub Actions 自动部署 Spring Boot 到 Linux 服务器
 
 > 本文记录一次完整的 CI/CD 搭建过程：Windows 本地开发 Spring Boot 项目，代码推送到 GitHub 指定分支后，由 GitHub Actions 自动构建 JAR，并通过 SSH 部署到 Linux 服务器的 systemd 服务。
 
@@ -21,8 +21,8 @@
 <groupId>com.chatai</groupId>
 <artifactId>chatai-with-newbot</artifactId>
 <version>2.0.1.26.0521</version>
-<java.version>1.8</java.version>
-<spring-boot.version>2.6.13</spring-boot.version>
+<java.version>21</java.version>
+<spring-boot.version>3.3.5</spring-boot.version>
 ```
 
 应用端口：
@@ -37,7 +37,7 @@ server:
 - 服务器 IP：`101.43.221.155`
 - SSH 用户：`hebulin`
 - 系统：OpenCloudOS 8.6
-- Java：`/usr/lib/jvm/jdk1.8.0_202/bin/java`
+- Java：`/usr/lib/jvm/jdk-21.0.6/bin/java`
 - 部署目录：`/opt/chatai-with-newbot`
 - 日志目录：`/var/log/chatai-with-newbot`
 - systemd 服务名：`chatai-with-newbot`
@@ -54,7 +54,7 @@ server:
 2. 推送到 GitHub 仓库 `dev` 分支。
 3. GitHub Actions 自动触发流水线。
 4. 流水线拉取代码。
-5. 使用 JDK 8 构建 Maven 项目。
+5. 使用 JDK 21 构建 Maven 项目。
 6. 生成 Spring Boot fat JAR。
 7. 通过 SSH/SCP 上传 JAR 到服务器。
 8. 服务器执行部署脚本：
@@ -99,7 +99,7 @@ Type=simple
 User=hebulin
 Group=hebulin
 WorkingDirectory=/opt/chatai-with-newbot
-ExecStart=/usr/lib/jvm/jdk1.8.0_202/bin/java -jar /opt/chatai-with-newbot/current.jar --spring.profiles.active=prod
+ExecStart=/usr/lib/jvm/jdk-21.0.6/bin/java -jar /opt/chatai-with-newbot/current.jar --spring.profiles.active=prod
 SuccessExitStatus=143
 Restart=always
 RestartSec=10
@@ -365,11 +365,11 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v4
 
-      - name: Set up JDK 8
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '8'
+          java-version: '21'
           cache: maven
 
       - name: Build Spring Boot JAR
@@ -432,7 +432,7 @@ GitHub 仓库 → Actions → Build and Deploy chatai-with-newbot
 确认以下步骤全部成功：
 
 - Checkout source code
-- Set up JDK 8
+- Set up JDK 21
 - Build Spring Boot JAR
 - Prepare SSH key
 - Upload JAR to server
@@ -542,7 +542,7 @@ tail -n 200 /var/log/chatai-with-newbot/error.log
 GitHub Actions 中使用：
 
 ```yaml
-java-version: '8'
+java-version: '21'
 ```
 
 如果依赖下载失败，可以重新运行 workflow；如果测试失败，当前示例使用了：
@@ -570,3 +570,4 @@ GitHub Actions 都会自动：
 5. 部署失败时尝试回滚。
 
 这套方式简单、清晰，并且没有把服务器密码或 SSH 私钥提交到仓库，适合个人项目或中小型 Spring Boot 服务部署。
+

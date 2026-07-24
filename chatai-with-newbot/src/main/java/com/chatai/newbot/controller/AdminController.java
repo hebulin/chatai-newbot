@@ -1,13 +1,16 @@
 package com.chatai.newbot.controller;
 
 import com.chatai.newbot.model.*;
-import com.chatai.newbot.service.FileStorageService;
+import com.chatai.newbot.service.JsonFileStorageService;
+import com.chatai.newbot.service.StorageManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
 
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -15,9 +18,9 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/admin")
 public class AdminController {
     private static final Logger log = LoggerFactory.getLogger(AdminController.class);
-    private final FileStorageService storageService;
+    private final StorageManager storageService;
 
-    public AdminController(FileStorageService storageService) {
+    public AdminController(StorageManager storageService) {
         this.storageService = storageService;
     }
 
@@ -172,6 +175,11 @@ public class AdminController {
             m.put("defaultName", raw != null ? raw.getName() : p.getName());
             m.put("icon", p.getIcon());
             m.put("type", "preset");
+            // 预设厂商的默认 API 地址/协议/思考参数类型：供前端"添加模型"选完厂商后自动填充 baseurl，
+            // 以及提交时兜底 apiUrl/protocol（fillProviderInfo 不兜底这两个字段）
+            m.put("defaultApiUrl", p.getDefaultApiUrl());
+            m.put("protocol", p.getProtocol());
+            m.put("thinkingParamType", p.getThinkingParamType());
             m.put("modelCount", p.getModels() == null ? 0 : p.getModels().size());
             // 预置模型列表：供前端"快速接入"勾选、"添加模型"预设下拉、计算"已全部接入"状态
             m.put("models", p.getModels() == null ? Collections.emptyList() : p.getModels());
@@ -424,7 +432,7 @@ public class AdminController {
         }
         String password = (String) body.get("password");
         if (password != null && !password.trim().isEmpty()) {
-            user.setPassword(FileStorageService.hashPassword(password));
+            user.setPassword(JsonFileStorageService.hashPassword(password));
         }
         storageService.updateUser(user);
         result.put("success", true);
@@ -487,7 +495,8 @@ public class AdminController {
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) String username,
             @RequestParam(required = false) String modelName,
-            @RequestParam(required = false) String date,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate,
             HttpServletRequest request, HttpServletResponse response) {
         Map<String, Object> result = new HashMap<>();
         if (!checkAdmin(request, response)) {
@@ -495,6 +504,9 @@ public class AdminController {
             result.put("message", "无权限");
             return result;
         }
+        // 校验日期范围（最多 30 天）
+        Map<String, Object> rangeCheck = validateDateRange(startDate, endDate);
+        if (rangeCheck != null) return rangeCheck;
         List<UsageLog> logs = storageService.getAllUsageLogs();
 
         // 过滤
@@ -504,8 +516,18 @@ public class AdminController {
         if (modelName != null && !modelName.isEmpty()) {
             logs = logs.stream().filter(l -> modelName.equals(l.getModelName())).collect(Collectors.toList());
         }
-        if (date != null && !date.isEmpty()) {
-            logs = logs.stream().filter(l -> l.getTimestamp() != null && l.getTimestamp().startsWith(date)).collect(Collectors.toList());
+        // 日期范围过滤：startDate <= log.date <= endDate（按 timestamp 前 10 位 yyyy-MM-dd 比较）
+        String finalStart = startDate;
+        String finalEnd = endDate;
+        if ((finalStart != null && !finalStart.isEmpty()) || (finalEnd != null && !finalEnd.isEmpty())) {
+            logs = logs.stream().filter(l -> {
+                String ts = l.getTimestamp();
+                if (ts == null || ts.length() < 10) return false;
+                String d = ts.substring(0, 10);
+                if (finalStart != null && !finalStart.isEmpty() && d.compareTo(finalStart) < 0) return false;
+                if (finalEnd != null && !finalEnd.isEmpty() && d.compareTo(finalEnd) > 0) return false;
+                return true;
+            }).collect(Collectors.toList());
         }
 
         // 按时间降序
@@ -554,6 +576,7 @@ public class AdminController {
 
     /**
      * 使用统计 - 按用户+日期+模型维度聚合，支持搜索+分页
+     * getAll=true 时不分页，返回全部聚合数据（图表专用）
      */
     @GetMapping("/usage/stats")
     public Map<String, Object> getUsageStats(
@@ -561,7 +584,9 @@ public class AdminController {
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) String username,
             @RequestParam(required = false) String modelName,
-            @RequestParam(required = false) String date,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate,
+            @RequestParam(defaultValue = "false") boolean getAll,
             HttpServletRequest request, HttpServletResponse response) {
         Map<String, Object> result = new HashMap<>();
         if (!checkAdmin(request, response)) {
@@ -569,6 +594,9 @@ public class AdminController {
             result.put("message", "无权限");
             return result;
         }
+        // 校验日期范围（最多 30 天）
+        Map<String, Object> rangeCheck = validateDateRange(startDate, endDate);
+        if (rangeCheck != null) return rangeCheck;
 
         List<UsageLog> logs = storageService.getAllUsageLogs();
 
@@ -579,8 +607,18 @@ public class AdminController {
         if (modelName != null && !modelName.isEmpty()) {
             logs = logs.stream().filter(l -> modelName.equals(l.getModelName())).collect(Collectors.toList());
         }
-        if (date != null && !date.isEmpty()) {
-            logs = logs.stream().filter(l -> l.getTimestamp() != null && l.getTimestamp().startsWith(date)).collect(Collectors.toList());
+        // 日期范围过滤
+        String finalStart = startDate;
+        String finalEnd = endDate;
+        if ((finalStart != null && !finalStart.isEmpty()) || (finalEnd != null && !finalEnd.isEmpty())) {
+            logs = logs.stream().filter(l -> {
+                String ts = l.getTimestamp();
+                if (ts == null || ts.length() < 10) return false;
+                String d = ts.substring(0, 10);
+                if (finalStart != null && !finalStart.isEmpty() && d.compareTo(finalStart) < 0) return false;
+                if (finalEnd != null && !finalEnd.isEmpty() && d.compareTo(finalEnd) > 0) return false;
+                return true;
+            }).collect(Collectors.toList());
         }
 
         // 按 (username, date, modelName) 聚合
@@ -617,23 +655,170 @@ public class AdminController {
             return ((String) a.get("modelName")).compareTo((String) b.get("modelName"));
         });
 
-        // 分页
         int total = statsList.size();
-        int totalPages = Math.max(1, (int) Math.ceil((double) total / size));
-        int fromIndex = Math.min((page - 1) * size, total);
-        int toIndex = Math.min(fromIndex + size, total);
-        List<Map<String, Object>> pageData = statsList.subList(fromIndex, toIndex);
-
         result.put("success", true);
-        result.put("data", pageData);
         result.put("total", total);
-        result.put("page", page);
-        result.put("size", size);
-        result.put("totalPages", totalPages);
+
+        if (getAll) {
+            // 图表专用：不分页，一次性返回全量聚合数据
+            result.put("data", statsList);
+            result.put("page", 1);
+            result.put("size", total);
+            result.put("totalPages", 1);
+        } else {
+            // 列表专用：分页
+            int totalPages = Math.max(1, (int) Math.ceil((double) total / size));
+            int fromIndex = Math.min((page - 1) * size, total);
+            int toIndex = Math.min(fromIndex + size, total);
+            List<Map<String, Object>> pageData = statsList.subList(fromIndex, toIndex);
+            result.put("data", pageData);
+            result.put("page", page);
+            result.put("size", size);
+            result.put("totalPages", totalPages);
+        }
+        return result;
+    }
+
+    // ========== 系统设置（存储模式） ==========
+
+    /**
+     * 获取当前存储模式
+     * 返回: { "success": true, "data": { "useSqlite": false, "dbFileSize": "2.3MB" } }
+     */
+    @GetMapping("/settings/storage")
+    public Map<String, Object> getStorageSettings(HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("useSqlite", storageService.isUseSqlite());
+        data.put("dbFileSize", storageService.getDbFileSize());
+        result.put("success", true);
+        result.put("data", data);
+        return result;
+    }
+
+    /**
+     * 切换存储模式
+     * 请求体: { "useSqlite": true }
+     * 首次开启 SQLite 时自动执行数据迁移
+     */
+    @PutMapping("/settings/storage")
+    public Map<String, Object> setStorageMode(@RequestBody Map<String, Object> body,
+                                               HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        Boolean useSqlite = (Boolean) body.get("useSqlite");
+        if (useSqlite == null) {
+            result.put("success", false);
+            result.put("message", "请指定 useSqlite 参数");
+            return result;
+        }
+        try {
+            if (useSqlite && !storageService.isUseSqlite()) {
+                // 首次开启 SQLite → 自动迁移数据
+                String migrationDone = null;
+                try {
+                    migrationDone = storageService.getSetting("migration_done");
+                } catch (Exception ignored) {}
+                if (!"true".equals(migrationDone)) {
+                    log.info("首次开启SQLite，自动执行数据迁移...");
+                    storageService.migrateJsonToSqlite();
+                }
+            }
+            storageService.setUseSqlite(useSqlite);
+            result.put("success", true);
+            result.put("message", useSqlite ? "已切换到 SQLite 存储" : "已切换到 JSON 文件存储");
+        } catch (Exception e) {
+            log.error("切换存储模式失败", e);
+            result.put("success", false);
+            result.put("message", "切换失败: " + e.getMessage());
+        }
+        return result;
+    }
+
+    /**
+     * 手动触发数据迁移（JSON → SQLite）
+     * 返回: { "success": true, "message": "迁移完成：users=12, models=8, logs=1523" }
+     */
+    @PostMapping("/settings/storage/migrate")
+    public Map<String, Object> migrateData(HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        try {
+            Map<String, Object> stats = storageService.migrateJsonToSqlite();
+            result.put("success", true);
+            result.put("message", String.format("迁移完成：users=%s, models=%s, logs=%s, chatHistories=%s",
+                    stats.get("users"), stats.get("models"), stats.get("logs"), stats.get("chatHistories")));
+            result.put("stats", stats);
+        } catch (Exception e) {
+            log.error("数据迁移失败", e);
+            result.put("success", false);
+            result.put("message", "迁移失败: " + e.getMessage());
+        }
         return result;
     }
 
     // ========== 工具方法 ==========
+
+    /**
+     * 校验统计接口的日期范围：两个日期不能同时为空（只填一边视为单日查询，最多 30 天）
+     * 返回 null 表示通过；返回非 null Map（success=false, message=...）表示失败
+     */
+    private Map<String, Object> validateDateRange(String startDate, String endDate) {
+        boolean hasStart = startDate != null && !startDate.isEmpty();
+        boolean hasEnd = endDate != null && !endDate.isEmpty();
+        if (!hasStart && !hasEnd) return null; // 都为空 = 不筛选
+        if (hasStart && !startDate.matches("\\d{4}-\\d{2}-\\d{2}")) {
+            Map<String, Object> err = new HashMap<>();
+            err.put("success", false);
+            err.put("message", "开始日期格式错误，应为 yyyy-MM-dd");
+            return err;
+        }
+        if (hasEnd && !endDate.matches("\\d{4}-\\d{2}-\\d{2}")) {
+            Map<String, Object> err = new HashMap<>();
+            err.put("success", false);
+            err.put("message", "结束日期格式错误，应为 yyyy-MM-dd");
+            return err;
+        }
+        // 只填一个就当作单日：复制到另一边
+        String s = hasStart ? startDate : endDate;
+        String e = hasEnd ? endDate : startDate;
+        try {
+            LocalDate start = LocalDate.parse(s);
+            LocalDate end = LocalDate.parse(e);
+            if (end.isBefore(start)) {
+                Map<String, Object> err = new HashMap<>();
+                err.put("success", false);
+                err.put("message", "结束日期不能早于开始日期");
+                return err;
+            }
+            long days = ChronoUnit.DAYS.between(start, end) + 1;
+            if (days > 30) {
+                Map<String, Object> err = new HashMap<>();
+                err.put("success", false);
+                err.put("message", "统计时间范围不能超过 30 天（当前 " + days + " 天）");
+                return err;
+            }
+        } catch (Exception ex) {
+            Map<String, Object> err = new HashMap<>();
+            err.put("success", false);
+            err.put("message", "日期解析失败，请使用 yyyy-MM-dd 格式");
+            return err;
+        }
+        return null;
+    }
 
     /**
      * API Key 脱敏：保留前4位和后4位，中间用星号替代
@@ -701,3 +886,4 @@ public class AdminController {
         return copy;
     }
 }
+

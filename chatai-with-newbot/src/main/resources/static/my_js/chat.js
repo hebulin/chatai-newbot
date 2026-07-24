@@ -298,66 +298,210 @@ function inferProviderId(model) {
     return '';
 }
 
-// ===== 自定义模型选择下拉框 =====
+// ===== 自定义模型选择下拉框（级联选择器）=====
+// 全局缓存：当前所有模型按厂商分组的结果，避免每次重渲染都重新计算
+var modelGroupedCache = null; // { groups: [{key, name, providerId, providerIcon, models:[...]}], order:[...] }
+
+// 触发器上的 icon HTML（与下拉列中复用同一函数）
+function buildProviderIconHtml(providerId, providerIcon) {
+    var iconPath = providerIconMap[providerId];
+    if (iconPath) {
+        return '<img src="' + iconPath + '" class="cascader-item-icon" />';
+    }
+    if (providerIcon) {
+        return '<span class="cascader-item-emoji">' + escapeHtml(providerIcon) + '</span>';
+    }
+    return '';
+}
+
+// 把 modelsData 按厂商分组并缓存到 modelGroupedCache
+function buildModelGroups(modelsData) {
+    var groups = {};
+    var order = [];
+    modelsData.forEach(function(m) {
+        var key = m.providerName || m.providerId || 'custom';
+        if (!groups[key]) {
+            groups[key] = {
+                key: key,
+                name: key,
+                providerId: m.providerId || inferProviderId(m),
+                providerIcon: m.providerIcon || '',
+                models: []
+            };
+            order.push(key);
+        }
+        groups[key].models.push(m);
+    });
+    // 同一组内，providerIcon 取第一个非空的（个别模型可能为空）
+    order.forEach(function(k) {
+        var g = groups[k];
+        if (!g.providerIcon) {
+            for (var i = 0; i < g.models.length; i++) {
+                if (g.models[i].providerIcon) { g.providerIcon = g.models[i].providerIcon; break; }
+            }
+        }
+    });
+    modelGroupedCache = { groups: groups, order: order };
+    return modelGroupedCache;
+}
+
+// 渲染级联容器：所有厂商的模型组一次性预渲染，
+// hover 切换时只切 is-active（visibility），不再重排 DOM，避免闪烁
 function renderModelSelector(modelsData) {
     var dropdown = document.getElementById('modelSelectDropdown');
     if (!dropdown) return;
     dropdown.innerHTML = '';
 
-    // 按厂商分组
-    var groups = {};
-    var groupOrder = [];
-    modelsData.forEach(function(m) {
-        var key = m.providerName || m.providerId || 'custom';
-        if (!groups[key]) {
-            groups[key] = { name: key, providerId: m.providerId || inferProviderId(m), models: [] };
-            groupOrder.push(key);
-        }
-        groups[key].models.push(m);
-    });
+    var cache = buildModelGroups(modelsData);
+    if (!cache.order.length) return;
 
-    groupOrder.forEach(function(key) {
-        var group = groups[key];
-        // 厂商分组标题
-        var groupHeader = document.createElement('div');
-        groupHeader.className = 'model-group-header';
-        var iconPath = providerIconMap[group.providerId];
-        var iconHtml = '';
-        if (iconPath) {
-            iconHtml = '<img src="' + iconPath + '" class="model-group-icon" />';
-        } else {
-            // 没有 SVG 图标时，使用后端 ModelConfig.providerIcon（emoji）
-            var emojiIcon = group.models[0] && group.models[0].providerIcon;
-            if (emojiIcon) {
-                iconHtml = '<span class="model-group-emoji" style="font-size:14px;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;">' + escapeHtml(emojiIcon) + '</span>';
-            }
-        }
-        groupHeader.innerHTML = iconHtml + '<span>' + escapeHtml(group.name) + '</span>';
-        dropdown.appendChild(groupHeader);
+    // 当前选中模型对应的厂商 key（用于默认激活第二列）
+    var currentModel = findModelById(currentModelId);
+    var activeProviderKey = (currentModel && (currentModel.providerName || currentModel.providerId)) || cache.order[0];
 
-        // 模型列表
-        group.models.forEach(function(m) {
-            var item = document.createElement('div');
-            item.className = 'model-item' + (m.id === currentModelId ? ' selected' : '');
-            item.setAttribute('data-model-id', m.id);
-            item.setAttribute('data-provider-id', m.providerId || inferProviderId(m));
-            item.setAttribute('data-supports-thinking', m.supportsThinking ? 'true' : 'false');
-            var pid = m.providerId || inferProviderId(m);
-            var itemIconPath = providerIconMap[pid];
-            var itemIconHtml = '';
-            if (itemIconPath) {
-                itemIconHtml = '<img src="' + itemIconPath + '" class="model-item-icon" />';
-            } else if (m.providerIcon) {
-                // 没有 SVG 图标时，使用 model.providerIcon（emoji），与厂商分组标题一致
-                itemIconHtml = '<span class="model-item-emoji" style="font-size:13px;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;flex-shrink:0;">' + escapeHtml(m.providerIcon) + '</span>';
-            }
-            item.innerHTML = itemIconHtml + '<span class="model-item-name">' + escapeHtml(m.displayName) + '</span>';
-            item.onclick = function() {
-                selectModel(m);
-            };
-            dropdown.appendChild(item);
+    // 两列容器
+    var cascader = document.createElement('div');
+    cascader.className = 'model-cascader';
+
+    var col1 = document.createElement('div');
+    col1.className = 'cascader-col cascader-col-providers';
+    col1.setAttribute('data-col', 'providers');
+
+    var col2 = document.createElement('div');
+    col2.className = 'cascader-col cascader-col-models';
+    col2.setAttribute('data-col', 'models');
+
+    cascader.appendChild(col1);
+    cascader.appendChild(col2);
+    dropdown.appendChild(cascader);
+
+    // 渲染第一列：厂商列表
+    cache.order.forEach(function(key) {
+        var g = cache.groups[key];
+        var item = document.createElement('div');
+        item.className = 'cascader-item cascader-provider' + (key === activeProviderKey ? ' is-active' : '');
+        item.setAttribute('data-provider-key', key);
+        item.innerHTML =
+            buildProviderIconHtml(g.providerId, g.providerIcon) +
+            '<span class="cascader-item-name">' + escapeHtml(g.name) + '</span>' +
+            '<svg class="cascader-item-arrow" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="9 18 15 12 9 6"/></svg>';
+        // hover 切换 is-active（只切类，不再重渲染第二列）
+        item.addEventListener('mouseenter', function() {
+            setActiveProvider(key);
         });
+        // 移动端 fallback：点击厂商也激活
+        item.addEventListener('click', function(e) {
+            e.stopPropagation();
+            setActiveProvider(key);
+        });
+        col1.appendChild(item);
     });
+
+    // 预渲染所有厂商的模型组（一次性渲染，hover 时只切 visibility）
+    cache.order.forEach(function(key) {
+        var g = cache.groups[key];
+        var group = document.createElement('div');
+        group.className = 'cascader-models-group' + (key === activeProviderKey ? ' is-active' : '');
+        group.setAttribute('data-provider-key', key);
+        if (g.models && g.models.length) {
+            g.models.forEach(function(m) {
+                var item = document.createElement('div');
+                item.className = 'cascader-item cascader-model' + (m.id === currentModelId ? ' is-selected' : '');
+                item.setAttribute('data-model-id', m.id);
+                item.setAttribute('data-supports-thinking', m.supportsThinking ? 'true' : 'false');
+                var iconHtml = '';
+                if (m.providerIcon) {
+                    iconHtml = '<span class="cascader-item-emoji">' + escapeHtml(m.providerIcon) + '</span>';
+                } else if (providerIconMap[m.providerId || g.providerId]) {
+                    iconHtml = '<img src="' + providerIconMap[m.providerId || g.providerId] + '" class="cascader-item-icon" />';
+                }
+                item.innerHTML =
+                    iconHtml +
+                    '<span class="cascader-item-name">' + escapeHtml(m.displayName) + '</span>' +
+                    '<svg class="cascader-check" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
+                item.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    selectModel(m);
+                });
+                group.appendChild(item);
+            });
+        } else {
+            var empty = document.createElement('div');
+            empty.className = 'cascader-col-empty';
+            empty.textContent = '该厂商下暂无模型';
+            group.appendChild(empty);
+        }
+        col2.appendChild(group);
+    });
+
+    if (cache.order.length > 0) {
+        dropdown.classList.add('has-second');
+        cascader.classList.add('has-second');
+    }
+
+    // 在浏览器布局完成后，测量所有模型组的最大自然高度，并锁定第二列高度
+    // 这样切换厂商时下拉面板高度不会变化，彻底避免闪烁
+    // 移动端（≤768px）使用 CSS 弹性高度，不做 JS 锁定
+    requestAnimationFrame(function() {
+        if (window.innerWidth <= 768) return;
+        var groups = col2.querySelectorAll('.cascader-models-group');
+        // 一次性临时把全部组改为 static（参与文档流）以测量真实高度
+        var saved = [];
+        Array.prototype.forEach.call(groups, function(g) {
+            saved.push({ pos: g.style.position, vis: g.style.visibility });
+            g.style.position = 'static';
+            g.style.visibility = 'hidden';
+        });
+        var maxH = 0;
+        Array.prototype.forEach.call(groups, function(g) {
+            if (g.offsetHeight > maxH) maxH = g.offsetHeight;
+        });
+        // 恢复原始内联样式（CSS 类的 visibility/position 重新生效）
+        Array.prototype.forEach.call(groups, function(g, i) {
+            g.style.position = saved[i].pos;
+            g.style.visibility = saved[i].vis;
+        });
+
+        // 第二列高度策略：
+        //   - 至少 5 行（200px），避免父节点少时下拉过窄
+        //   - 按最高模型组自然高度扩展
+        //   - 上限 500px（12 行），超过时组内滚动而不是无限拉高
+        // CSS 的 min-height/max-height 也会兜底，这里做一次 JS 钳制保证稳定
+        var col2MinH = 200;
+        var col2MaxH = 500;
+        var col2H = maxH > 0 ? maxH : col2MinH;
+        if (col2H < col2MinH) col2H = col2MinH;
+        if (col2H > col2MaxH) col2H = col2MaxH;
+        col2.style.height = col2H + 'px';
+    });
+}
+
+// 切换第一列 active 状态 + 切换第二列对应组的 visibility
+// 不再重渲染 DOM，零布局抖动
+function setActiveProvider(providerKey, opts) {
+    var dropdown = document.getElementById('modelSelectDropdown');
+    if (!dropdown) return;
+    var col1 = dropdown.querySelector('.cascader-col-providers');
+    var col2 = dropdown.querySelector('.cascader-col-models');
+    if (!col1 || !col2) return;
+    Array.prototype.forEach.call(col1.querySelectorAll('.cascader-provider'), function(el) {
+        if (el.getAttribute('data-provider-key') === providerKey) el.classList.add('is-active');
+        else el.classList.remove('is-active');
+    });
+    Array.prototype.forEach.call(col2.querySelectorAll('.cascader-models-group'), function(el) {
+        if (el.getAttribute('data-provider-key') === providerKey) el.classList.add('is-active');
+        else el.classList.remove('is-active');
+    });
+    // 需要滚动到当前选中项时（仅打开下拉时使用，hover 切换不滚）
+    if (opts && opts.scroll) {
+        var activeGroup = col2.querySelector('.cascader-models-group.is-active');
+        if (activeGroup) {
+            var selected = activeGroup.querySelector('.cascader-model.is-selected');
+            if (selected && selected.scrollIntoView) {
+                try { selected.scrollIntoView({ block: 'nearest' }); } catch(e) {}
+            }
+        }
+    }
 }
 
 function selectModel(model) {
@@ -369,29 +513,37 @@ function selectModel(model) {
     updateModelSelectDisplay(model);
     updateThinkToggle(model, prevModelId !== model.id);
     closeModelDropdown();
-    // 更新选中态
-    var items = document.querySelectorAll('.model-item');
-    items.forEach(function(item) {
-        if (item.getAttribute('data-model-id') === model.id) {
-            item.classList.add('selected');
-        } else {
-            item.classList.remove('selected');
-        }
-    });
+    // 更新第二列的选中态（不重渲染整个结构，仅切 class）
+    var dropdown = document.getElementById('modelSelectDropdown');
+    if (dropdown) {
+        Array.prototype.forEach.call(dropdown.querySelectorAll('.cascader-model'), function(item) {
+            if (item.getAttribute('data-model-id') === model.id) item.classList.add('is-selected');
+            else item.classList.remove('is-selected');
+        });
+    }
 }
 
+// 触发器显示：厂商 / 模型（不再截断）
 function updateModelSelectDisplay(model) {
     var valueEl = document.getElementById('modelSelectValue');
     if (!valueEl) return;
+    var providerName = model.providerName || model.providerId || '';
     var pid = model.providerId || inferProviderId(model);
-    var iconPath = providerIconMap[pid];
     var iconHtml = '';
-    if (iconPath) {
-        iconHtml = '<img src="' + iconPath + '" class="model-select-icon" />';
+    if (providerIconMap[pid]) {
+        iconHtml = '<img src="' + providerIconMap[pid] + '" class="model-select-icon" />';
     } else if (model.providerIcon) {
         iconHtml = '<span class="model-select-emoji" style="font-size:14px;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;">' + escapeHtml(model.providerIcon) + '</span>';
     }
-    valueEl.innerHTML = iconHtml + '<span>' + escapeHtml(model.displayName) + '</span>';
+    var providerSpan = providerName
+        ? '<span class="msv-provider">' + escapeHtml(providerName) + '</span>'
+        : '';
+    var sep = providerName ? '<span class="msv-sep">/</span>' : '';
+    valueEl.innerHTML =
+        iconHtml +
+        providerSpan +
+        sep +
+        '<span class="msv-name">' + escapeHtml(model.displayName) + '</span>';
 }
 
 function toggleModelDropdown() {
@@ -414,16 +566,37 @@ function openModelDropdown() {
             var dropdownHeight = dropdown.scrollHeight;
             var spaceBelow = window.innerHeight - rect.bottom;
             var spaceAbove = rect.top;
-            // 如果下方空间不足且上方空间更大，则向上展开
-            if (spaceBelow < dropdownHeight + 10 && spaceAbove > spaceBelow) {
-                dropdown.classList.add('dropup');
+
+            // 移动端：用 fixed 定位，动态计算位置紧贴触发按钮
+            if (window.innerWidth <= 768) {
+                if (spaceAbove >= dropdownHeight + 10 || spaceAbove > spaceBelow) {
+                    // 向上展开：浮窗底边紧贴触发按钮顶部
+                    dropdown.style.bottom = (window.innerHeight - rect.top + 6) + 'px';
+                    dropdown.style.top = 'auto';
+                    dropdown.classList.add('dropup');
+                } else {
+                    // 向下展开：浮窗顶边紧贴触发按钮底部
+                    dropdown.style.top = (rect.bottom + 6) + 'px';
+                    dropdown.style.bottom = 'auto';
+                    dropdown.classList.remove('dropup');
+                }
             } else {
-                dropdown.classList.remove('dropup');
+                dropdown.style.bottom = '';
+                dropdown.style.top = '';
+                if (spaceBelow < dropdownHeight + 10 && spaceAbove > spaceBelow) {
+                    dropdown.classList.add('dropup');
+                } else {
+                    dropdown.classList.remove('dropup');
+                }
             }
-            // 自动滚动到当前选中项
-            var selectedItem = dropdown.querySelector('.model-item.selected');
-            if (selectedItem) {
-                selectedItem.scrollIntoView({ block: 'nearest' });
+
+            // 自动定位到当前选中项：找到当前模型所在的厂商，激活其列
+            var currentModel = findModelById(currentModelId);
+            if (currentModel && modelGroupedCache) {
+                var key = currentModel.providerName || currentModel.providerId;
+                if (modelGroupedCache.groups[key]) {
+                    setActiveProvider(key, { scroll: true });
+                }
             }
         }, 0);
     }
@@ -438,6 +611,9 @@ function closeModelDropdown() {
     if (dropdown) {
         dropdown.classList.remove('active');
         dropdown.classList.remove('dropup');
+        // 清除移动端动态定位的内联样式
+        dropdown.style.bottom = '';
+        dropdown.style.top = '';
         modelDropdownOpen = false;
     }
     if (trigger) {
@@ -448,9 +624,11 @@ function closeModelDropdown() {
 // 更新深度思考开关
 function updateThinkToggle(model, isModelChanged) {
     var thinkIconBtn = document.getElementById('thinkIconBtn');
+    var toolbarDivider = document.getElementById('toolbarDivider');
     if (!thinkIconBtn) return;
     if (model.supportsThinking) {
         thinkIconBtn.style.display = 'flex';
+        if (toolbarDivider) toolbarDivider.style.display = '';
         if (isModelChanged) {
             // 切换到新模型时，默认关闭深度思考
             isDeepThinking = false;
@@ -458,6 +636,7 @@ function updateThinkToggle(model, isModelChanged) {
         thinkIconBtn.classList.toggle('active', isDeepThinking);
     } else {
         thinkIconBtn.style.display = 'none';
+        if (toolbarDivider) toolbarDivider.style.display = 'none';
         isDeepThinking = false;
     }
 }
@@ -492,6 +671,15 @@ function switchChat(id) {
     resetState();
     updateChatList();
     displayMessages();
+    // 移动端：选中会话后收起侧边栏与遮罩，避免遮罩残留罩住整页
+    if (window.innerWidth <= 768) {
+        var sb = document.getElementById('sidebar');
+        if (sb && sb.classList.contains('open')) {
+            sb.classList.remove('open');
+            sb.classList.add('collapsed');
+            toggleOverlay(false);
+        }
+    }
 }
 
 function deleteChat(id, e) {
@@ -843,18 +1031,17 @@ function sendMessage(fromButton) {
     console.log('发送消息，深度思考:', actualDeepThinking);
     var requestBody = {
         modelConfigId: currentModelId,
-        messages: [{ role: 'system', content: 'You are a helpful assistant.' }].concat(
-            chats[currentChatId].filter(function(m) {
-                // 过滤掉content为空的assistant消息，避免API报400错误
-                return m.role === 'user' || (m.role === 'assistant' && m.content && m.content.trim());
-            }).map(function(m) {
-                // 将用户消息中的images字段传递给后端
-                if (m.role === 'user' && m.images && m.images.length > 0) {
-                    return { role: m.role, content: m.content, images: m.images };
-                }
-                return { role: m.role, content: m.content };
-            })
-        ),
+        // 全局提示词（system 消息）由后端根据当前登录用户统一注入到消息列表首位，前端不再携带
+        messages: chats[currentChatId].filter(function(m) {
+            // 过滤掉content为空的assistant消息，避免API报400错误
+            return m.role === 'user' || (m.role === 'assistant' && m.content && m.content.trim());
+        }).map(function(m) {
+            // 将用户消息中的images字段传递给后端
+            if (m.role === 'user' && m.images && m.images.length > 0) {
+                return { role: m.role, content: m.content, images: m.images };
+            }
+            return { role: m.role, content: m.content };
+        }),
         stream: true,
         deepThinking: actualDeepThinking,
         temperature: 0.7
@@ -958,9 +1145,11 @@ function sendMessage(fromButton) {
                                 var delta = json.choices[0].delta;
                                 if (!hasResponse) { hasResponse = true; assistantMsg.time = nowStr(); }
 
-                                if (delta.reasoning_content) {
+                                // 兼容不同厂商的思考内容字段：reasoning_content（小米等）、reasoning（DeepSeek等）
+                                var deltaThinking = delta.reasoning_content || delta.reasoning;
+                                if (deltaThinking) {
                                     if (!thinkingStartTime) thinkingStartTime = Date.now();
-                                    currentThinkingContent += delta.reasoning_content;
+                                    currentThinkingContent += deltaThinking;
                                     updated = true;
                                 }
                                 if (delta.content) {
@@ -1606,22 +1795,31 @@ function showToast(msg) {
     }
 }
 
+// 遮罩延迟移除定时器：防止快速开合侧边栏时，旧的移除回调把刚激活的遮罩删掉
+var overlayRemoveTimer = null;
+
+// 切换侧边栏：移动端用 .open 控制抽屉式开合并联动遮罩，桌面端用 .collapsed 控制折叠并联动主内容边距
 function toggleSidebar() {
     var sidebar = document.getElementById('sidebar');
     var isMobile = window.innerWidth <= 768;
     if (isMobile) {
         sidebar.classList.toggle('open');
         sidebar.classList.remove('collapsed');
+        document.body.classList.remove('sidebar-collapsed');
         toggleOverlay(sidebar.classList.contains('open'));
     } else {
         sidebar.classList.toggle('collapsed');
+        // 桌面端：同步主内容区域压缩/展开
+        document.body.classList.toggle('sidebar-collapsed', sidebar.classList.contains('collapsed'));
     }
     // 侧边栏切换动画结束后重新定位scroll-nav
     setTimeout(updateScrollNav, 350);
 }
 
+// 显示/隐藏移动端遮罩层：关闭时延迟移除节点以等待动画，重入时先清除待执行的移除定时器，避免遮罩状态与侧边栏失步
 function toggleOverlay(show) {
     var ov = document.getElementById('overlay');
+    if (overlayRemoveTimer) { clearTimeout(overlayRemoveTimer); overlayRemoveTimer = null; }
     if (show) {
         if (!ov) {
             ov = document.createElement('div');
@@ -1632,7 +1830,10 @@ function toggleOverlay(show) {
         } else { ov.classList.add('active'); }
     } else if (ov) {
         ov.classList.remove('active');
-        setTimeout(function() { if(ov.parentNode) ov.remove(); }, 300);
+        overlayRemoveTimer = setTimeout(function() {
+            if (ov.parentNode) ov.remove();
+            overlayRemoveTimer = null;
+        }, 300);
     }
 }
 
@@ -1641,6 +1842,11 @@ function handleResize() {
     if (window.innerWidth > 768) {
         sidebar.classList.remove('open');
         toggleOverlay(false);
+        // 桌面端：按 collapsed 状态同步主内容边距
+        document.body.classList.toggle('sidebar-collapsed', sidebar.classList.contains('collapsed'));
+    } else {
+        // 移动端：主内容始终撑满
+        document.body.classList.remove('sidebar-collapsed');
     }
     updateScrollNav(); // 窗口大小变化时重新定位滚动导航按钮
 }
@@ -1680,7 +1886,7 @@ function updateScrollNav() {
     var topBtn = document.getElementById('scrollToTopBtn');
     var bottomBtn = document.getElementById('scrollToBottomBtn');
     var scrollNav = document.getElementById('scrollNav');
-    if (!container || !topBtn || !bottomBtn) return;
+    if (!container || !bottomBtn) return;
 
     // 动态定位scroll-nav到chat-container右下角（fixed定位）
     if (scrollNav) {
@@ -1696,7 +1902,7 @@ function updateScrollNav() {
     var isAtTop = scrollTop <= 5;
     var isAtBottom = scrollHeight - scrollTop - clientHeight <= 5;
 
-    topBtn.style.display = isAtTop ? 'none' : 'flex';
+    if (topBtn) topBtn.style.display = isAtTop ? 'none' : 'flex';
     bottomBtn.style.display = isAtBottom ? 'none' : 'flex';
 }
 
@@ -1732,6 +1938,38 @@ function handlePasteImage(e) {
             var base64 = event.target.result;
             if (!supportsMultimodal) {
                 // 不支持多模态：显示警告
+                showPasteWarning('当前模型不支持图像理解，请切换支持多模态的模型或删除图片');
+            }
+            pendingImages.push(base64);
+            renderImagePreview();
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
+// ===== 图片上传按钮（显式上传入口） =====
+function triggerImageUpload() {
+    var input = document.getElementById('imageFileInput');
+    if (input) {
+        input.value = ''; // 清空以便重复选择同一文件
+        input.click();
+    }
+}
+
+function handleImageUpload(input) {
+    var files = input.files;
+    if (!files || files.length === 0) return;
+    var supportsMultimodal = window._currentModelSupportsMultimodal;
+    Array.prototype.forEach.call(files, function(file) {
+        if (file.type.indexOf('image') === -1) return;
+        if (file.size > MAX_IMAGE_SIZE) {
+            showToast('图片超过5MB限制');
+            return;
+        }
+        var reader = new FileReader();
+        reader.onload = function(event) {
+            var base64 = event.target.result;
+            if (!supportsMultimodal) {
                 showPasteWarning('当前模型不支持图像理解，请切换支持多模态的模型或删除图片');
             }
             pendingImages.push(base64);
@@ -1976,7 +2214,36 @@ function openAboutModal() {
 
 // ===== 设置弹窗（带侧边栏） =====
 var _settingsLayerIndex = null;
+var _settingsOnResize = null;
 var _currentSettingsTab = 'changePassword';
+
+// 设置弹窗尺寸：按实际视口动态计算（平板/竖屏自动收缩，永不超出屏幕）
+function calcSettingsSize() {
+    var vw = window.innerWidth, vh = window.innerHeight;
+    return {
+        w: Math.max(300, Math.min(720, vw - 32)),
+        h: Math.max(320, Math.min(480, vh - 48))
+    };
+}
+// 将设置弹窗居中于视口（不越界）
+function centerSettingsLayer(layero) {
+    try {
+        layero.css({
+            top: Math.max((window.innerHeight - layero.outerHeight()) / 2, 16) + 'px',
+            left: Math.max((window.innerWidth - layero.outerWidth()) / 2, 16) + 'px'
+        });
+    } catch (e) {}
+}
+// 按当前视口重设设置弹窗外层与内容区尺寸并居中（内容区高度需扣除标题栏）
+function resizeSettingsModal(layero) {
+    try {
+        var s = calcSettingsSize();
+        var titleH = layero.find('.layui-layer-title').outerHeight() || 0;
+        layero.css({ width: s.w + 'px', height: s.h + 'px' });
+        layero.find('.layui-layer-content').css({ height: (s.h - titleH) + 'px' });
+        centerSettingsLayer(layero);
+    } catch (e) {}
+}
 
 function openSettingsModal() {
     var menu = document.getElementById('userMenu');
@@ -2000,14 +2267,12 @@ function openSettingsModal() {
     scheduleRestore();
 
     var content = buildSettingsModalHtml();
-    // 移动端使用响应式尺寸，避免弹窗超出视口
-    var isMobile = window.innerWidth <= 768;
-    var areaWidth = isMobile ? '95%' : '720px';
-    var areaHeight = isMobile ? '85%' : '480px';
+    // 按实际视口动态计算尺寸，避免平板/竖屏超出屏幕
+    var size = calcSettingsSize();
     _settingsLayerIndex = window._layer.open({
         type: 1,
         title: '设置',
-        area: [areaWidth, areaHeight],
+        area: [size.w + 'px', size.h + 'px'],
         shadeClose: false,
         maxmin: false,
         content: content,
@@ -2019,14 +2284,12 @@ function openSettingsModal() {
                     contentEl.style.padding = '0';
                     contentEl.style.overflow = 'hidden';
                 }
-                // 移动端：确保弹窗不超出视口
-                if (isMobile) {
-                    layero.css({
-                        'max-width': '100vw',
-                        'max-height': '100vh'
-                    });
-                }
             } catch(e) {}
+            centerSettingsLayer(layero);
+            // 窗口缩放 / 旋转（平板横竖屏切换）时，按实际屏幕尺寸动态调整并居中
+            _settingsOnResize = function() { resizeSettingsModal(layero); };
+            window.addEventListener('resize', _settingsOnResize);
+            window.addEventListener('orientationchange', _settingsOnResize);
             // 默认选中第一个菜单项
             switchSettingsTab('changePassword');
             // 再次保险还原搜索框值（在表单渲染后）
@@ -2034,6 +2297,11 @@ function openSettingsModal() {
         },
         end: function() {
             _settingsLayerIndex = null;
+            if (_settingsOnResize) {
+                window.removeEventListener('resize', _settingsOnResize);
+                window.removeEventListener('orientationchange', _settingsOnResize);
+                _settingsOnResize = null;
+            }
             // 清理定时器
             restoreTimers.forEach(function(t) { clearTimeout(t); });
             restoreTimers = [];
@@ -2048,6 +2316,14 @@ function buildSettingsModalHtml() {
         '    <div class="settings-menu-item active" data-tab="changePassword" onclick="switchSettingsTab(\'changePassword\')">' +
         '      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>' +
         '      <span>修改密码</span>' +
+        '    </div>' +
+        '    <div class="settings-menu-item" data-tab="systemPrompt" onclick="switchSettingsTab(\'systemPrompt\')">' +
+        '      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>' +
+        '      <span>全局提示词</span>' +
+        '    </div>' +
+        '    <div class="settings-menu-item" data-tab="dataManagement" onclick="switchSettingsTab(\'dataManagement\')">' +
+        '      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>' +
+        '      <span>数据管理</span>' +
         '    </div>' +
         '  </div>' +
         '  <div class="settings-content" id="settingsContent">' +
@@ -2098,7 +2374,186 @@ function switchSettingsTab(tab) {
     if (!content) return;
     if (tab === 'changePassword') {
         content.innerHTML = buildChangePasswordPanel();
+    } else if (tab === 'systemPrompt') {
+        content.innerHTML = buildSystemPromptPanel();
+        // 渲染后拉取当前已保存的全局提示词进行回填
+        loadSystemPrompt();
+    } else if (tab === 'dataManagement') {
+        content.innerHTML = buildDataManagementPanel();
     }
+}
+
+// 构建「全局提示词」设置面板
+function buildSystemPromptPanel() {
+    return '' +
+        '<div class="settings-panel" id="panel-systemPrompt">' +
+        '  <h3 class="settings-panel-title">全局提示词</h3>' +
+        '  <div class="settings-form-group">' +
+        '    <label>自定义全局提示词（System Prompt）</label>' +
+        '    <textarea id="sp_content" class="settings-input settings-textarea" rows="8" ' +
+        '       placeholder="例如：你是一名严谨的中文技术顾问，回答简洁、准确，并使用 Markdown 排版。留空则使用系统默认提示词。" ' +
+        '       autocomplete="off" data-lpignore="true" data-form-type="other"></textarea>' +
+        '    <div class="settings-form-tip" id="sp_tip"></div>' +
+        '  </div>' +
+        '  <div class="settings-form-actions">' +
+        '    <button type="button" class="settings-btn settings-btn-primary" onclick="saveSystemPrompt()">保存</button>' +
+        '  </div>' +
+        '  <div class="settings-form-note">每次对话调用都会携带该提示词，并始终置于消息列表最前面（优先级最高，先于对话历史与当前输入）。对所有会话生效。</div>' +
+        '</div>';
+}
+
+// 统计当前包含用户消息的有效会话数量（空白的"新会话"不计入）
+function countValidChats() {
+    var count = 0;
+    Object.keys(chats).forEach(function(id) {
+        var msgs = chats[id] || [];
+        for (var i = 0; i < msgs.length; i++) {
+            if (msgs[i].role === 'user') { count++; break; }
+        }
+    });
+    return count;
+}
+
+// 构建「数据管理」设置面板（导出全部历史对话 / 删除全部对话）
+function buildDataManagementPanel() {
+    var count = countValidChats();
+    return '' +
+        '<div class="settings-panel" id="panel-dataManagement">' +
+        '  <h3 class="settings-panel-title">数据管理</h3>' +
+        '  <div class="data-mgmt-rows">' +
+        '    <div class="data-mgmt-row">' +
+        '      <div class="data-mgmt-icon">' +
+        '        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>' +
+        '      </div>' +
+        '      <div class="data-mgmt-info">' +
+        '        <div class="data-mgmt-title">导出全部历史对话</div>' +
+        '        <div class="data-mgmt-desc">将当前账号下的全部会话记录（' + count + ' 条）导出为 TXT 文本文件</div>' +
+        '      </div>' +
+        '      <button type="button" class="settings-btn settings-btn-primary" onclick="confirmExportAllChats()">导出</button>' +
+        '    </div>' +
+        '    <div class="data-mgmt-row data-mgmt-row-danger">' +
+        '      <div class="data-mgmt-icon data-mgmt-icon-danger">' +
+        '        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>' +
+        '      </div>' +
+        '      <div class="data-mgmt-info">' +
+        '        <div class="data-mgmt-title">删除全部对话</div>' +
+        '        <div class="data-mgmt-desc">清空当前账号下的全部聊天记录，删除后无法恢复</div>' +
+        '      </div>' +
+        '      <button type="button" class="settings-btn settings-btn-danger" onclick="confirmDeleteAllChats()">删除</button>' +
+        '    </div>' +
+        '  </div>' +
+        '  <div class="settings-form-note">导出文件由浏览器保存到本地；删除操作会同步清除服务端数据，多端立即生效。</div>' +
+        '</div>';
+}
+
+// 数据管理 - 导出全部历史对话：二次确认后复用现有导出逻辑
+function confirmExportAllChats() {
+    var count = countValidChats();
+    if (count === 0) {
+        showToast('当前没有可导出的会话');
+        return;
+    }
+    showConfirmDialog('确定导出当前账号下的全部 ' + count + ' 条历史对话吗？', '导出确认', function() {
+        exportChats();
+    });
+}
+
+// 数据管理 - 删除全部对话：二次确认后清空本地与服务端全部会话数据，并刷新侧边栏会话列表
+function confirmDeleteAllChats() {
+    if (isStreamActive) {
+        showToast('请等待回答完成');
+        return;
+    }
+    var ids = Object.keys(chats);
+    var count = countValidChats();
+    if (count === 0) {
+        showToast('当前没有可删除的会话');
+        return;
+    }
+    showConfirmDialog('此操作将删除当前账号下全部 ' + count + ' 条会话及其聊天记录，删除后无法恢复。确定继续？', '删除全部对话', function() {
+        // 记录全部被删除的会话ID，随同步请求一并提交服务端删除
+        ids.forEach(function(id) {
+            deletedChatIds.push(id);
+        });
+        // 清空本地全部会话数据
+        chats = {};
+        currentChatId = null;
+        // 新建空白会话：内部会同步服务端、刷新侧边栏列表并重置视图
+        newChat();
+        // 重新渲染当前面板，刷新会话数量显示
+        if (_currentSettingsTab === 'dataManagement') {
+            var content = document.getElementById('settingsContent');
+            if (content) content.innerHTML = buildDataManagementPanel();
+        }
+        showToast('已删除全部对话');
+    });
+}
+
+// 拉取并回填当前用户已保存的全局提示词
+function loadSystemPrompt() {
+    var tipEl = document.getElementById('sp_tip');
+    fetch('/api/user/system-prompt', {
+        method: 'GET',
+        headers: authHeaders()
+    }).then(function(r) {
+        if (r.status === 401) {
+            showToast(authFailMsg(r));
+            setTimeout(function() { doLogout(); }, 1000);
+            return null;
+        }
+        return r.json();
+    }).then(function(data) {
+        if (!data) return;
+        var el = document.getElementById('sp_content');
+        if (el && data.success) {
+            el.value = data.systemPrompt || '';
+        } else if (el && data.message && tipEl) {
+            tipEl.textContent = data.message;
+            tipEl.classList.add('error');
+        }
+    }).catch(function(err) {
+        if (tipEl) {
+            tipEl.textContent = '加载失败：' + (err && err.message ? err.message : '网络异常');
+            tipEl.classList.add('error');
+        }
+    });
+}
+
+// 保存当前用户的全局提示词
+function saveSystemPrompt() {
+    var el = document.getElementById('sp_content');
+    var tipEl = document.getElementById('sp_tip');
+    if (tipEl) { tipEl.textContent = ''; tipEl.classList.remove('error'); }
+    var prompt = el ? el.value : '';
+    if (prompt.length > 20000) {
+        if (tipEl) { tipEl.textContent = '全局提示词过长（最多 20000 字符）'; tipEl.classList.add('error'); }
+        return;
+    }
+    fetch('/api/user/system-prompt', {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: JSON.stringify({ systemPrompt: prompt })
+    }).then(function(r) {
+        if (r.status === 401) {
+            showToast(authFailMsg(r));
+            setTimeout(function() { doLogout(); }, 1000);
+            return null;
+        }
+        return r.json();
+    }).then(function(data) {
+        if (!data) return;
+        if (data.success) {
+            showToast('全局提示词已保存');
+            if (tipEl) { tipEl.textContent = '已保存，立即对所有新对话生效。'; }
+        } else {
+            if (tipEl) { tipEl.textContent = data.message || '保存失败'; tipEl.classList.add('error'); }
+        }
+    }).catch(function(err) {
+        if (tipEl) {
+            tipEl.textContent = '保存失败：' + (err && err.message ? err.message : '网络异常');
+            tipEl.classList.add('error');
+        }
+    });
 }
 
 function submitChangePassword() {
