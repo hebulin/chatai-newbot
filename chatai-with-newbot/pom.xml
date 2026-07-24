@@ -8,10 +8,10 @@
     <name>chatai-with-newbot</name>
     <description>chatai-with-newbot</description>
     <properties>
-        <java.version>1.8</java.version>
+        <java.version>21</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-        <spring-boot.version>2.6.13</spring-boot.version>
+        <spring-boot.version>3.3.5</spring-boot.version>
     </properties>
     <dependencies>
         <dependency>
@@ -39,6 +39,17 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- SQLite JDBC 驱动（纯 Java，零安装） -->
+        <dependency>
+            <groupId>org.xerial</groupId>
+            <artifactId>sqlite-jdbc</artifactId>
+            <version>3.45.1.0</version>
+        </dependency>
+        <!-- Spring JDBC（提供 JdbcTemplate） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
 
     </dependencies>
     <dependencyManagement>
@@ -58,11 +69,17 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.8.1</version>
+                <version>3.12.1</version>
                 <configuration>
-                    <source>1.8</source>
-                    <target>1.8</target>
+                    <source>21</source>
+                    <target>21</target>
+                    <release>21</release>
                     <encoding>UTF-8</encoding>
+                    <!-- Spring Boot 3 / Spring Framework 6 不再从调试信息推断参数名，
+                         必须开启 -parameters，否则 @PathVariable/@RequestParam 未显式
+                         命名时会抛 IllegalArgumentException（后台编辑/统计等接口报500）。
+                         spring-boot-starter-parent 默认开启此项，本项目未继承父 POM，需手动开启。 -->
+                    <parameters>true</parameters>
                 </configuration>
             </plugin>
             <plugin>
@@ -86,3 +103,4 @@
     </build>
 
 </project>
+

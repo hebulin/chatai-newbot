@@ -2,7 +2,7 @@ package com.chatai.newbot.controller;
 
 import com.chatai.newbot.model.*;
 import com.chatai.newbot.service.ChatHistoryService;
-import com.chatai.newbot.service.FileStorageService;
+import com.chatai.newbot.service.StorageManager;
 import com.chatai.newbot.service.UnifiedChatService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,7 +11,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -21,10 +21,10 @@ import java.util.*;
 public class ChatController {
     private static final Logger log = LoggerFactory.getLogger(ChatController.class);
     private final UnifiedChatService chatService;
-    private final FileStorageService storageService;
+    private final StorageManager storageService;
     private final ChatHistoryService chatHistoryService;
 
-    public ChatController(UnifiedChatService chatService, FileStorageService storageService,
+    public ChatController(UnifiedChatService chatService, StorageManager storageService,
                           ChatHistoryService chatHistoryService) {
         this.chatService = chatService;
         this.storageService = storageService;
@@ -194,4 +194,57 @@ public class ChatController {
         }
         return result;
     }
+
+    // ========== 用户全局提示词（System Prompt） ==========
+
+    /**
+     * 获取当前登录用户的全局提示词。
+     * @return { "success": true, "systemPrompt": "..." }，未设置时 systemPrompt 为空字符串
+     */
+    @GetMapping("/user/system-prompt")
+    public Map<String, Object> getSystemPrompt(HttpServletRequest request) {
+        User user = (User) request.getAttribute("currentUser");
+        Map<String, Object> result = new HashMap<>();
+        // 重新从存储读取，避免使用登录时缓存的快照
+        User fresh = storageService.getUserById(user.getId());
+        String prompt = (fresh != null && fresh.getSystemPrompt() != null) ? fresh.getSystemPrompt() : "";
+        result.put("success", true);
+        result.put("systemPrompt", prompt);
+        return result;
+    }
+
+    /**
+     * 保存当前登录用户的全局提示词。
+     * 请求体: { "systemPrompt": "..." }。
+     * 该提示词会在每次调用 LLM API 时作为 system 消息置于消息列表首位，优先级最高。
+     */
+    @PutMapping("/user/system-prompt")
+    public Map<String, Object> updateSystemPrompt(@RequestBody Map<String, String> body,
+                                                  HttpServletRequest request) {
+        User user = (User) request.getAttribute("currentUser");
+        Map<String, Object> result = new HashMap<>();
+        String prompt = body.get("systemPrompt");
+        if (prompt == null) {
+            prompt = "";
+        }
+        prompt = prompt.trim();
+        // 长度保护：避免超长提示词过度挤占上下文窗口
+        if (prompt.length() > 20000) {
+            result.put("success", false);
+            result.put("message", "全局提示词过长（最多 20000 字符）");
+            return result;
+        }
+        User fresh = storageService.getUserById(user.getId());
+        if (fresh == null) {
+            result.put("success", false);
+            result.put("message", "用户不存在");
+            return result;
+        }
+        fresh.setSystemPrompt(prompt);
+        storageService.updateUser(fresh);
+        result.put("success", true);
+        result.put("message", "全局提示词已保存");
+        return result;
+    }
 }
+

@@ -4,6 +4,7 @@ import com.chatai.newbot.model.ChatRequest;
 import com.chatai.newbot.model.ModelConfig;
 import com.chatai.newbot.model.NewBotMessage;
 import com.chatai.newbot.model.UsageLog;
+import com.chatai.newbot.model.User;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,16 +17,20 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * 统一聊天服务 - 使用OpenAI兼容协议调用所有厂商的API
+ * 统一聊天服务 - 支持 OpenAI 兼容协议 与 Anthropic 协议
+ * 根据 ModelConfig.protocol 字段自动选择请求构建与流式解析策略
  * 支持不同厂商的思考模式参数差异
  */
 @Service
 public class UnifiedChatService {
     private static final Logger log = LoggerFactory.getLogger(UnifiedChatService.class);
-    private final FileStorageService storageService;
+    /** 用户未自定义全局提示词时使用的系统默认提示词 */
+    private static final String DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant.";
+    private static final String ANTHROPIC_VERSION = "2023-06-01";
+    private final StorageManager storageService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public UnifiedChatService(FileStorageService storageService) {
+    public UnifiedChatService(StorageManager storageService) {
         this.storageService = storageService;
     }
 
@@ -38,11 +43,21 @@ public class UnifiedChatService {
             return Flux.just("{\"error\":{\"message\":\"该模型已被禁用\",\"type\":\"config_error\"}}");
         }
 
+        String protocol = config.getProtocol();
+        if ("anthropic".equalsIgnoreCase(protocol)) {
+            return chatAnthropic(request, config, usageLog);
+        }
+        return chatOpenAI(request, config, usageLog);
+    }
+
+    // ==================== OpenAI 兼容协议 ====================
+
+    private Flux<String> chatOpenAI(ChatRequest request, ModelConfig config, UsageLog usageLog) {
         String apiUrl = config.getApiUrl();
         String apiKey = config.getApiKey();
         String modelId = config.getModelId();
 
-        log.info("调用模型: {} ({}), API: {}, 思考模式: {}", config.getDisplayName(), modelId, apiUrl, request.isDeepThinking());
+        log.info("调用模型[OpenAI]: {} ({}), API: {}, 思考模式: {}", config.getDisplayName(), modelId, apiUrl, request.isDeepThinking());
 
         // 构建OpenAI兼容的请求体
         Map<String, Object> requestBody = new HashMap<>();
@@ -54,10 +69,26 @@ public class UnifiedChatService {
         streamOptions.put("include_usage", true);
         requestBody.put("stream_options", streamOptions);
 
+        // 解析当前用户的全局提示词（System Prompt）：
+        // 优先级最高，永远置于消息列表起始位置（system role），时间顺序上先于对话历史与当前用户输入。
+        // 由后端统一注入，客户端无法伪造或遗漏，从而保证每次 API 调用都必然携带。
+        String systemPrompt = resolveSystemPrompt(usageLog);
+
         // 构建消息列表（支持多模态：当消息含图片时，content转为数组格式）
         List<Object> messages = new ArrayList<>();
+        // 1) 全局提示词始终占据 messages[0]（即便将来增加上下文截断/压缩也不会被挤掉）
+        Map<String, Object> systemMsg = new HashMap<>();
+        systemMsg.put("role", "system");
+        systemMsg.put("content", systemPrompt);
+        messages.add(systemMsg);
+
+        // 2) 追加对话历史与当前用户输入（忽略客户端自带的 system 消息，统一由后端注入）
         if (request.getMessages() != null) {
             for (NewBotMessage msg : request.getMessages()) {
+                // 跳过客户端携带的 system 消息，避免与后端注入的全局提示词重复或冲突
+                if ("system".equals(msg.getRole())) {
+                    continue;
+                }
                 // 过滤掉content为空的assistant消息，避免API报400错误
                 if ("assistant".equals(msg.getRole()) && (msg.getContent() == null || msg.getContent().trim().isEmpty())) {
                     continue;
@@ -216,35 +247,319 @@ public class UnifiedChatService {
                         updateUsageLog(usageLog, usageRef.get());
                     }
                 })
-                .onErrorResume(e -> {
-                    String errorMsg = e.getMessage();
-                    String displayMsg = errorMsg;
-                    if (e instanceof WebClientResponseException) {
-                        WebClientResponseException wce = (WebClientResponseException) e;
-                        String responseBody = wce.getResponseBodyAsString();
-                        log.error("API调用错误: {} | 状态码: {} | 响应体: {}", errorMsg, wce.getStatusCode(), responseBody);
-                        // 尝试从响应体中提取更友好的错误消息
-                        try {
-                            @SuppressWarnings("unchecked")
-                            Map<String, Object> parsed = objectMapper.readValue(responseBody, Map.class);
-                            @SuppressWarnings("unchecked")
-                            Map<String, Object> errorObj = (Map<String, Object>) parsed.get("error");
-                            if (errorObj != null && errorObj.get("message") != null) {
-                                displayMsg = wce.getStatusCode().value() + " - " + errorObj.get("message");
-                            } else {
-                                displayMsg = wce.getStatusCode().value() + " " + wce.getStatusText();
+                .onErrorResume(e -> handleError(e));
+    }
+
+    // ==================== Anthropic 协议 ====================
+
+    private Flux<String> chatAnthropic(ChatRequest request, ModelConfig config, UsageLog usageLog) {
+        String apiUrl = config.getApiUrl();
+        String apiKey = config.getApiKey();
+        String modelId = config.getModelId();
+
+        log.info("调用模型[Anthropic]: {} ({}), API: {}, 思考模式: {}", config.getDisplayName(), modelId, apiUrl, request.isDeepThinking());
+
+        String systemPrompt = resolveSystemPrompt(usageLog);
+
+        // 构建 Anthropic Messages API 请求体
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("model", modelId);
+        requestBody.put("stream", true);
+        requestBody.put("system", systemPrompt);
+
+        // max_tokens 在 Anthropic 中为必填
+        int maxTokens = request.getMax_tokens() > 0 ? request.getMax_tokens() : 8192;
+
+        // 构建消息列表（Anthropic 不允许 system role 在 messages 中）
+        List<Object> messages = new ArrayList<>();
+        if (request.getMessages() != null) {
+            for (NewBotMessage msg : request.getMessages()) {
+                if ("system".equals(msg.getRole())) {
+                    continue;
+                }
+                if ("assistant".equals(msg.getRole()) && (msg.getContent() == null || msg.getContent().trim().isEmpty())) {
+                    continue;
+                }
+                Map<String, Object> m = new HashMap<>();
+                m.put("role", msg.getRole());
+                // 多模态：Anthropic 图片格式为 {type:"image", source:{type:"base64",...}}
+                if (msg.getImages() != null && !msg.getImages().isEmpty() && config.isSupportsMultimodal()) {
+                    List<Map<String, Object>> contentParts = new ArrayList<>();
+                    for (String imageBase64 : msg.getImages()) {
+                        Map<String, Object> imagePart = new HashMap<>();
+                        imagePart.put("type", "image");
+                        Map<String, Object> source = new HashMap<>();
+                        source.put("type", "base64");
+                        // 从 data URL 中提取 media_type 和纯 base64 数据
+                        String mediaType = "image/png";
+                        String base64Data = imageBase64;
+                        if (imageBase64.startsWith("data:")) {
+                            int commaIdx = imageBase64.indexOf(',');
+                            if (commaIdx > 0) {
+                                String header = imageBase64.substring(5, commaIdx); // e.g. "image/png;base64"
+                                int semicolonIdx = header.indexOf(';');
+                                if (semicolonIdx > 0) {
+                                    mediaType = header.substring(0, semicolonIdx);
+                                }
+                                base64Data = imageBase64.substring(commaIdx + 1);
                             }
-                        } catch (Exception parseEx) {
-                            displayMsg = wce.getStatusCode().value() + " " + wce.getStatusText();
                         }
-                    } else {
-                        log.error("API调用错误: {}", errorMsg);
+                        source.put("media_type", mediaType);
+                        source.put("data", base64Data);
+                        imagePart.put("source", source);
+                        contentParts.add(imagePart);
                     }
-                    return Flux.just(String.format(
-                            "{\"error\":{\"message\":\"%s\",\"type\":\"api_error\"}}",
-                            displayMsg.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
-                    ));
-                });
+                    if (msg.getContent() != null && !msg.getContent().trim().isEmpty()) {
+                        Map<String, Object> textPart = new HashMap<>();
+                        textPart.put("type", "text");
+                        textPart.put("text", msg.getContent());
+                        contentParts.add(textPart);
+                    }
+                    m.put("content", contentParts);
+                } else {
+                    m.put("content", msg.getContent());
+                }
+                messages.add(m);
+            }
+        }
+        requestBody.put("messages", messages);
+
+        // 温度参数
+        if (request.getTemperature() > 0) {
+            requestBody.put("temperature", request.getTemperature());
+        }
+
+        // Anthropic 思考模式（Extended Thinking）
+        if (request.isDeepThinking() && config.isSupportsThinking()) {
+            Map<String, Object> thinking = new HashMap<>();
+            thinking.put("type", "enabled");
+            // budget_tokens 必须小于 max_tokens，设为 max_tokens 的 80%
+            int budgetTokens = (int) (maxTokens * 0.8);
+            thinking.put("budget_tokens", budgetTokens);
+            requestBody.put("thinking", thinking);
+            // Anthropic 思考模式下不允许设置 temperature
+            requestBody.remove("temperature");
+            requestBody.put("max_tokens", maxTokens);
+            log.debug("Anthropic 思考模式已开启, budget_tokens={}", budgetTokens);
+        } else {
+            requestBody.put("max_tokens", maxTokens);
+        }
+
+        // 拼接 URL: /v1/messages
+        String fullUrl = apiUrl;
+        if (!fullUrl.endsWith("/")) {
+            fullUrl += "/";
+        }
+        fullUrl += "messages";
+
+        // Anthropic 使用 x-api-key 头认证
+        WebClient webClient = WebClient.builder()
+                .defaultHeader("x-api-key", apiKey)
+                .defaultHeader("anthropic-version", ANTHROPIC_VERSION)
+                .defaultHeader("Content-Type", "application/json")
+                .codecs(configurer -> configurer
+                        .defaultCodecs()
+                        .maxInMemorySize(16 * 1024 * 1024))
+                .build();
+
+        // 用于累计 Anthropic usage 数据
+        AtomicReference<Map<String, Object>> usageRef = new AtomicReference<>();
+
+        return webClient
+                .post()
+                .uri(fullUrl)
+                .bodyValue(requestBody)
+                .retrieve()
+                .bodyToFlux(String.class)
+                .flatMap(chunk -> {
+                    log.debug("Anthropic chunk: {}", chunk.length() > 200 ? chunk.substring(0, 200) + "..." : chunk);
+                    List<String> transformed = transformAnthropicChunk(chunk, usageRef);
+                    return Flux.fromIterable(transformed);
+                })
+                .doOnComplete(() -> {
+                    log.info("Anthropic 流式输出完成");
+                    if (usageLog != null && usageRef.get() != null) {
+                        updateUsageLog(usageLog, usageRef.get());
+                    }
+                })
+                .onErrorResume(e -> handleError(e));
+    }
+
+    /**
+     * 将 Anthropic SSE 事件翻译为前端可识别的 OpenAI 兼容格式
+     * Anthropic 事件类型: message_start / content_block_delta / message_delta / message_stop 等
+     */
+    @SuppressWarnings("unchecked")
+    private List<String> transformAnthropicChunk(String chunk, AtomicReference<Map<String, Object>> usageRef) {
+        List<String> results = new ArrayList<>();
+        try {
+            String json = chunk.trim();
+            // 去除 SSE 前缀
+            if (json.startsWith("data: ")) {
+                json = json.substring(6).trim();
+            }
+            // 跳过 event: 行和空行
+            if (json.isEmpty() || json.startsWith("event:") || json.equals("[DONE]")) {
+                return results;
+            }
+
+            Map<String, Object> parsed = objectMapper.readValue(json, Map.class);
+            String type = (String) parsed.get("type");
+            if (type == null) return results;
+
+            switch (type) {
+                case "message_start": {
+                    // 提取初始 usage (input_tokens)
+                    Map<String, Object> message = (Map<String, Object>) parsed.get("message");
+                    if (message != null) {
+                        Map<String, Object> usage = (Map<String, Object>) message.get("usage");
+                        if (usage != null) {
+                            Map<String, Object> normalized = getOrCreateUsage(usageRef);
+                            Object inputTokens = usage.get("input_tokens");
+                            if (inputTokens != null) {
+                                normalized.put("prompt_tokens", ((Number) inputTokens).intValue());
+                            }
+                            Object cacheRead = usage.get("cache_read_input_tokens");
+                            if (cacheRead != null) {
+                                normalized.put("cached_tokens", ((Number) cacheRead).intValue());
+                            }
+                        }
+                    }
+                    break;
+                }
+                case "content_block_delta": {
+                    Map<String, Object> delta = (Map<String, Object>) parsed.get("delta");
+                    if (delta == null) break;
+                    String deltaType = (String) delta.get("type");
+                    if ("text_delta".equals(deltaType)) {
+                        // 文本内容 → 转为 OpenAI choices[0].delta.content
+                        String text = (String) delta.get("text");
+                        if (text != null) {
+                            results.add(buildOpenAIChunk(text, null));
+                        }
+                    } else if ("thinking_delta".equals(deltaType)) {
+                        // 思考内容 → 转为 OpenAI choices[0].delta.reasoning_content
+                        String thinking = (String) delta.get("thinking");
+                        if (thinking != null) {
+                            results.add(buildOpenAIChunk(null, thinking));
+                        }
+                    }
+                    break;
+                }
+                case "message_delta": {
+                    // 提取输出 token 用量
+                    Map<String, Object> usage = (Map<String, Object>) parsed.get("usage");
+                    if (usage != null) {
+                        Map<String, Object> normalized = getOrCreateUsage(usageRef);
+                        Object outputTokens = usage.get("output_tokens");
+                        if (outputTokens != null) {
+                            normalized.put("completion_tokens", ((Number) outputTokens).intValue());
+                        }
+                    }
+                    break;
+                }
+                case "message_stop": {
+                    // 流结束，输出最终 usage 供前端提取
+                    Map<String, Object> normalized = usageRef.get();
+                    if (normalized != null && !normalized.isEmpty()) {
+                        try {
+                            Map<String, Object> usageChunk = new HashMap<>();
+                            usageChunk.put("usage", normalized);
+                            results.add(objectMapper.writeValueAsString(usageChunk));
+                        } catch (Exception e) {
+                            // ignore
+                        }
+                    }
+                    break;
+                }
+                default:
+                    // content_block_start, content_block_stop, ping 等忽略
+                    break;
+            }
+        } catch (Exception e) {
+            // 解析失败忽略（可能是 event: 行等非 JSON 内容）
+            log.trace("Anthropic chunk 解析跳过: {}", e.getMessage());
+        }
+        return results;
+    }
+
+    /**
+     * 构建 OpenAI 兼容格式的 chunk JSON（供前端直接解析）
+     */
+    private String buildOpenAIChunk(String content, String reasoningContent) {
+        try {
+            Map<String, Object> delta = new HashMap<>();
+            if (content != null) delta.put("content", content);
+            if (reasoningContent != null) delta.put("reasoning_content", reasoningContent);
+
+            Map<String, Object> choice = new HashMap<>();
+            choice.put("delta", delta);
+            choice.put("index", 0);
+
+            Map<String, Object> chunk = new HashMap<>();
+            chunk.put("choices", Collections.singletonList(choice));
+            return objectMapper.writeValueAsString(chunk);
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private Map<String, Object> getOrCreateUsage(AtomicReference<Map<String, Object>> usageRef) {
+        Map<String, Object> usage = usageRef.get();
+        if (usage == null) {
+            usage = new HashMap<>();
+            usageRef.set(usage);
+        }
+        return usage;
+    }
+
+    // ==================== 公共方法 ====================
+
+    /**
+     * 解析当前用户的全局提示词
+     */
+    private String resolveSystemPrompt(UsageLog usageLog) {
+        String systemPrompt = DEFAULT_SYSTEM_PROMPT;
+        if (usageLog != null && usageLog.getUserId() != null) {
+            User currentUser = storageService.getUserById(usageLog.getUserId());
+            if (currentUser != null && currentUser.getSystemPrompt() != null
+                    && !currentUser.getSystemPrompt().trim().isEmpty()) {
+                systemPrompt = currentUser.getSystemPrompt().trim();
+            }
+        }
+        return systemPrompt;
+    }
+
+    /**
+     * 统一错误处理
+     */
+    private Flux<String> handleError(Throwable e) {
+        String errorMsg = e.getMessage();
+        String displayMsg = errorMsg;
+        if (e instanceof WebClientResponseException) {
+            WebClientResponseException wce = (WebClientResponseException) e;
+            String responseBody = wce.getResponseBodyAsString();
+            log.error("API调用错误: {} | 状态码: {} | 响应体: {}", errorMsg, wce.getStatusCode(), responseBody);
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> parsed = objectMapper.readValue(responseBody, Map.class);
+                @SuppressWarnings("unchecked")
+                Map<String, Object> errorObj = (Map<String, Object>) parsed.get("error");
+                if (errorObj != null && errorObj.get("message") != null) {
+                    displayMsg = wce.getStatusCode().value() + " - " + errorObj.get("message");
+                } else {
+                    displayMsg = wce.getStatusCode().value() + " " + wce.getStatusText();
+                }
+            } catch (Exception parseEx) {
+                displayMsg = wce.getStatusCode().value() + " " + wce.getStatusText();
+            }
+        } else {
+            log.error("API调用错误: {}", errorMsg);
+        }
+        return Flux.just(String.format(
+                "{\"error\":{\"message\":\"%s\",\"type\":\"api_error\"}}",
+                displayMsg.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+        ));
     }
 
     /**
@@ -274,7 +589,7 @@ public class UnifiedChatService {
 
     /**
      * 将提取的 usage 数据写入 UsageLog 并持久化
-     * 支持不同厂商的 usage 字段格式差异
+     * 支持不同厂商的 usage 字段格式差异（OpenAI / Anthropic）
      */
     @SuppressWarnings("unchecked")
     private void updateUsageLog(UsageLog usageLog, Map<String, Object> usage) {
@@ -284,12 +599,16 @@ public class UnifiedChatService {
             if (pt != null) usageLog.setPromptTokens(((Number) pt).intValue());
             if (ct != null) usageLog.setCompletionTokens(((Number) ct).intValue());
 
-            // 提取缓存 token: prompt_tokens_details.cached_tokens (DeepSeek等)
+            // 提取缓存 token:
+            // OpenAI格式: prompt_tokens_details.cached_tokens (DeepSeek等)
+            // Anthropic格式(已归一化): 顶层 cached_tokens
             Object details = usage.get("prompt_tokens_details");
             if (details instanceof Map) {
                 Object cached = ((Map<String, Object>) details).get("cached_tokens");
                 if (cached != null) usageLog.setCachedTokens(((Number) cached).intValue());
             }
+            Object cachedTop = usage.get("cached_tokens");
+            if (cachedTop != null) usageLog.setCachedTokens(((Number) cachedTop).intValue());
 
             // 提取思考/推理 token: completion_tokens_details.reasoning_tokens
             // DeepSeek、Qwen、Kimi等支持思考模式的模型会返回此字段

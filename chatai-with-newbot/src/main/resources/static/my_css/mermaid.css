@@ -7,20 +7,21 @@
 /* ===== 容器(卡片) - 随主题 ===== */
 .mermaid-container {
   margin: 10px 0;
-  background: #1e293b;
-  border-radius: 10px;
+  background: #1d1d1c;
+  border-radius: 8px;
   overflow: hidden;
   max-width: 100%;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
   color: #e0e0e0;
   font-size: 13px;
   line-height: 1.5;
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 [data-theme="light"] .mermaid-container {
   background: #ffffff;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  color: #1e293b;
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.08));
+  color: #0e1115;
 }
 
 /* ===== 工具栏 ===== */
