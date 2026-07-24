@@ -514,11 +514,19 @@ function editModel(id) {
     var isPresetThinking = model.supportsThinking || false;
     var isPresetMm = model.supportsMultimodal || false;
     var html = '<div class="layui-form" lay-filter="editModelForm">';
+    // ===== 厂商部分 =====
     html += '<div class="form-group"><label class="form-label">厂商</label><div class="form-value">' + getModelProviderIconHtml(model, 20) + esc(model.providerName || model.providerId) + '</div></div>';
-    html += '<div class="form-group"><label class="form-label">显示名</label><div class="form-value"><input type="text" id="emDisplayName" class="layui-input" value="' + esc(model.displayName||'') + '"/></div></div>';
-    html += '<div class="form-group"><label class="form-label">模型ID</label><div class="form-value"><input type="text" id="emModelId" class="layui-input" value="' + esc(model.modelId||'') + '" readonly style="opacity:0.6"/></div></div>';
+    // 割线：厂商 / API设置
+    html += '<div class="form-section-divider"></div>';
+    // ===== API设置部分 =====
+    html += '<div class="form-group"><label class="form-label">协议格式</label><div class="form-value"><span style="font-size:12px;color:#ef4444;">' + formatProtocolLabel(model.protocol) + '</span></div></div>';
     html += '<div class="form-group"><label class="form-label">API 地址</label><div class="form-value"><input type="text" id="emApiUrl" class="layui-input" value="' + esc(model.apiUrl||'') + '"/></div></div>';
     html += '<div class="form-group"><label class="form-label">API Key</label><div class="form-value"><input type="text" id="emApiKey" class="layui-input" value="' + esc(model.apiKey||'') + '" placeholder="不修改则留空"/></div></div>';
+    html += '<div class="form-group"><label class="form-label">模型名称</label><div class="form-value"><input type="text" id="emDisplayName" class="layui-input" value="' + esc(model.displayName||'') + '"/></div></div>';
+    html += '<div class="form-group"><label class="form-label">模型ID</label><div class="form-value"><input type="text" id="emModelId" class="layui-input" value="' + esc(model.modelId||'') + '" readonly style="opacity:0.6"/></div></div>';
+    // 割线：API设置 / 模型设置
+    html += '<div class="form-section-divider"></div>';
+    // ===== 模型设置部分 =====
     html += '<div class="form-group"><div class="form-value" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">状态</span><input type="checkbox" id="emEnabled" lay-skin="switch"' + (model.enabled?' checked':'') + '></div></div>';
     html += '<div class="form-group"><div class="form-value" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">可见性</span><input type="checkbox" id="emVisibleToAll" lay-skin="switch"' + (model.visibleToAll?' checked':'') + '></div></div>';
     // 能力开关（可手动设置）
@@ -752,6 +760,12 @@ function submitRenameProvider(encodedId, isCustom) {
     });
 }
 
+// 协议类型显示标签
+function formatProtocolLabel(protocol) {
+    if (protocol === 'anthropic') return 'Anthropic';
+    return 'OpenAI 兼容';
+}
+
 function showAddModel() {
     var layer = window._layer, form = window._form, $ = window._$;
     var providerOptions = '';
@@ -760,7 +774,7 @@ function showAddModel() {
     });
     providerOptions += '<option value="__custom__">自定义厂商...</option>';
     var html = '<div class="layui-form" lay-filter="addModelForm">';
-    // 厂商选择
+    // ===== 厂商部分 =====
     html += '<div class="form-group"><label class="form-label">厂商</label><div class="form-value"><select id="amProviderId" lay-filter="amProviderId">' + providerOptions + '</select></div></div>';
     // 自定义厂商名称（选择自定义厂商时显示）
     html += '<div id="amCustomProviderFields" style="display:none;">';
@@ -770,21 +784,34 @@ function showAddModel() {
     html += '<div id="amModelSelectGroup" style="display:none;">';
     html += '<div class="form-group"><label class="form-label">模型</label><div class="form-value" id="amModelSelectContainer"></div></div>';
     html += '</div>';
+    // 割线：厂商 / API设置
+    html += '<div class="form-section-divider"></div>';
+    // ===== API设置部分 =====
+    // 协议格式下拉（仅自定义厂商显示）
+    html += '<div id="amProtocolGroup" style="display:none;">';
+    html += '<div class="form-group"><label class="form-label">协议格式</label><div class="form-value"><select id="amProtocol" lay-filter="amProtocol"><option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic</option></select></div></div>';
+    html += '</div>';
     // 预设模型字段区域（选择内置厂商+预设模型时显示）
     html += '<div id="amPresetFields" style="display:none;">';
-    html += '<div class="form-group"><label class="form-label">显示名</label><div class="form-value"><input type="text" id="amPresetDisplayName" class="layui-input" placeholder="显示名称"/></div></div>';
-    html += '<div class="form-group"><label class="form-label">模型ID</label><div class="form-value"><input type="text" id="amPresetModelId" class="layui-input" placeholder="模型标识" readonly style="opacity:0.6"/></div></div>';
+    html += '<div class="form-group"><label class="form-label">协议格式</label><div class="form-value"><span id="amPresetProtocolHint" style="font-size:12px;color:#ef4444;"></span></div></div>';
     html += '<div class="form-group"><label class="form-label">API 地址</label><div class="form-value"><input type="text" id="amPresetApiUrl" class="layui-input" placeholder="API地址"/></div></div>';
     html += '<div class="form-group"><label class="form-label">API Key</label><div class="form-value"><input type="text" id="amPresetApiKey" class="layui-input" placeholder="sk-..."/></div></div>';
+    html += '<div class="form-group"><label class="form-label">模型名称</label><div class="form-value"><input type="text" id="amPresetDisplayName" class="layui-input" placeholder="模型名称"/></div></div>';
+    html += '<div class="form-group"><label class="form-label">模型ID</label><div class="form-value"><input type="text" id="amPresetModelId" class="layui-input" placeholder="模型标识" readonly style="opacity:0.6"/></div></div>';
+    // 割线：API设置 / 模型设置
+    html += '<div class="form-section-divider"></div>';
     html += '<div class="form-group"><div class="form-value" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">可见性</span><input type="checkbox" id="amPresetVisibleToAll" lay-skin="switch" checked></div></div>';
     html += '<div id="amPresetThinkingInfo"></div>';
     html += '</div>';
     // 自定义模型字段区域（选择内置厂商+自定义模型 或 选择自定义厂商时显示）
     html += '<div id="amCustomFields" style="display:none;">';
-    html += '<div class="form-group"><label class="form-label">显示名</label><div class="form-value"><input type="text" id="amDisplayName" class="layui-input" placeholder="可选，默认使用模型ID"/></div></div>';
-    html += '<div class="form-group"><label class="form-label">模型ID</label><div class="form-value"><input type="text" id="amModelId" class="layui-input" placeholder="如 gpt-4o"/></div></div>';
+    html += '<div id="amCustomProtocolHintGroup" class="form-group" style="display:none;"><label class="form-label">协议格式</label><div class="form-value"><span id="amCustomProtocolHint" style="font-size:12px;color:#ef4444;"></span></div></div>';
     html += '<div class="form-group"><label class="form-label">API 地址</label><div class="form-value"><input type="text" id="amApiUrl" class="layui-input" placeholder="API地址"/></div></div>';
     html += '<div class="form-group"><label class="form-label">API Key</label><div class="form-value"><input type="text" id="amApiKey" class="layui-input" placeholder="sk-..."/></div></div>';
+    html += '<div class="form-group"><label class="form-label">模型名称</label><div class="form-value"><input type="text" id="amDisplayName" class="layui-input" placeholder="可选，默认使用模型ID"/></div></div>';
+    html += '<div class="form-group"><label class="form-label">模型ID</label><div class="form-value"><input type="text" id="amModelId" class="layui-input" placeholder="如 gpt-4o"/></div></div>';
+    // 割线：API设置 / 模型设置
+    html += '<div class="form-section-divider"></div>';
     html += '<div class="form-group"><div class="form-value" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">可见性</span><input type="checkbox" id="amVisibleToAll" lay-skin="switch" checked></div></div>';
     html += '<div class="form-group"><div class="form-value" id="amThinkingValue" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">思考模式</span><input type="checkbox" id="amSupportsThinking" lay-skin="switch"></div></div>';
     html += '<div class="form-group"><div class="form-value" id="amMultimodalValue" style="display:flex;align-items:center;gap:12px;"><span style="min-width:60px;">多模态</span><input type="checkbox" id="amSupportsMultimodal" lay-skin="switch"></div></div>';
@@ -821,6 +848,9 @@ function onAddModelProviderChange() {
         $('#amModelSelectGroup').hide();
         $('#amPresetFields').hide();
         $('#amCustomFields').show();
+        // 自定义厂商：显示协议格式下拉，隐藏只读协议提示
+        $('#amProtocolGroup').show();
+        $('#amCustomProtocolHintGroup').hide();
         // 清空自定义厂商的预填URL
         $('#amApiUrl').val('');
         // 重置思考模式/多模态为开关
@@ -829,8 +859,9 @@ function onAddModelProviderChange() {
         // 只渲染checkbox，避免重新渲染select导致下拉框损坏
         form.render('checkbox', 'addModelForm');
     } else {
-        // 内置厂商：隐藏自定义厂商名称，显示模型选择
+        // 内置厂商：隐藏自定义厂商名称和协议下拉，显示模型选择
         $('#amCustomProviderFields').hide();
+        $('#amProtocolGroup').hide();
         $('#amModelSelectGroup').show();
         // 更新模型下拉列表
         updateAddModelSelect();
@@ -901,6 +932,9 @@ function showAddModelPresetFields(provider, modelId) {
         $('#amPresetModelId').val(pm.id);
         $('#amPresetApiUrl').val(provider ? provider.defaultApiUrl : '');
     }
+    // 显示协议类型（只读，跟随厂商）
+    var protocol = provider ? provider.protocol : 'openai';
+    $('#amPresetProtocolHint').text(formatProtocolLabel(protocol));
     // 能力提示：预设模型只标注，不可设置
     var capInfo = $('#amPresetThinkingInfo');
     var capHtml = '<div class="form-group"><label class="form-label">能力</label><div class="form-value" style="display:flex;gap:8px;flex-wrap:wrap;">';
@@ -917,9 +951,16 @@ function showAddModelCustomModelFields(provider) {
     var $ = window._$, form = window._form;
     $('#amPresetFields').hide();
     $('#amCustomFields').show();
-    // 预填厂商默认URL
     if (provider) {
+        // 内置厂商+自定义模型：协议只读，跟随厂商
         $('#amApiUrl').val(provider.defaultApiUrl || '');
+        $('#amProtocolGroup').hide();
+        $('#amCustomProtocolHintGroup').show();
+        $('#amCustomProtocolHint').text(formatProtocolLabel(provider.protocol));
+    } else {
+        // 自定义厂商：协议使用下拉框（由 onAddModelProviderChange 显示）
+        $('#amProtocolGroup').show();
+        $('#amCustomProtocolHintGroup').hide();
     }
     // 重置思考模式/多模态为开关
     $('#amThinkingValue').html('<span style="min-width:60px;">思考模式</span><input type="checkbox" id="amSupportsThinking" lay-skin="switch">');
@@ -954,6 +995,7 @@ function submitAddModel() {
             providerName: customProviderName,
             apiUrl: $('#amApiUrl').val().trim(),
             apiKey: apiKey,
+            protocol: $('#amProtocol').val() || 'openai',
             visibleToAll: $('#amVisibleToAll').is(':checked'),
             supportsThinking: supportsThinking,
             supportsMultimodal: supportsMultimodal,

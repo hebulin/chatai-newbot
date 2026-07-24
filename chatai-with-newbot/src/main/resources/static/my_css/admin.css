@@ -1699,6 +1699,13 @@ body::before {
     font-family: var(--sans);
 }
 
+/* 表单分区割线：厂商 / API设置 / 模型设置 */
+.form-section-divider {
+    border: none;
+    border-top: 1px dashed var(--border);
+    margin: 4px 0 18px;
+}
+
 /* Switch 统一 - 圆点在右侧 */
 .layui-form-switch {
     border: 1px solid var(--border) !important;
