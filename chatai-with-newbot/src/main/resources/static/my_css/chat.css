@@ -1859,6 +1859,29 @@ textarea.settings-textarea {
     /* iOS Safari：输入框字号 <16px 时聚焦会自动缩放页面 */
     #userInput { font-size: 16px; }
 
+    /* === 移动端：设置弹窗侧栏改为顶部水平标签栏 === */
+    .settings-modal {
+        flex-direction: column;
+    }
+    .settings-sidebar {
+        width: 100%;
+        flex-direction: row;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+        padding: 8px 12px;
+        gap: 6px;
+        overflow-x: auto;
+        flex-shrink: 0;
+    }
+    .settings-menu-item {
+        white-space: nowrap;
+        padding: 8px 12px;
+        font-size: 11px;
+    }
+    .settings-content {
+        padding: 16px 14px;
+    }
+
     /* === 移动端：模型级联选择器适配 === */
     .model-select-dropdown {
         position: fixed;

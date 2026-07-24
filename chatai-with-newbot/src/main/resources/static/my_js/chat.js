@@ -1145,9 +1145,11 @@ function sendMessage(fromButton) {
                                 var delta = json.choices[0].delta;
                                 if (!hasResponse) { hasResponse = true; assistantMsg.time = nowStr(); }
 
-                                if (delta.reasoning_content) {
+                                // 兼容不同厂商的思考内容字段：reasoning_content（小米等）、reasoning（DeepSeek等）
+                                var deltaThinking = delta.reasoning_content || delta.reasoning;
+                                if (deltaThinking) {
                                     if (!thinkingStartTime) thinkingStartTime = Date.now();
-                                    currentThinkingContent += delta.reasoning_content;
+                                    currentThinkingContent += deltaThinking;
                                     updated = true;
                                 }
                                 if (delta.content) {
