@@ -1043,7 +1043,7 @@ function renderUsersList(users) {
             : '<span class="status-badge vis-admin">普通用户</span>';
         var actions = '<div class="action-btns">';
         actions += '<button class="action-btn edit-btn" onclick="editUser(\'' + esc(u.id) + '\')"><i class="layui-icon layui-icon-edit"></i></button>';
-        actions += '<button class="action-btn del-btn" onclick="deleteUser(\'' + esc(u.id) + '\')"><i class="layui-icon layui-icon-delete"></i></button>';
+        if (u.username !== 'admin') actions += '<button class="action-btn del-btn" onclick="deleteUser(\'' + esc(u.id) + '\')"><i class="layui-icon layui-icon-delete"></i></button>';
         if (u.role !== 'admin') actions += '<button class="action-btn perm-btn" onclick="showPerms(\'' + esc(u.id) + '\')" title="权限"><i class="layui-icon layui-icon-auz"></i></button>';
         actions += '</div>';
         var tr = '<tr>'
@@ -1135,6 +1135,7 @@ function saveUser(id) {
 function deleteUser(id) {
     var user = allUsers.find(function(u) { return u.id === id; });
     if (!user) return;
+    if (user.username === 'admin') { window._layer.msg('内置管理员账号不可删除', {icon:0}); return; }
     window._layer.confirm('确定删除用户 "' + user.username + '" 吗？', {icon:3, title:'确认删除'}, function(idx) {
         api('/api/admin/users/' + id, { method:'DELETE' }).then(function(data) {
             if (data && data.success) { window._layer.close(idx); window._layer.msg('已删除',{icon:1}); loadUsers(); }
