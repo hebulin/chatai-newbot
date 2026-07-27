@@ -419,3 +419,159 @@ html.dark {
   font-variant-numeric: tabular-nums;
   padding: 0 4px;
 }
+
+/* ============================================
+   移动端响应式适配（手机端 ≤ 640px）
+   ============================================ */
+@media (max-width: 640px) {
+  /* 弹窗過罩层：禁止横向溢出 */
+  .el-overlay-dialog {
+    overflow-x: hidden;
+  }
+
+  /* 弹窗：近全屏宽度，减少留白 */
+  .el-dialog {
+    --el-dialog-margin-top: 8vh;
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px) !important;
+    margin: 8vh auto 0 !important;
+  }
+  .el-dialog .el-dialog__body {
+    padding: 16px 16px 20px;
+    max-height: 65vh;
+    overflow-y: auto;
+  }
+  .el-dialog .el-dialog__header {
+    padding: 14px 16px 10px;
+    margin-right: 0;
+  }
+  .el-dialog .el-dialog__footer {
+    padding: 12px 16px 16px;
+  }
+  .el-dialog .el-dialog__title {
+    font-size: 15px;
+  }
+
+  /* MessageBox 确认框适配 */
+  .el-message-box {
+    width: calc(100vw - 32px) !important;
+    max-width: calc(100vw - 32px) !important;
+  }
+  .el-message-box .el-message-box__content {
+    padding: 12px 16px;
+  }
+  .el-message-box .el-message-box__message p {
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  /* 表单：缩小 label 宽度，紧凑排列 */
+  .el-dialog .el-form-item__label {
+    width: 72px !important;
+    min-width: 72px !important;
+    font-size: 13px;
+    padding-right: 8px;
+  }
+  .el-dialog .el-form-item {
+    margin-bottom: 14px;
+  }
+
+  /* 筛选栏：单列紧凑 */
+  .filter-bar {
+    padding: 12px;
+    gap: 8px;
+  }
+  .filter-bar .el-input,
+  .filter-bar .el-select {
+    width: 100% !important;
+  }
+  .filter-bar .el-input {
+    max-width: 100%;
+  }
+
+  /* 分页器：换行居中 */
+  .admin-pager {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px;
+    padding: 12px 8px 4px;
+  }
+  .admin-pager-info {
+    width: 100%;
+    text-align: center;
+    order: -1;
+  }
+
+  /* 卡片内边距缩小 */
+  .admin-card {
+    padding: 12px;
+  }
+
+  /* 表格横向滚动提示 */
+  .el-table {
+    font-size: 12px;
+  }
+
+  /* section header 紧凑 */
+  .section-header {
+    margin-bottom: 14px;
+  }
+  .section-title h2 {
+    font-size: 17px;
+  }
+  .section-tip {
+    font-size: 12px;
+  }
+
+  /* 图标选择器换行 */
+  .icon-picker {
+    gap: 4px;
+  }
+  .icon-picker-item {
+    width: 30px;
+    height: 30px;
+    font-size: 16px;
+  }
+
+  /* 权限弹窗模型列表高度限制 */
+  .el-dialog .el-checkbox {
+    height: auto;
+    margin-bottom: 2px;
+  }
+
+  /* 厂商卡片网格：单列 */
+  .provider-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .provider-card {
+    padding: 14px 16px;
+  }
+}
+
+/* 超小屏幕（≤ 380px）进一步压缩 */
+@media (max-width: 380px) {
+  .el-dialog {
+    width: calc(100vw - 16px) !important;
+    max-width: calc(100vw - 16px) !important;
+    margin: 5vh auto 0 !important;
+  }
+  .el-dialog .el-dialog__body {
+    padding: 12px 12px 16px;
+    max-height: 60vh;
+  }
+  .el-dialog .el-dialog__header {
+    padding: 12px 12px 8px;
+  }
+  .el-dialog .el-dialog__footer {
+    padding: 10px 12px 14px;
+  }
+  .el-dialog .el-form-item__label {
+    width: 64px !important;
+    min-width: 64px !important;
+    font-size: 12px;
+  }
+  .admin-card {
+    padding: 10px;
+  }
+}

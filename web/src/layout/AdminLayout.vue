@@ -219,4 +219,37 @@ onMounted(() => {
   font-size: 12px;
   border-top: 1px solid var(--border);
 }
+
+/* 移动端适配 */
+@media (max-width: 640px) {
+  .admin-nav {
+    padding: 0 12px;
+    height: 52px;
+  }
+  .nav-brand-icon {
+    width: 28px;
+    height: 28px;
+  }
+  .nav-brand-name {
+    font-size: 14px;
+  }
+  .nav-brand-sub {
+    font-size: 9px;
+  }
+  .admin-tabs-wrapper {
+    padding: 0 12px;
+  }
+  .admin-tabs :deep(.el-tabs__item) {
+    font-size: 13px;
+    height: 40px;
+    line-height: 40px;
+    padding: 0 12px;
+  }
+  .admin-main {
+    padding: 16px 12px;
+  }
+  .admin-footer {
+    padding: 12px 16px;
+  }
+}
 </style>

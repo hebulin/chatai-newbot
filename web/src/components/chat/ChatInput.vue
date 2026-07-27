@@ -45,10 +45,12 @@
               :props="cascaderProps"
               :show-all-levels="false"
               :style="{ width: modelInputWidth }"
-              filterable
+              :filterable="!isMobile"
+              :key="'cascader-' + (isMobile ? 'mobile' : 'desktop')"
               placement="top"
               popper-class="model-cascader-popper"
               @change="handleModelChange"
+              @visible-change="onCascaderVisibleChange"
             >
               <template #default="{ data }">
                 <img v-if="data.icon && data.icon.startsWith('/')" :src="data.icon" class="cascader-node-icon" />
@@ -73,7 +75,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useModelsStore } from '@/stores/models'
 import { useTheme } from '@/composables/useTheme'
 import { ElMessage } from 'element-plus'
@@ -98,6 +100,24 @@ const textareaRef = ref(null)
 const fileInputRef = ref(null)
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024
+
+// 移动端判定：窄屏(≤768px)关闭 el-cascader 的 filterable，
+// 避免点击模型选择器时内部搜索 input 获焦而唤起手机软键盘
+const isMobile = ref(typeof window !== 'undefined' && window.innerWidth <= 768)
+function handleResize() {
+  isMobile.value = window.innerWidth <= 768
+}
+onMounted(() => window.addEventListener('resize', handleResize))
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', handleResize)
+  // 组件卸载时确保恢复背景滚动，防止浮窗未关闭就卸载导致锁定残留
+  const container = document.querySelector('.chat-container')
+  if (container) {
+    container.style.overflow = ''
+    container.style.touchAction = ''
+  }
+  document.body.style.touchAction = ''
+})
 
 const thinkIconSrc = computed(() => {
   return getTheme() === 'dark' ? '/icons/icon_深度思考_ss.svg' : '/icons/icon_深度思考.svg'
@@ -186,6 +206,29 @@ function handleModelChange(val) {
   if (model) modelsStore.selectModel(model)
   // 切换模型后重置深度思考开关（与旧版一致，避免上一模型的思考状态带到新模型）
   deepThinking.value = false
+}
+
+// 移动端：模型选择浮窗弹出时锁定背景(.chat-container)与 body 的触摸滚动，
+// 避免触摸浮窗外区域时背景页面可上下左右滑动；关闭后恢复原滚动位置
+let savedContainerScrollTop = 0
+function onCascaderVisibleChange(visible) {
+  if (!isMobile.value) return
+  const container = document.querySelector('.chat-container')
+  if (visible) {
+    if (container) {
+      savedContainerScrollTop = container.scrollTop
+      container.style.overflow = 'hidden'
+      container.style.touchAction = 'none'
+    }
+    document.body.style.touchAction = 'none'
+  } else {
+    if (container) {
+      container.style.overflow = ''
+      container.style.touchAction = ''
+      container.scrollTop = savedContainerScrollTop
+    }
+    document.body.style.touchAction = ''
+  }
 }
 
 function autoResize() {

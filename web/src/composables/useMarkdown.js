@@ -24,15 +24,6 @@ function nextUid() {
   return 'mermaid-' + Date.now().toString(36) + '-' + (++uidCounter)
 }
 
-// 安全读取 localStorage（隐私模式/禁用存储时返回 null）
-function safeStorageGet(key) {
-  try { return localStorage.getItem(key) } catch (e) { return null }
-}
-// 安全写入 localStorage
-function safeStorageSet(key, val) {
-  try { localStorage.setItem(key, val) } catch (e) { /* ignore */ }
-}
-
 async function loadMermaid() {
   if (mermaidModule) return mermaidModule
   if (mermaidLoading) return mermaidLoading
@@ -60,17 +51,10 @@ function ensureMermaidInit(themeKey) {
   }
 }
 
-// 获取当前 mermaid 主题：优先 localStorage 持久化值，回退按全局明暗主题映射
+// 获取 mermaid 默认主题：按全局明暗主题映射。不读 localStorage--
+// 切换主题仅影响当前图表本次会话，刷新后所有图回到跟随全局明暗的默认主题。
 function getCurrentMermaidTheme(globalTheme) {
-  const saved = safeStorageGet('mermaidTheme')
-  if (saved && MERMAID_THEMES.some(t => t.key === saved)) return saved
   return globalTheme === 'dark' ? 'dark' : 'default'
-}
-
-// 设置并持久化 mermaid 主题
-function setCurrentMermaidTheme(theme) {
-  if (!MERMAID_THEMES.some(t => t.key === theme)) return
-  safeStorageSet('mermaidTheme', theme)
 }
 
 /**
@@ -169,9 +153,11 @@ function splitMermaidLine(line) {
   return parts
 }
 
-// 节点标签引号化：标签含特殊字符时用双引号包裹，避免解析歧义
+// 节点标签引号化：标签含特殊字符时用双引号包裹，避免解析歧义。
+// label 内不含 [ ] （用 [^\[\]] 限定），含嵌套方括号的标签（通常已引号化，
+// 如 A["x<b>[1,2]</b>"]）保持原样，避免正则截断到内部 ] 后错误重新引号化破坏语法。
 function quoteMermaidLabels(line) {
-  return line.replace(/(\w+)\[([^\]]*)\]/g, (match, nodeId, label) => {
+  return line.replace(/(\w+)\[([^\[\]]*)\]/g, (match, nodeId, label) => {
     if (label.startsWith('"') && label.endsWith('"')) return match
     if (/[(){}\[\]#&]/.test(label)) {
       const escapedLabel = label.replace(/"/g, '\\"')
@@ -184,6 +170,32 @@ function quoteMermaidLabels(line) {
 function enqueueRender(el, text) {
   renderQueue.push({ el, text })
   drainQueue()
+}
+
+// parse 验证后入队渲染：先验证 normalize 后的代码，parse 失败则回退 raw 原文。
+// 避免 normalize（如 quoteMermaidLabels）误伤已引号化的复杂标签导致渲染失败；
+// 初次渲染与主题切换重渲染共用此逻辑，保证两者行为一致。
+function parseAndEnqueueRender(el, normalized, raw) {
+  const renderWith = (code) => { if (el.isConnected) enqueueRender(el, code) }
+  if (!mermaidModule) { renderWith(normalized); return }
+  try {
+    const r = mermaidModule.parse(normalized)
+    if (r && typeof r.then === 'function') {
+      r.then(() => renderWith(normalized)).catch(() => tryRenderRaw(raw, renderWith))
+    } else {
+      renderWith(normalized)
+    }
+  } catch (e) {
+    tryRenderRaw(raw, renderWith)
+  }
+}
+// 回退用 raw 原文 parse 验证后渲染
+function tryRenderRaw(raw, renderWith) {
+  try {
+    const r2 = mermaidModule.parse(raw)
+    if (r2 && typeof r2.then === 'function') r2.then(() => renderWith(raw)).catch(() => {})
+    else renderWith(raw)
+  } catch (e2) { /* ignore */ }
 }
 
 function drainQueue() {
@@ -275,45 +287,76 @@ function cropSvgViewBox(svg) {
 }
 
 // ===== 聊天区内联缩放/拖拽 =====
+// 采用 viewBox 缩放方案：通过修改 SVG 的 viewBox 属性实现缩放/平移，
+// 而非 CSS transform。viewBox 缩放改变 SVG 内部坐标系，所有内容（含
+// foreignObject 内的 HTML 标签文字）按新坐标系矢量重渲染，避免 CSS
+// transform + will-change 触发 GPU 合成层栅格化导致的放大模糊问题。
 function attachInlinePanZoom(preEl) {
   const svg = preEl.querySelector('svg')
   const wrapper = preEl.closest('.mermaid-scroll-wrapper')
   if (!svg || !wrapper || wrapper.dataset.panzoomBound) return
+  // 读取裁剪后的初始 viewBox（由 cropSvgViewBox 写入），无则无法缩放
+  const vbStr = svg.getAttribute('viewBox')
+  if (!vbStr) return
+  const m = vbStr.split(/[\s,]+/).map(Number)
+  if (m.length !== 4 || m[2] <= 0 || m[3] <= 0) return
+  const vx0 = m[0], vy0 = m[1], vw0 = m[2], vh0 = m[3]
+
   wrapper.dataset.panzoomBound = 'true'
   wrapper.classList.add('interactive')
 
+  // scale 为缩放倍数（相对初始视图）；panX/panY 为 SVG 坐标系平移量
   let scale = 1, panX = 0, panY = 0
-  let dragging = false, sx = 0, sy = 0, spx = 0, spy = 0
-  const MIN = 0.3, MAX = 6, EDGE = 80
+  let dragging = false, sx = 0, sy = 0, sPanX = 0, sPanY = 0
+  const MIN = 0.3, MAX = 6
 
-  function apply() {
-    svg.style.transform = 'translate(' + panX + 'px, ' + panY + 'px) scale(' + scale + ')'
+  // 将当前缩放/平移写入 viewBox：viewBox 宽高随 scale 反比缩放
+  function applyViewBox() {
+    const vw = vw0 / scale
+    const vh = vh0 / scale
+    svg.setAttribute('viewBox', (vx0 - panX) + ' ' + (vy0 - panY) + ' ' + vw + ' ' + vh)
   }
-  // 宽松边界：保证图表至少留出 EDGE px 在可视区内，不至于被拖丢
-  function clamp() {
-    const w = preEl.offsetWidth || 1
-    const h = preEl.offsetHeight || 1
-    panX = Math.min(Math.max(panX, EDGE - w * scale), w - EDGE)
-    panY = Math.min(Math.max(panY, EDGE - h * scale), h - EDGE)
+  // 限制平移范围：保证 viewBox 与原始内容区域始终有交集，避免图表被完全拖出可视区
+  function clampPan() {
+    const vw = vw0 / scale
+    const vh = vh0 / scale
+    panX = Math.min(vw, Math.max(-vw0, panX))
+    panY = Math.min(vh, Math.max(-vh0, panY))
+  }
+  // 屏幕像素坐标转 SVG 坐标（用 getScreenCTM 精确转换，兼容 meet 留白）
+  function screenToSvg(clientX, clientY) {
+    const ctm = svg.getScreenCTM()
+    if (!ctm) return [vx0, vy0]
+    const inv = ctm.inverse()
+    return [
+      clientX * inv.a + clientY * inv.c + inv.e,
+      clientX * inv.b + clientY * inv.d + inv.f
+    ]
+  }
+  // 以 SVG 坐标 (cx, cy) 为中心缩放到 newScale，保持该点在视口中位置不变
+  function zoomAt(newScale, cx, cy) {
+    newScale = Math.min(MAX, Math.max(MIN, newScale))
+    if (newScale === scale) return
+    const curVx = vx0 - panX, curVy = vy0 - panY
+    const curVw = vw0 / scale, curVh = vh0 / scale
+    const fx = (cx - curVx) / curVw
+    const fy = (cy - curVy) / curVh
+    const newVw = vw0 / newScale, newVh = vh0 / newScale
+    panX = vx0 - (cx - fx * newVw)
+    panY = vy0 - (cy - fy * newVh)
+    scale = newScale
+    clampPan()
+    applyViewBox()
   }
   function onWheel(e) {
     e.preventDefault()
-    const rect = preEl.getBoundingClientRect()
-    const cx = e.clientX - rect.left
-    const cy = e.clientY - rect.top
-    const ns = Math.min(MAX, Math.max(MIN, scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15)))
-    if (ns === scale) return
-    const ratio = ns / scale
-    panX = cx - ratio * (cx - panX)
-    panY = cy - ratio * (cy - panY)
-    scale = ns
-    clamp()
-    apply()
+    const [cx, cy] = screenToSvg(e.clientX, e.clientY)
+    zoomAt(scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15), cx, cy)
   }
   function onDown(e) {
     if (e.button !== 0) return
     dragging = true
-    sx = e.clientX; sy = e.clientY; spx = panX; spy = panY
+    sx = e.clientX; sy = e.clientY; sPanX = panX; sPanY = panY
     wrapper.classList.add('dragging')
     e.preventDefault()
   }
@@ -324,10 +367,16 @@ function attachInlinePanZoom(preEl) {
       return
     }
     if (!dragging) return
-    panX = spx + (e.clientX - sx)
-    panY = spy + (e.clientY - sy)
-    clamp()
-    apply()
+    const ctm = svg.getScreenCTM()
+    if (!ctm || ctm.a === 0) return
+    // 像素位移转 SVG 坐标位移（ctm.a/d 为 svg->屏幕的缩放系数）
+    const dxSvg = (e.clientX - sx) / ctm.a
+    const dySvg = (e.clientY - sy) / ctm.d
+    // viewBox x = vx0 - panX，panX 与位移同向（鼠标左拖 dx<0 -> panX 减小 -> viewBox x 增大 -> 内容左移）
+    panX = sPanX + dxSvg
+    panY = sPanY + dySvg
+    clampPan()
+    applyViewBox()
   }
   function onUp() {
     if (!dragging) return
@@ -336,7 +385,7 @@ function attachInlinePanZoom(preEl) {
   }
   function reset() {
     scale = 1; panX = 0; panY = 0
-    apply()
+    applyViewBox()
   }
 
   wrapper.addEventListener('wheel', onWheel, { passive: false })
@@ -356,36 +405,14 @@ export async function renderMermaidBlocks(container, theme = 'dark') {
   const els = container.querySelectorAll('.mermaid-view pre.mermaid:not([data-processed])')
   if (!els.length) return
 
-  const mermaid = await loadMermaid()
+  await loadMermaid()
   ensureMermaidInit(getCurrentMermaidTheme(theme))
 
   els.forEach(el => {
     el.setAttribute('data-processed', 'true')
     const rawText = el.textContent
-    const normalized = normalizeMermaidCode(rawText)
-    // 先尝试 parse 验证，失败则用原文重试
-    try {
-      const parseResult = mermaid.parse(normalized)
-      if (parseResult && typeof parseResult.then === 'function') {
-        parseResult.then(() => {
-          if (el.isConnected) enqueueRender(el, normalized)
-        }).catch(() => {
-          try {
-            const r2 = mermaid.parse(rawText)
-            if (r2 && typeof r2.then === 'function') {
-              r2.then(() => { if (el.isConnected) enqueueRender(el, rawText) }).catch(() => {})
-            }
-          } catch (e) { /* ignore */ }
-        })
-      } else {
-        if (el.isConnected) enqueueRender(el, normalized)
-      }
-    } catch (e) {
-      try {
-        mermaid.parse(rawText)
-        if (el.isConnected) enqueueRender(el, rawText)
-      } catch (e2) { /* ignore */ }
-    }
+    // parse 验证 normalize 后代码，失败回退原文（共用逻辑，避免 normalize 误伤）
+    parseAndEnqueueRender(el, normalizeMermaidCode(rawText), rawText)
   })
 }
 
@@ -437,6 +464,8 @@ export function handleMermaidToolbarClick(e) {
       const code = container.querySelector('.mermaid-code')
       if (view) view.style.display = pane === 'view' ? '' : 'none'
       if (code) code.style.display = pane === 'code' ? 'block' : 'none'
+      // 切换工具栏按钮可见性：视图模式显 下载/主题/全屏，代码模式显 复制代码
+      container.classList.toggle('mermaid-mode-code', pane === 'code')
       break
     }
     case 'copy': {
@@ -453,17 +482,9 @@ export function handleMermaidToolbarClick(e) {
       copyTextWithFallback(raw, onSuccess, () => showToast('复制失败'))
       break
     }
-    case 'downloadSvg': {
-      const svg = container.querySelector('.mermaid-view svg')
-      if (!svg) return
-      const svgString = new XMLSerializer().serializeToString(cleanSvgForExport(svg))
-      downloadFile(svgString, 'mermaid-' + Date.now() + '.svg', 'image/svg+xml')
-      break
-    }
-    case 'downloadPng': {
-      const svg = container.querySelector('.mermaid-view svg')
-      if (!svg) return
-      svgToPng(cleanSvgForExport(svg), 'mermaid-' + Date.now() + '.png')
+    case 'download': {
+      // 弹出下载选项菜单（SVG / PNG），由菜单项触发实际下载
+      showMermaidDownloadMenu(btn, container)
       break
     }
     case 'fullscreen': {
@@ -558,11 +579,48 @@ function showMermaidThemeMenu(btn, container) {
   }, 0)
 }
 
-// 应用 mermaid 主题到单个图表并重渲染（同时持久化为默认主题）
+// 显示 mermaid 下载选项菜单（SVG/PNG），点击选项触发对应下载，点击外部关闭
+function showMermaidDownloadMenu(btn, container) {
+  if (!container) return
+  const existing = container.querySelector('.mermaid-download-menu')
+  if (existing) { existing.remove(); return }
+  const menu = document.createElement('div')
+  menu.className = 'mermaid-download-menu active'
+  menu.innerHTML =
+    '<div class="mermaid-download-menu-item" data-fmt="svg"><span>下载 SVG</span></div>' +
+    '<div class="mermaid-download-menu-item" data-fmt="png"><span>下载 PNG</span></div>'
+  const toolbar = container.querySelector('.mermaid-toolbar')
+  if (toolbar) { toolbar.style.position = 'relative'; toolbar.appendChild(menu) }
+  else { container.appendChild(menu) }
+  menu.querySelectorAll('.mermaid-download-menu-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const fmt = item.getAttribute('data-fmt')
+      const svg = container.querySelector('.mermaid-view svg')
+      if (svg) {
+        if (fmt === 'svg') {
+          const svgString = new XMLSerializer().serializeToString(cleanSvgForExport(svg))
+          downloadFile(svgString, 'mermaid-' + Date.now() + '.svg', 'image/svg+xml')
+        } else {
+          svgToPng(cleanSvgForExport(svg), 'mermaid-' + Date.now() + '.png')
+        }
+      }
+      menu.remove()
+    })
+  })
+  setTimeout(() => {
+    const onDocClick = (e) => {
+      if (menu.contains(e.target) || btn.contains(e.target)) return
+      menu.remove()
+      document.removeEventListener('click', onDocClick)
+    }
+    document.addEventListener('click', onDocClick)
+  }, 0)
+}
+
+// 应用 mermaid 主题到单个图表并重渲染（仅影响当前图表本次会话，不持久化、不影响其他图表）
 function applyMermaidTheme(container, theme) {
   if (!container) return
   container.dataset.mermaidTheme = theme
-  setCurrentMermaidTheme(theme)
   const view = container.querySelector('.mermaid-view')
   const pre = view ? view.querySelector('pre') : null
   if (!pre) return
@@ -573,7 +631,8 @@ function applyMermaidTheme(container, theme) {
   pre.removeAttribute('data-processed')
   pre.innerHTML = escapeHtml(raw)
   ensureMermaidInit(theme)
-  enqueueRender(pre, normalizeMermaidCode(raw))
+  // 与初次渲染一致：parse 验证 normalize 后代码，失败回退原文，避免 normalize 误伤导致渲染失败
+  parseAndEnqueueRender(pre, normalizeMermaidCode(raw), raw)
 }
 
 // 导出前清理：剥离内联样式（width:100%/transform等），按 viewBox 还原自然尺寸
@@ -592,6 +651,30 @@ function cleanSvgForExport(svg) {
   return clone
 }
 
+// 将 SVG 内所有 <image> 的外部图片引用内联为 data URL，
+// 避免 SVG 经 img 绘制到 canvas 后因跨域资源污染导致 toBlob 失败
+async function inlineExternalImages(svg) {
+  const images = Array.from(svg.querySelectorAll('image'))
+  await Promise.all(images.map(img => (async () => {
+    const href = img.getAttribute('href') || img.getAttributeNS('http://www.w3.org/1999/xlink', 'href') || img.getAttribute('xlink:href')
+    if (!href || href.startsWith('data:') || href.startsWith('#')) return
+    try {
+      const res = await fetch(href, { mode: 'cors' })
+      if (!res.ok) return
+      const blob = await res.blob()
+      const dataUrl = await new Promise((resolve, reject) => {
+        const r = new FileReader()
+        r.onload = () => resolve(r.result)
+        r.onerror = reject
+        r.readAsDataURL(blob)
+      })
+      img.setAttribute('href', dataUrl)
+      img.removeAttributeNS('http://www.w3.org/1999/xlink', 'href')
+      img.removeAttribute('xlink:href')
+    } catch (e) { /* 跨域 fetch 失败则跳过，保留原引用 */ }
+  })()))
+}
+
 function downloadFile(content, filename, type) {
   const blob = new Blob([content], { type })
   const url = URL.createObjectURL(blob)
@@ -604,7 +687,9 @@ function downloadFile(content, filename, type) {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-function svgToPng(svgElement, filename) {
+async function svgToPng(svgElement, filename) {
+  // 先内联外部图片，避免 canvas 跨域污染导致 toBlob 失败
+  await inlineExternalImages(svgElement)
   const svgData = new XMLSerializer().serializeToString(svgElement)
   const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' })
   const url = URL.createObjectURL(blob)
@@ -619,27 +704,45 @@ function svgToPng(svgElement, filename) {
     ctx.scale(2, 2)
     ctx.drawImage(img, 0, 0, w, h)
     URL.revokeObjectURL(url)
-    canvas.toBlob(pngBlob => {
-      if (!pngBlob) return
-      const pngUrl = URL.createObjectURL(pngBlob)
-      const a = document.createElement('a')
-      a.href = pngUrl
-      a.download = filename
-      a.click()
-      setTimeout(() => URL.revokeObjectURL(pngUrl), 1000)
-    }, 'image/png')
+    try {
+      canvas.toBlob(pngBlob => {
+        if (!pngBlob) { showToast('PNG 导出失败，请改用 SVG 下载'); return }
+        const pngUrl = URL.createObjectURL(pngBlob)
+        const a = document.createElement('a')
+        a.href = pngUrl
+        a.download = filename
+        a.click()
+        setTimeout(() => URL.revokeObjectURL(pngUrl), 1000)
+      }, 'image/png')
+    } catch (e) {
+      // canvas 被跨域资源污染，toBlob 抛 SecurityError
+      showToast('PNG 导出失败（图表含跨域资源），请改用 SVG 下载')
+    }
+  }
+  img.onerror = function () {
+    URL.revokeObjectURL(url)
+    showToast('PNG 导出失败，请改用 SVG 下载')
   }
   img.src = url
 }
 
 function openMermaidFullscreen(svg) {
+  // 解析裁剪后的初始 viewBox（由 cropSvgViewBox 写入），无则无法缩放
+  const vbStr = svg.getAttribute('viewBox')
+  if (!vbStr) return
+  const parts = vbStr.split(/[\s,]+/).map(Number)
+  if (parts.length !== 4 || parts[2] <= 0 || parts[3] <= 0) return
+  const vx0 = parts[0], vy0 = parts[1], vw0 = parts[2], vh0 = parts[3]
+
   // --- 状态 ---
-  let scale = 1
-  let initScale = 1
+  // zoom 为缩放倍数（相对初始适配视图，1 = meet 自动适配视口）；
+  // panX/panY 为 SVG 坐标系平移量。采用 viewBox 缩放保证矢量清晰。
+  let zoom = 1
   let panX = 0, panY = 0
   let dragging = false
-  let startX = 0, startY = 0, startPanX = 0, startPanY = 0
-  const MIN_SCALE = 0.2, MAX_SCALE = 8
+  let startX = 0, startY = 0, sPanX = 0, sPanY = 0
+  let rafId = null
+  const MIN_ZOOM = 0.2, MAX_ZOOM = 8
 
   // --- DOM 构建 ---
   const overlay = document.createElement('div')
@@ -667,17 +770,11 @@ function openMermaidFullscreen(svg) {
   content.className = 'mermaid-fullscreen-content'
   const svgClone = svg.cloneNode(true)
   svgClone.removeAttribute('style')
-  // 移除固定宽高，仅保留 viewBox，确保矢量缩放不模糊
-  const vb = svgClone.getAttribute('viewBox')
+  // 移除固定宽高，仅保留 viewBox；CSS 设 width/height:100% 占满画布，
+  // preserveAspectRatio="xMidYMid meet" 自动适配视口（大则缩小，小则原大小居中）
   svgClone.removeAttribute('width')
   svgClone.removeAttribute('height')
-  if (vb) {
-    const parts = vb.split(/[\s,]+/).map(Number)
-    if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
-      svgClone.style.width = parts[2] + 'px'
-      svgClone.style.height = parts[3] + 'px'
-    }
-  }
+  svgClone.setAttribute('preserveAspectRatio', 'xMidYMid meet')
   svgClone.classList.add('mfs-svg')
   content.appendChild(svgClone)
 
@@ -685,54 +782,92 @@ function openMermaidFullscreen(svg) {
   overlay.appendChild(closeBtn)
   overlay.appendChild(content)
 
-  // --- 变换应用 ---
+  // --- 变换应用（修改 viewBox，矢量缩放不模糊） ---
   const zoomLabel = toolbar.querySelector('.mfs-zoom-label')
-  function applyTransform(animate) {
-    svgClone.style.transition = animate ? 'transform 0.2s ease' : 'none'
-    svgClone.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`
-    zoomLabel.textContent = Math.round(scale * 100) + '%'
+  function applyViewBox() {
+    const vw = vw0 / zoom
+    const vh = vh0 / zoom
+    svgClone.setAttribute('viewBox', (vx0 - panX) + ' ' + (vy0 - panY) + ' ' + vw + ' ' + vh)
+    zoomLabel.textContent = Math.round(zoom * 100) + '%'
   }
-
-  function zoomAt(newScale, cx, cy, animate) {
-    newScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, newScale))
-    if (newScale === scale) return
-    // 以 (cx, cy) 为缩放中心
-    const rect = content.getBoundingClientRect()
-    const ox = cx - (rect.left + rect.width / 2)
-    const oy = cy - (rect.top + rect.height / 2)
-    const ratio = newScale / scale
-    panX = ox - ratio * (ox - panX)
-    panY = oy - ratio * (oy - panY)
-    scale = newScale
-    applyTransform(animate)
+  // 屏幕像素坐标转 SVG 坐标（用 getScreenCTM 精确转换，兼容 meet 留白）
+  function screenToSvg(clientX, clientY) {
+    const ctm = svgClone.getScreenCTM()
+    if (!ctm) return [vx0 + vw0 / 2, vy0 + vh0 / 2]
+    const inv = ctm.inverse()
+    return [
+      clientX * inv.a + clientY * inv.c + inv.e,
+      clientX * inv.b + clientY * inv.d + inv.f
+    ]
+  }
+  // 直接设置缩放并保持中心点 (cx, cy) 视口位置不变
+  function setZoom(newZoom, cx, cy) {
+    newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, newZoom))
+    if (newZoom === zoom) { applyViewBox(); return }
+    const curVx = vx0 - panX, curVy = vy0 - panY
+    const curVw = vw0 / zoom, curVh = vh0 / zoom
+    const fx = (cx - curVx) / curVw
+    const fy = (cy - curVy) / curVh
+    const newVw = vw0 / newZoom, newVh = vh0 / newZoom
+    panX = vx0 - (cx - fx * newVw)
+    panY = vy0 - (cy - fy * newVh)
+    zoom = newZoom
+    applyViewBox()
+  }
+  // 以 SVG 坐标 (cx, cy) 为中心缩放，animate=true 时用 rAF 做缓动过渡
+  function zoomAt(targetZoom, cx, cy, animate) {
+    targetZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, targetZoom))
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null }
+    if (!animate || targetZoom === zoom) { setZoom(targetZoom, cx, cy); return }
+    const fromZoom = zoom
+    const startT = performance.now()
+    const dur = 200
+    function step(now) {
+      const t = Math.min(1, (now - startT) / dur)
+      // easeInOutQuad 缓动
+      const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2
+      setZoom(fromZoom + (targetZoom - fromZoom) * ease, cx, cy)
+      if (t < 1) rafId = requestAnimationFrame(step)
+      else rafId = null
+    }
+    rafId = requestAnimationFrame(step)
   }
 
   function resetView() {
-    scale = initScale; panX = 0; panY = 0
-    applyTransform(true)
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null }
+    zoom = 1; panX = 0; panY = 0
+    applyViewBox()
   }
 
   // --- 滚轮缩放 ---
   function onWheel(e) {
     e.preventDefault()
+    const [cx, cy] = screenToSvg(e.clientX, e.clientY)
     const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15
-    zoomAt(scale * factor, e.clientX, e.clientY, false)
+    zoomAt(zoom * factor, cx, cy, false)
   }
 
   // --- 拖拽平移 ---
   function onMouseDown(e) {
     if (e.button !== 0) return
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null }
     dragging = true
     startX = e.clientX; startY = e.clientY
-    startPanX = panX; startPanY = panY
+    sPanX = panX; sPanY = panY
     content.classList.add('dragging')
     e.preventDefault()
   }
   function onMouseMove(e) {
     if (!dragging) return
-    panX = startPanX + (e.clientX - startX)
-    panY = startPanY + (e.clientY - startY)
-    applyTransform(false)
+    const ctm = svgClone.getScreenCTM()
+    if (!ctm || ctm.a === 0) return
+    // 像素位移转 SVG 坐标位移（ctm.a/d 为 svg->屏幕的缩放系数）
+    const dxSvg = (e.clientX - startX) / ctm.a
+    const dySvg = (e.clientY - startY) / ctm.d
+    // viewBox x = vx0 - panX，panX 与位移同向（鼠标左拖 dx<0 -> panX 减小 -> viewBox x 增大 -> 内容左移）
+    panX = sPanX + dxSvg
+    panY = sPanY + dySvg
+    applyViewBox()
   }
   function onMouseUp() {
     if (!dragging) return
@@ -745,12 +880,12 @@ function openMermaidFullscreen(svg) {
     const btn = e.target.closest('[data-mfs]')
     if (!btn) return
     const act = btn.getAttribute('data-mfs')
-    const rect = content.getBoundingClientRect()
-    const cx = rect.left + rect.width / 2
-    const cy = rect.top + rect.height / 2
+    // 工具栏按钮以画布中心为缩放中心
+    const rect = svgClone.getBoundingClientRect()
+    const [cx, cy] = screenToSvg(rect.left + rect.width / 2, rect.top + rect.height / 2)
     switch (act) {
-      case 'zoomIn': zoomAt(scale * 1.3, cx, cy, true); break
-      case 'zoomOut': zoomAt(scale / 1.3, cx, cy, true); break
+      case 'zoomIn': zoomAt(zoom * 1.3, cx, cy, true); break
+      case 'zoomOut': zoomAt(zoom / 1.3, cx, cy, true); break
       case 'reset': resetView(); break
       case 'downloadSvg': {
         const svgString = new XMLSerializer().serializeToString(cleanSvgForExport(svg))
@@ -763,6 +898,7 @@ function openMermaidFullscreen(svg) {
 
   // --- 关闭与清理 ---
   function close() {
+    if (rafId) cancelAnimationFrame(rafId)
     overlay.remove()
     document.removeEventListener('keydown', onKeyDown)
     document.removeEventListener('mousemove', onMouseMove)
@@ -771,8 +907,16 @@ function openMermaidFullscreen(svg) {
   }
   function onKeyDown(e) {
     if (e.key === 'Escape') close()
-    else if (e.key === '+' || e.key === '=') { const r = content.getBoundingClientRect(); zoomAt(scale * 1.3, r.left + r.width / 2, r.top + r.height / 2, true) }
-    else if (e.key === '-') { const r = content.getBoundingClientRect(); zoomAt(scale / 1.3, r.left + r.width / 2, r.top + r.height / 2, true) }
+    else if (e.key === '+' || e.key === '=') {
+      const r = svgClone.getBoundingClientRect()
+      const [cx, cy] = screenToSvg(r.left + r.width / 2, r.top + r.height / 2)
+      zoomAt(zoom * 1.3, cx, cy, true)
+    }
+    else if (e.key === '-') {
+      const r = svgClone.getBoundingClientRect()
+      const [cx, cy] = screenToSvg(r.left + r.width / 2, r.top + r.height / 2)
+      zoomAt(zoom / 1.3, cx, cy, true)
+    }
     else if (e.key === '0') resetView()
   }
 
@@ -788,16 +932,8 @@ function openMermaidFullscreen(svg) {
 
   document.body.appendChild(overlay)
 
-  // 初始适配：如果 SVG 自然尺寸超出视口，缩放适配
-  const availW = window.innerWidth * 0.88
-  const availH = window.innerHeight * 0.80
-  const svgW = svgClone.offsetWidth || 800
-  const svgH = svgClone.offsetHeight || 600
-  if (svgW > availW || svgH > availH) {
-    scale = Math.min(availW / svgW, availH / svgH)
-  }
-  initScale = scale
-  applyTransform(false)
+  // 初始：zoom=1，meet 自动适配视口，无需手动计算适配比例
+  applyViewBox()
 }
 
 // 配置 marked
@@ -856,8 +992,7 @@ export function renderMarkdown(text) {
         `</div>` +
         `<div class="mermaid-toolbar-right">` +
           `<button class="mermaid-action" data-act="copy" title="复制代码"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>` +
-          `<button class="mermaid-action" data-act="downloadSvg" title="下载 SVG"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>` +
-          `<button class="mermaid-action" data-act="downloadPng" title="下载 PNG"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></button>` +
+          `<button class="mermaid-action" data-act="download" title="下载"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>` +
           `<button class="mermaid-action" data-act="fullscreen" title="全屏查看"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button>` +
           `<button class="mermaid-action" data-act="toggleTheme" title="切换主题"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg></button>` +
         `</div>` +
