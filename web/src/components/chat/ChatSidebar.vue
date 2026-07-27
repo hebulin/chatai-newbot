@@ -89,6 +89,8 @@
             </div>
           </div>
         </div>
+        <!-- 版本号展示 -->
+        <div class="sidebar-version">v{{ APP_VERSION }}</div>
       </div>
     </div>
   </aside>
@@ -100,6 +102,7 @@ import { useRouter } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
 import { useAuthStore } from '@/stores/auth'
 import { useTheme } from '@/composables/useTheme'
+import { APP_VERSION } from '@/config/version'
 
 const router = useRouter()
 const chatStore = useChatStore()
