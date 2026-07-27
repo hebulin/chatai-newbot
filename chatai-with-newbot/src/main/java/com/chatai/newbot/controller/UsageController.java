@@ -87,6 +87,35 @@ public class UsageController {
     }
 
     /**
+     * 使用汇总 - 返回总调用次数、输入/输出/思考Token汇总
+     */
+    @GetMapping("/summary")
+    public Map<String, Object> getUsageSummary(
+            @RequestParam(required = false) String username,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate,
+            HttpServletRequest request) {
+        Map<String, Object> result = new HashMap<>();
+        String effectiveUsername = resolveUsernameScope(request, username);
+        List<UsageLog> logs = filterLogs(storageService.getAllUsageLogs(), effectiveUsername, null, startDate, endDate);
+
+        int calls = logs.size();
+        int promptTokens = logs.stream().mapToInt(UsageLog::getPromptTokens).sum();
+        int completionTokens = logs.stream().mapToInt(UsageLog::getCompletionTokens).sum();
+        int reasoningTokens = logs.stream().mapToInt(UsageLog::getReasoningTokens).sum();
+
+        Map<String, Object> data = new HashMap<>();
+        data.put("calls", calls);
+        data.put("promptTokens", promptTokens);
+        data.put("completionTokens", completionTokens);
+        data.put("reasoningTokens", reasoningTokens);
+
+        result.put("success", true);
+        result.put("data", data);
+        return result;
+    }
+
+    /**
      * 筛选选项 - 管理员返回全部用户名/模型名；普通用户仅返回本人及其使用过的模型
      */
     @GetMapping("/filters")
