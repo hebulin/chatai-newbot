@@ -248,6 +248,12 @@ body { display: flex; flex-direction: column; min-height: 100%; }
     height: 100vh;
     overflow: hidden;
 }
+/* 动态视口高度：移动端浏览器底部工具栏显隐时实时跟随，
+   避免 100vh 大于实际可见区域导致输入区下边缘被遮挡；
+   不支持 dvh 的内核沿用上方 100vh 声明 */
+@supports (height: 100dvh) {
+    .chat-page { height: 100dvh; }
+}
 
 /* ============================================
    MAIN LAYOUT
@@ -532,6 +538,17 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
     user-select: none;
 }
 .user-info:hover { border-color: var(--primary); color: var(--fg); background: var(--primary-soft); }
+/* 侧边栏底部版本号展示 */
+.sidebar-version {
+    margin-top: 8px;
+    text-align: center;
+    font-size: 10px;
+    color: var(--fg-4);
+    font-family: var(--mono);
+    letter-spacing: 0.04em;
+    user-select: none;
+    flex-shrink: 0;
+}
 #usernameDisplay { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--sans); text-transform: none; letter-spacing: 0; }
 .user-info-spacer { flex: 1; }
 .user-info-more { display: flex; align-items: center; color: var(--fg-3); transition: color 0.15s; }
@@ -2263,6 +2280,10 @@ textarea.settings-textarea {
         /* 移动端默认隐藏在屏幕外：仅凭 .open 控制抽屉开合。
            修复前基类无 transform，"无类名"状态等于展开，导致侧边栏无法折叠 */
         transform: translateX(-100%);
+    }
+    /* 动态视口高度：跟随浏览器底部工具栏显隐，避免侧边栏底部用户头像被遮挡 */
+    @supports (height: 100dvh) {
+        .sidebar { height: calc(100dvh - 56px); }
     }
     .sidebar.open { transform: translateX(0); }
     .close-sidebar-btn { display: flex; }
