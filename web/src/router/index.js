@@ -1,0 +1,94 @@
+import { createRouter, createWebHistory } from 'vue-router'
+
+const routes = [
+  {
+    path: '/login',
+    name: 'Login',
+    component: () => import('@/views/LoginView.vue'),
+    meta: { public: true, title: '登录' }
+  },
+  {
+    path: '/',
+    name: 'Chat',
+    component: () => import('@/views/ChatView.vue'),
+    meta: { title: '工作台' }
+  },
+  {
+    path: '/admin',
+    component: () => import('@/layout/AdminLayout.vue'),
+    redirect: '/admin/quick-start',
+    meta: { requiresAdmin: true },
+    children: [
+      {
+        path: 'quick-start',
+        name: 'QuickStart',
+        component: () => import('@/views/admin/QuickStart.vue'),
+        meta: { title: '快速接入' }
+      },
+      {
+        path: 'models',
+        name: 'Models',
+        component: () => import('@/views/admin/Models.vue'),
+        meta: { title: '模型管理' }
+      },
+      {
+        path: 'providers',
+        name: 'Providers',
+        component: () => import('@/views/admin/Providers.vue'),
+        meta: { title: '厂商管理' }
+      },
+      {
+        path: 'users',
+        name: 'Users',
+        component: () => import('@/views/admin/Users.vue'),
+        meta: { title: '用户管理' }
+      },
+      {
+        path: 'settings',
+        name: 'Settings',
+        component: () => import('@/views/admin/Settings.vue'),
+        meta: { title: '系统设置' }
+      }
+    ]
+  }
+]
+
+const router = createRouter({
+  history: createWebHistory('/'),
+  routes
+})
+
+// 路由守卫：鉴权
+router.beforeEach(async (to, from, next) => {
+  const token = localStorage.getItem('token')
+
+  // 公开页面（登录页）
+  if (to.meta.public) {
+    // 已登录用户访问登录页 → 跳转到首页
+    if (token) {
+      next('/')
+      return
+    }
+    next()
+    return
+  }
+
+  // 需要登录的页面
+  if (!token) {
+    next('/login')
+    return
+  }
+
+  // 需要管理员权限的页面
+  if (to.meta.requiresAdmin || to.matched.some(r => r.meta.requiresAdmin)) {
+    const role = localStorage.getItem('role')
+    if (role !== 'admin') {
+      next('/')
+      return
+    }
+  }
+
+  next()
+})
+
+export default router

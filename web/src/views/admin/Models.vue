@@ -1,0 +1,584 @@
+<template>
+  <div>
+    <div class="section-header">
+      <div class="section-title">
+        <span class="section-eyebrow">02 / MODELS · 模型</span>
+        <h2>模型管理</h2>
+      </div>
+      <el-button type="primary" @click="showAddModel">
+        <el-icon><Plus /></el-icon> 添加模型
+      </el-button>
+    </div>
+
+    <div class="admin-card">
+      <!-- 筛选栏 -->
+      <div class="filter-bar">
+        <el-input v-model="filters.name" placeholder="名称模糊查询" clearable style="width:180px" @input="applyFilter" />
+        <el-select v-model="filters.providerId" placeholder="全部厂商" clearable style="width:150px" @change="applyFilter">
+          <el-option v-for="opt in providerFilterOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+        </el-select>
+        <el-select v-model="filters.modelId" placeholder="全部模型" clearable filterable style="width:180px" @change="applyFilter">
+          <el-option v-for="opt in modelIdFilterOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+        </el-select>
+        <el-select v-model="filters.thinking" placeholder="思考" clearable style="width:110px" @change="applyFilter">
+          <el-option label="支持" value="1" />
+          <el-option label="不支持" value="0" />
+        </el-select>
+        <el-select v-model="filters.multimodal" placeholder="多模态" clearable style="width:110px" @change="applyFilter">
+          <el-option label="支持" value="1" />
+          <el-option label="不支持" value="0" />
+        </el-select>
+        <el-select v-model="filters.enabled" placeholder="状态" clearable style="width:110px" @change="applyFilter">
+          <el-option label="已启用" value="1" />
+          <el-option label="已禁用" value="0" />
+        </el-select>
+        <el-select v-model="filters.visible" placeholder="可见性" clearable style="width:120px" @change="applyFilter">
+          <el-option label="所有人" value="1" />
+          <el-option label="仅管理员" value="0" />
+        </el-select>
+        <el-button @click="resetFilter">重置</el-button>
+      </div>
+
+      <!-- 模型表格 -->
+      <el-table :data="pagedModels" v-loading="loading" stripe style="width:100%">
+        <el-table-column label="名称" min-width="200">
+          <template #default="{ row }">
+            <div class="model-name-cell">
+              <img v-if="getModelIcon(row)" :src="getModelIcon(row)" class="provider-icon" />
+              <span v-else-if="row.providerIcon" style="font-size:16px;">{{ row.providerIcon }}</span>
+              <span>{{ row.displayName || row.modelId }}</span>
+              <span v-if="row.id === defaultModelId" class="default-badge">默认</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column prop="providerName" label="厂商" width="120" />
+        <el-table-column label="模型" width="180">
+          <template #default="{ row }">
+            <span class="model-id-text">{{ row.modelId }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="思考" width="80" align="center">
+          <template #default="{ row }">
+            <span v-if="row.supportsThinking" class="think-badge">支持</span>
+            <span v-else style="color:var(--ink-4)">不支持</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="多模态" width="80" align="center">
+          <template #default="{ row }">
+            <span v-if="row.supportsMultimodal" class="mm-badge">支持</span>
+            <span v-else style="color:var(--ink-4)">不支持</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="90" align="center">
+          <template #default="{ row }">
+            <span
+              class="status-badge"
+              :class="row.enabled ? 'status-enabled' : 'status-disabled'"
+              @click="toggleModel(row)"
+              style="cursor:pointer"
+            >{{ row.enabled ? '已启用' : '已禁用' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="可见性" width="100" align="center">
+          <template #default="{ row }">
+            <span class="status-badge" :class="row.visibleToAll ? 'vis-all' : 'vis-admin'">
+              {{ row.visibleToAll ? '所有人' : '仅管理员' }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="140" align="center" fixed="right">
+          <template #default="{ row }">
+            <el-button-group>
+              <el-button size="small" text @click="handleDefault(row)">
+                <el-icon :color="row.id === defaultModelId ? '#f59e0b' : undefined">
+                  <StarFilled v-if="row.id === defaultModelId" />
+                  <Star v-else />
+                </el-icon>
+              </el-button>
+              <el-button size="small" text @click="editModel(row)">
+                <el-icon><Edit /></el-icon>
+              </el-button>
+              <el-button size="small" text type="danger" @click="handleDelete(row)">
+                <el-icon><Delete /></el-icon>
+              </el-button>
+            </el-button-group>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="admin-pager">
+        <select v-model.number="modelPageSize" class="admin-pager-size" @change="modelPage = 1">
+          <option :value="10">10条/页</option>
+          <option :value="20">20条/页</option>
+          <option :value="50">50条/页</option>
+        </select>
+        <button class="admin-pager-btn" :disabled="modelPage <= 1" @click="modelPage--">上一页</button>
+        <span class="admin-pager-info">第 {{ modelPage }} / {{ modelTotalPages }} 页 · 共 {{ filteredModels.length }} 条</span>
+        <button class="admin-pager-btn" :disabled="modelPage >= modelTotalPages" @click="modelPage++">下一页</button>
+      </div>
+    </div>
+
+    <!-- 编辑模型弹窗 -->
+    <el-dialog v-model="editVisible" :title="'编辑模型 - ' + (editForm.displayName || editForm.modelId)" width="520px" destroy-on-close>
+      <el-form label-width="90px">
+        <el-form-item label="厂商">
+          <span style="display:flex;align-items:center;gap:8px;">
+            <img v-if="getModelIcon(editForm)" :src="getModelIcon(editForm)" style="width:20px;height:20px;border-radius:4px;" />
+            {{ editForm.providerName || editForm.providerId }}
+          </span>
+        </el-form-item>
+        <div class="form-section-divider"></div>
+        <el-form-item label="协议格式">
+          <span style="font-size:12px;color:#ef4444;">{{ formatProtocol(editForm.protocol) }}</span>
+        </el-form-item>
+        <el-form-item label="API 地址">
+          <el-input v-model="editForm.apiUrl" />
+        </el-form-item>
+        <el-form-item label="API Key">
+          <el-input v-model="editForm.apiKey" placeholder="不修改则留空" />
+        </el-form-item>
+        <el-form-item label="模型名称">
+          <el-input v-model="editForm.displayName" />
+        </el-form-item>
+        <el-form-item label="模型ID">
+          <el-input v-model="editForm.modelId" disabled />
+        </el-form-item>
+        <div class="form-section-divider"></div>
+        <el-form-item label="状态">
+          <el-switch v-model="editForm.enabled" />
+        </el-form-item>
+        <el-form-item label="可见性">
+          <el-switch v-model="editForm.visibleToAll" active-text="所有人" inactive-text="仅管理员" />
+        </el-form-item>
+        <el-form-item label="思考模式">
+          <el-switch v-model="editForm.supportsThinking" />
+        </el-form-item>
+        <el-form-item label="多模态">
+          <el-switch v-model="editForm.supportsMultimodal" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveModel" :loading="submitting">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 添加模型弹窗 -->
+    <el-dialog v-model="addVisible" title="添加模型" width="540px" destroy-on-close>
+      <el-form label-width="90px">
+        <el-form-item label="厂商">
+          <el-select v-model="addForm.providerId" style="width:100%" @change="onProviderChange">
+            <el-option v-for="p in presetProviders" :key="p.id" :label="p.name" :value="p.id" />
+            <el-option label="自定义厂商..." value="__custom__" />
+          </el-select>
+        </el-form-item>
+        <!-- 自定义厂商名称 -->
+        <el-form-item v-if="addForm.providerId === '__custom__'" label="厂商名称">
+          <el-input v-model="addForm.customProviderName" placeholder="如：OpenAI" />
+        </el-form-item>
+        <!-- 内置厂商模型选择 -->
+        <el-form-item v-if="addForm.providerId !== '__custom__' && addForm.providerId" label="模型">
+          <el-select v-model="addForm.modelSelect" style="width:100%" @change="onModelSelectChange">
+            <el-option v-for="pm in currentProviderModels" :key="pm.id" :label="pm.name + (pm.supportsThinking ? ' (思考)' : '') + (pm.supportsMultimodal ? ' (多模态)' : '') + (isModelAdded(pm.id) ? ' ✓已接入' : '')" :value="pm.id" />
+            <el-option label="自定义模型..." value="__custom__" />
+          </el-select>
+        </el-form-item>
+
+        <div class="form-section-divider"></div>
+
+        <!-- 协议格式 -->
+        <el-form-item v-if="addForm.providerId === '__custom__'" label="协议格式">
+          <el-select v-model="addForm.protocol" style="width:100%">
+            <el-option label="OpenAI 兼容" value="openai" />
+            <el-option label="Anthropic" value="anthropic" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-else-if="addForm.providerId" label="协议格式">
+          <span style="font-size:12px;color:#ef4444;">{{ formatProtocol(currentProvider?.protocol) }}</span>
+        </el-form-item>
+
+        <!-- 预设模型字段 -->
+        <template v-if="isPresetMode">
+          <el-form-item label="API 地址">
+            <el-input v-model="addForm.apiUrl" />
+          </el-form-item>
+          <el-form-item label="API Key">
+            <el-input v-model="addForm.apiKey" placeholder="sk-..." />
+          </el-form-item>
+          <el-form-item label="模型名称">
+            <el-input v-model="addForm.displayName" />
+          </el-form-item>
+          <el-form-item label="模型ID">
+            <el-input v-model="addForm.modelId" disabled />
+          </el-form-item>
+          <div class="form-section-divider"></div>
+          <el-form-item label="可见性">
+            <el-switch v-model="addForm.visibleToAll" active-text="所有人" inactive-text="仅管理员" />
+          </el-form-item>
+          <el-form-item label="能力">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <span :style="{ fontSize:'13px', padding:'4px 12px', borderRadius:'6px', background: selectedPresetModel?.supportsThinking ? 'rgba(16,185,129,.15)' : 'rgba(100,116,139,.1)', color: selectedPresetModel?.supportsThinking ? '#10b981' : '#64748b' }">
+                思考模式：{{ selectedPresetModel?.supportsThinking ? '支持' : '不支持' }}
+              </span>
+              <span :style="{ fontSize:'13px', padding:'4px 12px', borderRadius:'6px', background: selectedPresetModel?.supportsMultimodal ? 'rgba(99,102,241,.15)' : 'rgba(100,116,139,.1)', color: selectedPresetModel?.supportsMultimodal ? '#818cf8' : '#64748b' }">
+                多模态：{{ selectedPresetModel?.supportsMultimodal ? '支持' : '不支持' }}
+              </span>
+            </div>
+          </el-form-item>
+        </template>
+
+        <!-- 自定义模型字段 -->
+        <template v-else>
+          <el-form-item label="API 地址">
+            <el-input v-model="addForm.apiUrl" placeholder="API地址" />
+          </el-form-item>
+          <el-form-item label="API Key">
+            <el-input v-model="addForm.apiKey" placeholder="sk-..." />
+          </el-form-item>
+          <el-form-item label="模型名称">
+            <el-input v-model="addForm.displayName" placeholder="可选，默认使用模型ID" />
+          </el-form-item>
+          <el-form-item label="模型ID">
+            <el-input v-model="addForm.modelId" placeholder="如 gpt-4o" />
+          </el-form-item>
+          <div class="form-section-divider"></div>
+          <el-form-item label="可见性">
+            <el-switch v-model="addForm.visibleToAll" active-text="所有人" inactive-text="仅管理员" />
+          </el-form-item>
+          <el-form-item label="思考模式">
+            <el-switch v-model="addForm.supportsThinking" />
+          </el-form-item>
+          <el-form-item label="多模态">
+            <el-switch v-model="addForm.supportsMultimodal" />
+          </el-form-item>
+        </template>
+      </el-form>
+      <template #footer>
+        <el-button @click="addVisible = false">取消</el-button>
+        <el-button type="primary" @click="submitAddModel" :loading="submitting">添加</el-button>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Edit, Delete, Star, StarFilled } from '@element-plus/icons-vue'
+import { getModels, addModel, updateModel, deleteModel, setDefaultModel, clearDefaultModel } from '@/api/models'
+import { getProviders } from '@/api/providers'
+
+const providerIconMap = {
+  deepseek: '/icons/deepseek-icon.svg',
+  qwen: '/icons/qwen-icon.svg',
+  kimi: '/icons/kimi-icon.svg',
+  zhipu: '/icons/zhipu-icon.svg',
+  minimax: '/icons/minimax-icon.svg',
+  doubao: '/icons/doubao-icon.svg'
+}
+
+const route = useRoute()
+const router = useRouter()
+const loading = ref(false)
+const submitting = ref(false)
+const allModels = ref([])
+const allProviders = ref([])
+const defaultModelId = ref(null)
+
+// 筛选
+const filters = ref({ name: '', providerId: '', modelId: '', thinking: '', multimodal: '', enabled: '', visible: '' })
+
+const presetProviders = computed(() => allProviders.value.filter(p => p.type !== 'custom'))
+
+const providerFilterOptions = computed(() => {
+  const map = {}
+  allModels.value.forEach(m => {
+    const pid = m.providerId || '__custom__'
+    if (!map[pid]) map[pid] = m.providerName || pid
+  })
+  return Object.keys(map).sort().map(k => ({ value: k, label: map[k] }))
+})
+
+const modelIdFilterOptions = computed(() => {
+  const seen = {}
+  const opts = []
+  allModels.value.forEach(m => {
+    if (m.modelId && !seen[m.modelId]) {
+      seen[m.modelId] = true
+      opts.push({ value: m.modelId, label: m.displayName || m.modelId })
+    }
+  })
+  return opts
+})
+
+const modelPage = ref(1)
+const modelPageSize = ref(10)
+
+const filteredModels = computed(() => {
+  return allModels.value.filter(m => {
+    if (filters.value.name) {
+      const nm = (m.displayName || m.modelId || '').toLowerCase()
+      if (!nm.includes(filters.value.name.toLowerCase())) return false
+    }
+    if (filters.value.providerId && (m.providerId || '__custom__') !== filters.value.providerId) return false
+    if (filters.value.modelId && m.modelId !== filters.value.modelId) return false
+    if (filters.value.thinking !== '' && filters.value.thinking !== null) {
+      if ((m.supportsThinking ? '1' : '0') !== filters.value.thinking) return false
+    }
+    if (filters.value.multimodal !== '' && filters.value.multimodal !== null) {
+      if ((m.supportsMultimodal ? '1' : '0') !== filters.value.multimodal) return false
+    }
+    if (filters.value.enabled !== '' && filters.value.enabled !== null) {
+      if ((m.enabled ? '1' : '0') !== filters.value.enabled) return false
+    }
+    if (filters.value.visible !== '' && filters.value.visible !== null) {
+      if ((m.visibleToAll ? '1' : '0') !== filters.value.visible) return false
+    }
+    return true
+  })
+})
+
+const pagedModels = computed(() => {
+  const start = (modelPage.value - 1) * modelPageSize.value
+  return filteredModels.value.slice(start, start + modelPageSize.value)
+})
+const modelTotalPages = computed(() => Math.max(1, Math.ceil(filteredModels.value.length / modelPageSize.value)))
+
+function applyFilter() { modelPage.value = 1 }
+function resetFilter() {
+  filters.value = { name: '', providerId: '', modelId: '', thinking: '', multimodal: '', enabled: '', visible: '' }
+  modelPage.value = 1
+}
+
+function getModelIcon(model) {
+  if (model.providerId && providerIconMap[model.providerId]) return providerIconMap[model.providerId]
+  return null
+}
+
+function formatProtocol(protocol) {
+  return protocol === 'anthropic' ? 'Anthropic' : 'OpenAI 兼容'
+}
+
+// 切换启用/禁用
+async function toggleModel(row) {
+  const res = await updateModel(row.id, { ...row, enabled: !row.enabled })
+  if (res?.success) {
+    ElMessage.success(!row.enabled ? '已启用' : '已禁用')
+    await loadData()
+  }
+}
+
+// 设置/取消默认
+async function handleDefault(row) {
+  if (row.id === defaultModelId.value) {
+    const res = await clearDefaultModel()
+    if (res?.success) { ElMessage.success(res.message || '已取消默认模型'); await loadData() }
+  } else {
+    const res = await setDefaultModel(row.id)
+    if (res?.success) { ElMessage.success(res.message || '已设为默认模型'); await loadData() }
+  }
+}
+
+// 删除
+async function handleDelete(row) {
+  try {
+    await ElMessageBox.confirm(`确定删除模型 "${row.displayName || row.modelId}" 吗？`, '确认删除', { type: 'warning' })
+    const res = await deleteModel(row.id)
+    if (res?.success) { ElMessage.success('已删除'); await loadData() }
+    else ElMessage.error(res?.message || '删除失败')
+  } catch { /* cancelled */ }
+}
+
+// ===== 编辑模型 =====
+const editVisible = ref(false)
+const editForm = ref({})
+
+function editModel(row) {
+  editForm.value = { ...row }
+  editVisible.value = true
+}
+
+async function saveModel() {
+  submitting.value = true
+  try {
+    const payload = { ...editForm.value }
+    if (!payload.apiKey || payload.apiKey.includes('*')) delete payload.apiKey
+    const res = await updateModel(editForm.value.id, payload)
+    if (res?.success) {
+      ElMessage.success('保存成功')
+      editVisible.value = false
+      await loadData()
+    } else {
+      ElMessage.error(res?.message || '保存失败')
+    }
+  } finally {
+    submitting.value = false
+  }
+}
+
+// ===== 添加模型 =====
+const addVisible = ref(false)
+const addForm = ref({
+  providerId: '',
+  customProviderName: '',
+  modelSelect: '',
+  protocol: 'openai',
+  apiUrl: '',
+  apiKey: '',
+  displayName: '',
+  modelId: '',
+  visibleToAll: true,
+  supportsThinking: false,
+  supportsMultimodal: false
+})
+
+const currentProvider = computed(() => presetProviders.value.find(p => p.id === addForm.value.providerId))
+const currentProviderModels = computed(() => currentProvider.value?.models || [])
+const selectedPresetModel = computed(() => currentProviderModels.value.find(pm => pm.id === addForm.value.modelSelect))
+const isPresetMode = computed(() => addForm.value.providerId !== '__custom__' && addForm.value.modelSelect && addForm.value.modelSelect !== '__custom__')
+
+function isModelAdded(modelId) {
+  return allModels.value.some(m => m.providerId === addForm.value.providerId && m.modelId === modelId)
+}
+
+function showAddModel() {
+  addForm.value = { providerId: '', customProviderName: '', modelSelect: '', protocol: 'openai', apiUrl: '', apiKey: '', displayName: '', modelId: '', visibleToAll: true, supportsThinking: false, supportsMultimodal: false }
+  addVisible.value = true
+}
+
+function onProviderChange() {
+  addForm.value.modelSelect = ''
+  addForm.value.apiUrl = ''
+  addForm.value.displayName = ''
+  addForm.value.modelId = ''
+  if (addForm.value.providerId !== '__custom__' && currentProvider.value) {
+    addForm.value.apiUrl = currentProvider.value.defaultApiUrl || ''
+    // 默认选第一个预设模型
+    const models = currentProvider.value.models || []
+    if (models.length > 0) {
+      addForm.value.modelSelect = models[0].id
+      onModelSelectChange(models[0].id)
+    } else {
+      addForm.value.modelSelect = '__custom__'
+    }
+  }
+}
+
+function onModelSelectChange(val) {
+  if (val === '__custom__') {
+    addForm.value.displayName = ''
+    addForm.value.modelId = ''
+    addForm.value.supportsThinking = false
+    addForm.value.supportsMultimodal = false
+  } else {
+    const pm = currentProviderModels.value.find(m => m.id === val)
+    if (pm) {
+      addForm.value.displayName = pm.name
+      addForm.value.modelId = pm.id
+      addForm.value.apiUrl = currentProvider.value?.defaultApiUrl || ''
+    }
+  }
+}
+
+async function submitAddModel() {
+  const isCustomProvider = addForm.value.providerId === '__custom__'
+  let payload
+
+  if (isCustomProvider) {
+    if (!addForm.value.customProviderName.trim()) { ElMessage.warning('请输入厂商名称'); return }
+    if (!addForm.value.modelId.trim()) { ElMessage.warning('请输入模型ID'); return }
+    if (!addForm.value.apiKey.trim()) { ElMessage.warning('请输入 API Key'); return }
+    payload = {
+      providerId: '__custom__',
+      modelId: addForm.value.modelId.trim(),
+      displayName: addForm.value.displayName.trim() || addForm.value.modelId.trim(),
+      providerName: addForm.value.customProviderName.trim(),
+      apiUrl: addForm.value.apiUrl.trim(),
+      apiKey: addForm.value.apiKey.trim(),
+      protocol: addForm.value.protocol,
+      visibleToAll: addForm.value.visibleToAll,
+      supportsThinking: addForm.value.supportsThinking,
+      supportsMultimodal: addForm.value.supportsMultimodal,
+      enabled: true
+    }
+  } else if (isPresetMode.value) {
+    if (!addForm.value.apiKey.trim()) { ElMessage.warning('请输入 API Key'); return }
+    const pm = selectedPresetModel.value
+    if (!pm) { ElMessage.warning('请选择模型'); return }
+    payload = {
+      providerId: addForm.value.providerId,
+      modelId: pm.id,
+      displayName: addForm.value.displayName.trim() || pm.name,
+      providerName: currentProvider.value.name,
+      providerIcon: currentProvider.value.icon,
+      apiUrl: addForm.value.apiUrl.trim() || currentProvider.value.defaultApiUrl,
+      apiKey: addForm.value.apiKey.trim(),
+      protocol: currentProvider.value.protocol,
+      thinkingParamType: currentProvider.value.thinkingParamType,
+      visibleToAll: addForm.value.visibleToAll,
+      supportsThinking: pm.supportsThinking || false,
+      supportsMultimodal: pm.supportsMultimodal || false,
+      enabled: true
+    }
+  } else {
+    // 内置厂商 + 自定义模型
+    if (!addForm.value.modelId.trim()) { ElMessage.warning('请输入模型ID'); return }
+    if (!addForm.value.apiKey.trim()) { ElMessage.warning('请输入 API Key'); return }
+    payload = {
+      providerId: addForm.value.providerId,
+      modelId: addForm.value.modelId.trim(),
+      displayName: addForm.value.displayName.trim() || addForm.value.modelId.trim(),
+      providerName: currentProvider.value?.name,
+      providerIcon: currentProvider.value?.icon,
+      apiUrl: addForm.value.apiUrl.trim() || currentProvider.value?.defaultApiUrl,
+      apiKey: addForm.value.apiKey.trim(),
+      protocol: currentProvider.value?.protocol,
+      thinkingParamType: currentProvider.value?.thinkingParamType,
+      visibleToAll: addForm.value.visibleToAll,
+      supportsThinking: addForm.value.supportsThinking,
+      supportsMultimodal: addForm.value.supportsMultimodal,
+      enabled: true
+    }
+  }
+
+  submitting.value = true
+  try {
+    const res = await addModel(payload)
+    if (res?.success) {
+      ElMessage.success('添加成功')
+      addVisible.value = false
+      await loadData()
+    } else {
+      ElMessage.error(res?.message || '添加失败')
+    }
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function loadData() {
+  loading.value = true
+  try {
+    const [mRes, pRes] = await Promise.all([getModels(), getProviders()])
+    if (mRes?.success) {
+      allModels.value = mRes.data || []
+      defaultModelId.value = mRes.defaultModelId || null
+    }
+    if (pRes?.success) allProviders.value = pRes.data || []
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(async () => {
+  await loadData()
+  // 接收快速接入页厂商卡片下钻的过滤参数，按厂商过滤模型列表
+  const pid = route.query.providerId
+  if (pid) {
+    filters.value.providerId = String(pid)
+    applyFilter()
+    // 清除 query，避免刷新或返回时重复应用过滤
+    router.replace({ path: '/admin/models' })
+  }
+})
+</script>

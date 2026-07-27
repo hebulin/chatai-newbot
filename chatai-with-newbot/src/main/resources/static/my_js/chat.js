@@ -229,7 +229,7 @@ function doLogout() {
     window.location.href = '/login.html';
 }
 
-function goAdmin() { window.location.href = '/admin.html'; }
+function goAdmin() { window.location.href = '/admin/'; }
 
 // ===== 模型加载 =====
 function loadModels() {
