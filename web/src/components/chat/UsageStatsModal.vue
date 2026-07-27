@@ -12,26 +12,6 @@
           <button class="modal-close" @click="$emit('close')">✕</button>
         </div>
 
-        <!-- 顶部四维汇总卡片（两个 Tab 均可见，打开即加载填充） -->
-        <div class="us-summary-strip">
-          <div class="us-stat-card" :class="{ tick: tickFlags.count }">
-            <div class="us-stat-num">{{ statsSummary.count }}</div>
-            <div class="us-stat-label">调用次数 · CALLS</div>
-          </div>
-          <div class="us-stat-card" :class="{ tick: tickFlags.promptTokens }">
-            <div class="us-stat-num">{{ fmtShort(statsSummary.promptTokens) }}</div>
-            <div class="us-stat-label">输入Token · INPUT</div>
-          </div>
-          <div class="us-stat-card" :class="{ tick: tickFlags.completionTokens }">
-            <div class="us-stat-num">{{ fmtShort(statsSummary.completionTokens) }}</div>
-            <div class="us-stat-label">输出Token · OUTPUT</div>
-          </div>
-          <div class="us-stat-card" :class="{ tick: tickFlags.reasoningTokens }">
-            <div class="us-stat-num">{{ fmtShort(statsSummary.reasoningTokens) }}</div>
-            <div class="us-stat-label">思考Token · REASONING</div>
-          </div>
-        </div>
-
         <!-- 子Tab -->
         <div class="us-body">
           <div class="us-subtab-nav">
@@ -57,12 +37,18 @@
                 </select>
               </div>
               <div class="us-field">
-                <label class="us-label">开始日期</label>
-                <input type="date" v-model="usageFilter.startDate" class="us-input" />
-              </div>
-              <div class="us-field">
-                <label class="us-label">结束日期</label>
-                <input type="date" v-model="usageFilter.endDate" class="us-input" />
+                <label class="us-label">日期范围</label>
+                <el-date-picker
+                  v-model="usageDateRange"
+                  type="daterange"
+                  range-separator="至"
+                  start-placeholder="开始日期"
+                  end-placeholder="结束日期"
+                  value-format="YYYY-MM-DD"
+                  :shortcuts="dateShortcuts"
+                  class="us-date-range"
+                  size="small"
+                />
               </div>
               <div class="us-actions">
                 <button class="us-btn us-btn-primary" @click="searchUsage">搜索</button>
@@ -121,16 +107,42 @@
                 </select>
               </div>
               <div class="us-field">
-                <label class="us-label">开始日期</label>
-                <input type="date" v-model="statsFilter.startDate" class="us-input" />
-              </div>
-              <div class="us-field">
-                <label class="us-label">结束日期</label>
-                <input type="date" v-model="statsFilter.endDate" class="us-input" />
+                <label class="us-label">日期范围</label>
+                <el-date-picker
+                  v-model="statsDateRange"
+                  type="daterange"
+                  range-separator="至"
+                  start-placeholder="开始日期"
+                  end-placeholder="结束日期"
+                  value-format="YYYY-MM-DD"
+                  :shortcuts="dateShortcuts"
+                  class="us-date-range"
+                  size="small"
+                />
               </div>
               <div class="us-actions">
                 <button class="us-btn us-btn-primary" @click="searchStats">搜索</button>
                 <button class="us-btn" @click="resetStatsFilter">重置</button>
+              </div>
+            </div>
+
+            <!-- 四维汇总卡片 -->
+            <div class="us-stat-cards">
+              <div class="us-stat-card" :class="{ tick: tickFlags.count }">
+                <div class="us-stat-num">{{ statsSummary.count }}</div>
+                <div class="us-stat-label">调用次数 · CALLS</div>
+              </div>
+              <div class="us-stat-card" :class="{ tick: tickFlags.promptTokens }">
+                <div class="us-stat-num">{{ fmtShort(statsSummary.promptTokens) }}</div>
+                <div class="us-stat-label">输入Token · INPUT</div>
+              </div>
+              <div class="us-stat-card" :class="{ tick: tickFlags.completionTokens }">
+                <div class="us-stat-num">{{ fmtShort(statsSummary.completionTokens) }}</div>
+                <div class="us-stat-label">输出Token · OUTPUT</div>
+              </div>
+              <div class="us-stat-card" :class="{ tick: tickFlags.reasoningTokens }">
+                <div class="us-stat-num">{{ fmtShort(statsSummary.reasoningTokens) }}</div>
+                <div class="us-stat-label">思考Token · REASONING</div>
               </div>
             </div>
 
@@ -215,7 +227,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import { getUsageLogs, getUserStats, getUsernames } from '@/api/usage'
@@ -244,8 +256,27 @@ const statsTotalPages = ref(1)
 const usernames = ref([])
 const modelNames = ref([])
 
-const usageFilter = ref({ username: '', modelName: '', startDate: '', endDate: '' })
-const statsFilter = ref({ username: '', startDate: '', endDate: '' })
+const usageFilter = ref({ username: '', modelName: '' })
+const statsFilter = ref({ username: '' })
+
+// 日期范围（el-date-picker daterange 绑定数组）
+function getLast30Days() {
+  const end = new Date()
+  const start = new Date()
+  start.setDate(start.getDate() - 29)
+  const fmt = d => d.toISOString().slice(0, 10)
+  return [fmt(start), fmt(end)]
+}
+const usageDateRange = ref(getLast30Days())
+const statsDateRange = ref(getLast30Days())
+
+// 日期快捷选项
+const dateShortcuts = [
+  { text: '今天', value: () => { const d = new Date(); return [d, d] } },
+  { text: '本周', value: () => { const end = new Date(); const start = new Date(); const day = start.getDay() || 7; start.setDate(start.getDate() - day + 1); return [start, end] } },
+  { text: '本月', value: () => { const end = new Date(); const start = new Date(end.getFullYear(), end.getMonth(), 1); return [start, end] } },
+  { text: '最近30天', value: () => { const end = new Date(); const start = new Date(); start.setDate(start.getDate() - 29); return [start, end] } }
+]
 
 // 图表指标（与旧版对齐：曲线 6 指标、柱状 6 指标，含缓存Token/思考模式）
 const lineMetric = ref('count')
@@ -284,12 +315,36 @@ function esc(v) {
   return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
+// 移动端弹窗打开时锁定 body 滚动，防止日期选择器弹出后背景页面可滑动
+let savedScrollY = 0
+function lockBodyScroll() {
+  savedScrollY = window.scrollY
+  document.body.style.position = 'fixed'
+  document.body.style.top = `-${savedScrollY}px`
+  document.body.style.left = '0'
+  document.body.style.right = '0'
+  document.body.style.overflow = 'hidden'
+}
+function unlockBodyScroll() {
+  document.body.style.position = ''
+  document.body.style.top = ''
+  document.body.style.left = ''
+  document.body.style.right = ''
+  document.body.style.overflow = ''
+  window.scrollTo(0, savedScrollY)
+}
+
 // 打开弹窗即加载：筛选下拉 + 使用记录 + 全局汇总图表数据
 onMounted(() => {
+  lockBodyScroll()
   loadFilters()
   loadUsageLogs()
   loadCharts()
   nextTick(setupScrollShadow)
+})
+
+onBeforeUnmount(() => {
+  unlockBodyScroll()
 })
 
 // 加载筛选下拉数据（usernames 仅 admin 用，modelNames 所有用户用）
@@ -312,15 +367,15 @@ function switchToStats() {
   }
 }
 
-// 日期范围校验：≤30 天、结束不早于开始、格式合法；非法返回错误信息否则返回 null
-function validateDateRange(startDate, endDate) {
-  if (startDate && endDate) {
-    const s = new Date(startDate)
-    const e = new Date(endDate)
+// 日期范围校验：≤31 天、结束不早于开始、格式合法；非法返回错误信息否则返回 null
+function validateDateRange(dateRange) {
+  if (dateRange && dateRange.length === 2) {
+    const s = new Date(dateRange[0])
+    const e = new Date(dateRange[1])
     if (isNaN(s.getTime()) || isNaN(e.getTime())) return '日期格式不合法'
     if (s > e) return '结束日期不能早于开始日期'
     const diffDays = (e - s) / 86400000
-    if (diffDays > 30) return '日期范围不能超过 30 天'
+    if (diffDays > 31) return '日期范围不能超过 31 天'
   }
   return null
 }
@@ -348,14 +403,14 @@ watch(statsSummary, (val) => {
 }, { deep: true })
 
 async function loadUsageLogs() {
-  const err = validateDateRange(usageFilter.value.startDate, usageFilter.value.endDate)
+  const err = validateDateRange(usageDateRange.value)
   if (err) { ElMessage.warning(err); return }
   try {
     const params = { page: usagePage.value, size: usageSize.value }
     if (usageFilter.value.username) params.username = usageFilter.value.username
     if (usageFilter.value.modelName) params.modelName = usageFilter.value.modelName
-    if (usageFilter.value.startDate) params.startDate = usageFilter.value.startDate
-    if (usageFilter.value.endDate) params.endDate = usageFilter.value.endDate
+    if (usageDateRange.value && usageDateRange.value[0]) params.startDate = usageDateRange.value[0]
+    if (usageDateRange.value && usageDateRange.value[1]) params.endDate = usageDateRange.value[1]
     const data = await getUsageLogs(params)
     if (data && data.success) {
       usageLogs.value = data.data || []
@@ -372,13 +427,13 @@ function searchUsage() {
 }
 
 async function loadUserStats() {
-  const err = validateDateRange(statsFilter.value.startDate, statsFilter.value.endDate)
+  const err = validateDateRange(statsDateRange.value)
   if (err) { ElMessage.warning(err); return }
   try {
     const params = { page: statsPage.value, size: statsPageSize.value }
     if (statsFilter.value.username) params.username = statsFilter.value.username
-    if (statsFilter.value.startDate) params.startDate = statsFilter.value.startDate
-    if (statsFilter.value.endDate) params.endDate = statsFilter.value.endDate
+    if (statsDateRange.value && statsDateRange.value[0]) params.startDate = statsDateRange.value[0]
+    if (statsDateRange.value && statsDateRange.value[1]) params.endDate = statsDateRange.value[1]
     const data = await getUserStats(params)
     if (data && data.success) {
       userStats.value = data.data || []
@@ -392,8 +447,8 @@ async function loadCharts() {
   try {
     const params = { getAll: true, size: 10000 }
     if (statsFilter.value.username) params.username = statsFilter.value.username
-    if (statsFilter.value.startDate) params.startDate = statsFilter.value.startDate
-    if (statsFilter.value.endDate) params.endDate = statsFilter.value.endDate
+    if (statsDateRange.value && statsDateRange.value[0]) params.startDate = statsDateRange.value[0]
+    if (statsDateRange.value && statsDateRange.value[1]) params.endDate = statsDateRange.value[1]
     const data = await getUserStats(params)
     if (data && data.success) {
       chartData.value = data.data || []
@@ -403,7 +458,7 @@ async function loadCharts() {
 
 // 用户统计搜索：校验日期 + 重置页码 + 加载列表与图表
 function searchStats() {
-  const err = validateDateRange(statsFilter.value.startDate, statsFilter.value.endDate)
+  const err = validateDateRange(statsDateRange.value)
   if (err) { ElMessage.warning(err); return }
   statsPage.value = 1
   loadUserStats()
@@ -411,13 +466,15 @@ function searchStats() {
 }
 
 function resetUsageFilter() {
-  usageFilter.value = { username: '', modelName: '', startDate: '', endDate: '' }
+  usageFilter.value = { username: '', modelName: '' }
+  usageDateRange.value = getLast30Days()
   usagePage.value = 1
   loadUsageLogs()
 }
 
 function resetStatsFilter() {
-  statsFilter.value = { username: '', startDate: '', endDate: '' }
+  statsFilter.value = { username: '' }
+  statsDateRange.value = getLast30Days()
   searchStats()
 }
 
@@ -544,6 +601,8 @@ function buildBarSvg(labels, values, metric) {
   align-items: center;
   justify-content: center;
   background: rgba(0,0,0,0.5);
+  touch-action: none;
+  overscroll-behavior: none;
 }
 .us-modal-container {
   background: var(--bg-2, #1e1e2e);
@@ -592,15 +651,7 @@ function buildBarSvg(labels, values, metric) {
   cursor: pointer;
   font-size: 16px;
 }
-/* 顶部汇总卡片条 */
-.us-summary-strip {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--border, #333);
-  background: var(--paper, #252536);
-}
+/* 汇总卡片（用户统计tab内） */
 .us-stat-cards {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -644,6 +695,8 @@ function buildBarSvg(labels, values, metric) {
   flex: 1;
   overflow-y: auto;
   padding: 16px 20px;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 .us-subtab-nav {
   display: flex;
@@ -861,4 +914,88 @@ function buildBarSvg(labels, values, metric) {
 .us-chart-canvas :deep(.us-chart-axis-label) { fill: var(--ink-3, #999); font-size: 11px; }
 .us-chart-canvas :deep(.us-chart-point) { transition: transform 0.15s; cursor: pointer; transform-box: fill-box; transform-origin: center; }
 .us-chart-canvas :deep(.us-chart-point:hover) { transform: scale(1.5); }
+/* 日期范围选择器暗色适配 */
+.us-date-range {
+  --el-date-editor-width: 240px;
+}
+.us-date-range :deep(.el-input__wrapper) {
+  background: var(--paper, #252536);
+  border-color: var(--border, #333);
+  box-shadow: none;
+}
+.us-date-range :deep(.el-input__inner) {
+  color: var(--ink, #eee);
+  font-size: 12px;
+}
+.us-date-range :deep(.el-range-separator) {
+  color: var(--ink-3, #999);
+  font-size: 12px;
+}
+.us-date-range :deep(.el-range-input) {
+  color: var(--ink, #eee);
+  font-size: 12px;
+  background: transparent;
+}
+.us-date-range :deep(.el-range__icon),
+.us-date-range :deep(.el-range__close-icon) {
+  color: var(--ink-3, #999);
+}
+</style>
+
+<!-- 全局样式：约束 el-date-picker 弹出面板在移动端不引起背景滚动 -->
+<style>
+.el-picker-panel,
+.el-date-range-picker {
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+.el-picker-panel * {
+  overscroll-behavior: contain;
+}
+
+/* 移动端日期范围选择器适配：默认双列日历(table-cell 并排)+左侧快捷栏(absolute width:110px)
+   面板宽 646px，窄屏严重溢出；改为单列日历上下堆叠 + 顶部水平滚动快捷栏，
+   面板宽度 min(360px, 视口-16px) 适配窄屏 */
+@media (max-width: 768px) {
+  .el-date-range-picker {
+    width: min(360px, calc(100vw - 16px)) !important;
+  }
+  .el-date-range-picker .el-picker-panel__body {
+    min-width: 0 !important;
+  }
+  /* 两个日历从 table-cell 并排改为 block 上下堆叠 */
+  .el-date-range-picker__content {
+    display: block !important;
+    width: 100% !important;
+  }
+  .el-date-range-picker__content.is-left {
+    border-right: none !important;
+    border-bottom: 1px solid var(--el-datepicker-inner-border-color, var(--el-border-color-light)) !important;
+  }
+  /* 月份标题左右内边距由 50px 收窄为 20px，防止窄屏标题文字溢出 */
+  .el-date-range-picker__content .el-date-range-picker__header div {
+    margin-left: 20px !important;
+    margin-right: 20px !important;
+  }
+  /* 快捷栏从左侧绝对定位(width:110px) 改为顶部水平滚动条 */
+  .el-picker-panel__sidebar {
+    position: static !important;
+    width: 100% !important;
+    height: auto !important;
+    padding: 6px 0 !important;
+    display: flex !important;
+    overflow-x: auto !important;
+    border-right: none !important;
+    border-bottom: 1px solid var(--el-datepicker-inner-border-color, var(--el-border-color-light)) !important;
+  }
+  .el-picker-panel__shortcut {
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+  }
+  /* body 不再为左侧快捷栏让出 110px 左边距 */
+  .el-picker-panel__sidebar + .el-picker-panel__body,
+  .el-picker-panel [slot=sidebar] + .el-picker-panel__body {
+    margin-left: 0 !important;
+  }
+}
 </style>

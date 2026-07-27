@@ -385,4 +385,40 @@ function confirmDeleteAll() {
   color: var(--ink-3, #999);
   margin-top: 4px;
 }
+
+/* === 移动端：侧栏改为顶部水平标签栏 === */
+@media (max-width: 480px) {
+  .modal-container {
+    width: 96%;
+    max-height: 90vh;
+  }
+  .settings-modal {
+    flex-direction: column;
+  }
+  .settings-sidebar {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    border-right: none;
+    border-bottom: 1px solid var(--border, #333);
+    padding: 8px 12px;
+    gap: 6px;
+    overflow-x: auto;
+    flex-shrink: 0;
+  }
+  .settings-menu-item {
+    white-space: nowrap;
+    flex-shrink: 0;
+    padding: 8px 12px;
+    font-size: 12px;
+    margin-bottom: 0;
+  }
+  .settings-content {
+    padding: 16px 14px;
+  }
+  .data-mgmt-row {
+    flex-wrap: wrap;
+  }
+}
 </style>

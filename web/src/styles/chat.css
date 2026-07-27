@@ -953,9 +953,8 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
 }
 .mermaid-toolbar {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
+    flex-direction: column; /* 两行布局：上行类型标签+视图/代码 tab，下行功能按钮 */
+    gap: 6px;
     padding: 6px 10px;
     background: var(--surface-2);
     border-bottom: 1px solid var(--border);
@@ -963,12 +962,14 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
 .mermaid-toolbar-left {
     display: flex;
     align-items: center;
+    justify-content: space-between; /* 类型标签靠左，视图/代码 tab 靠右 */
     gap: 10px;
     min-width: 0;
 }
 .mermaid-toolbar-right {
     display: flex;
     align-items: center;
+    justify-content: flex-end; /* 功能按钮靠右 */
     gap: 4px;
     flex-shrink: 0;
 }
@@ -1030,6 +1031,13 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
     background: var(--primary-soft);
 }
 .mermaid-action.success { color: var(--good); }
+/* mermaid 工具栏按钮按视图/代码模式显隐：
+   视图模式(默认)显 下载/主题/全屏，隐 复制代码；代码模式反之 */
+.mermaid-container .mermaid-action[data-act="copy"] { display: none; }
+.mermaid-container.mermaid-mode-code .mermaid-action[data-act="copy"] { display: flex; }
+.mermaid-container.mermaid-mode-code .mermaid-action[data-act="download"],
+.mermaid-container.mermaid-mode-code .mermaid-action[data-act="fullscreen"],
+.mermaid-container.mermaid-mode-code .mermaid-action[data-act="toggleTheme"] { display: none; }
 .mermaid-scroll-wrapper {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
@@ -1050,8 +1058,6 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
 .mermaid-scroll-wrapper.interactive .mermaid-view pre.mermaid svg {
     width: 100%;
     height: auto;
-    transform-origin: 0 0;
-    will-change: transform;
     user-select: none;
     -webkit-user-drag: none;
 }
@@ -1141,6 +1147,43 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
 [data-theme="light"] .mermaid-theme-menu-item { color: #64748b; }
 [data-theme="light"] .mermaid-theme-menu-item:hover { background: rgba(0, 0, 0, 0.04); color: #1e293b; }
 [data-theme="light"] .mermaid-theme-menu-item.active { color: #6366f1; }
+/* mermaid 下载选项菜单（SVG/PNG） */
+.mermaid-download-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    background: #1e293b;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 4px;
+    min-width: 120px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    z-index: 100;
+    display: none;
+}
+[data-theme="light"] .mermaid-download-menu {
+    background: #ffffff;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+}
+.mermaid-download-menu.active { display: block; }
+.mermaid-download-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: #a1a1aa;
+    cursor: pointer;
+    border-radius: 5px;
+    transition: all 0.15s;
+}
+.mermaid-download-menu-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #e0e0e0;
+}
+[data-theme="light"] .mermaid-download-menu-item { color: #64748b; }
+[data-theme="light"] .mermaid-download-menu-item:hover { background: rgba(0, 0, 0, 0.04); color: #1e293b; }
 /* 流式生成中状态 */
 .mermaid-container.streaming .mermaid-toolbar { border-bottom-color: var(--border); }
 .mermaid-streaming-tip {
@@ -1259,8 +1302,8 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
 .mermaid-fullscreen-content.dragging { cursor: grabbing; }
 .mermaid-fullscreen-content .mfs-svg {
     background: transparent;
-    transform-origin: center center;
-    will-change: transform;
+    width: 100%;
+    height: 100%;
     pointer-events: none;
     max-width: none;
     max-height: none;
@@ -2243,6 +2286,7 @@ textarea.settings-textarea {
     .settings-sidebar {
         width: 100%;
         flex-direction: row;
+        flex-wrap: nowrap;
         border-right: none;
         border-bottom: 1px solid var(--border);
         padding: 8px 12px;
@@ -2252,6 +2296,7 @@ textarea.settings-textarea {
     }
     .settings-menu-item {
         white-space: nowrap;
+        flex-shrink: 0;
         padding: 8px 12px;
         font-size: 11px;
     }
@@ -2324,16 +2369,39 @@ textarea.settings-textarea {
         line-height: 1.4;
     }
     .model-cascader-popper .cascader-node-label {
-        font-size: 13px;
+        font-size: 12.5px;
     }
+}
+
+/* === 移动端字号/行距/间距系统性优化（≤768px）：收紧字号与留白，避免内容过大显示不全 === */
+@media (max-width: 768px) {
+    /* 消息气泡：字号略降、行高收紧、padding 减小 */
+    .msg-bubble { font-size: 13px; line-height: 1.6; padding: 10px 13px; }
+    .msg-wrapper { margin-bottom: 20px; }
+    .msg-row { gap: 10px; }
+    .msg-avatar { width: 28px; height: 28px; }
+    /* 时间/token 信息左右内边距跟随头像缩小（原 48px） */
+    .msg-time-top, .msg-footer { padding-left: 38px; padding-right: 38px; }
+    /* 思考块、代码块字号收紧 */
+    .thinking-body { font-size: 12px; line-height: 1.5; }
+    .msg-bubble pre code { font-size: 11.5px; line-height: 1.55; }
+    /* 会话列表项字号/padding 收紧 */
+    .chat-item { font-size: 12.5px; padding: 8px 10px; }
+    /* 输入框：工具栏按钮缩小、textarea padding 收紧（字号保持 16px 防 iOS 聚焦缩放） */
+    .think-icon-btn, .upload-image-btn { width: 26px; height: 26px; }
+    .input-textarea-wrap textarea { padding: 8px 14px; }
+    .input-inner-toolbar { gap: 6px; padding: 5px 8px 7px; }
+    .model-select-area .el-cascader .el-input__inner { font-size: 11.5px; }
 }
 
 @media (max-width: 480px) {
     .chat-container { padding: 12px; }
-    .msg-bubble { padding: 12px 14px; font-size: 14px; }
+    .msg-bubble { padding: 9px 11px; font-size: 12.5px; line-height: 1.55; }
     .msg-row { gap: 10px; }
     .msg-avatar { width: 28px; height: 28px; }
     .meta-tag { font-size: 8px; }
+    .msg-wrapper { margin-bottom: 18px; }
+    .msg-bubble pre code { font-size: 11px; }
     .input-footer { flex-direction: column; gap: 4px; }
     .input-footer .foot-c { order: 1; }
     .input-footer .foot-r { order: 2; min-width: 0; }
