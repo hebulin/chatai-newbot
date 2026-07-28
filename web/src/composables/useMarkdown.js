@@ -1,4 +1,5 @@
 import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/atom-one-dark.css'
 
@@ -42,7 +43,9 @@ function ensureMermaidInit(themeKey) {
     mermaidModule.initialize({
       startOnLoad: false,
       theme: themeKey || 'default',
-      securityLevel: 'loose'
+      // strict：禁用图表内脚本/事件处理器并对标签 HTML 转义，防止 AI 生成的
+      // mermaid 代码在分享页等公开场景触发 XSS；仍为内联 SVG，不影响自定义工具栏
+      securityLevel: 'strict'
     })
     mermaidInitialized = true
     lastInitTheme = themeKey
@@ -1027,7 +1030,10 @@ export function renderMarkdown(text) {
     html = html.replace('%%STREAMING_MERMAID_' + idx + '%%', streamingHtml)
   })
 
-  return html
+  // XSS 防护：marked 默认原样输出 Markdown 中的裸 HTML，AI 回复内容经 v-html 渲染，
+  // 若含 <script>/onerror 等会造成 XSS（分享页为公开场景，风险尤甚）。用 DOMPurify
+  // 清洗，剥离脚本与事件处理器，同时保留 mermaid 工具栏所需的 data-* 属性与内联 SVG。
+  return DOMPurify.sanitize(html, { ADD_ATTR: ['target'], ADD_TAGS: ['use'] })
 }
 
 // 下载媒体文件（图片/视频）：fetch 转 blob 触发下载，跨域失败回退直接打开链接

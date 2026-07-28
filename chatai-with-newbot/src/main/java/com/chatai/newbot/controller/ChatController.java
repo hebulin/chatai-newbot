@@ -404,11 +404,25 @@ public class ChatController {
             result.put("message", "模型不可用");
             return result;
         }
-        if (!Boolean.TRUE.equals(config.getVisibleToAll()) && !user.isAdmin()
-                && !user.getAllowedModelIds().contains(config.getId())) {
-            result.put("success", false);
-            result.put("message", "无权使用该模型");
-            return result;
+        // 权限判定与 /chat 语义保持一致：admin 不限；配置了非空白名单的用户仅限白名单内模型；
+        // 未配置白名单则可用所有公开模型。注意 allowedModelIds 可能为 null，需先判空防 NPE。
+        if (!user.isAdmin()) {
+            List<String> allowed = user.getAllowedModelIds();
+            boolean permitted = (allowed != null && !allowed.isEmpty())
+                    ? allowed.contains(config.getId())
+                    : Boolean.TRUE.equals(config.getVisibleToAll());
+            if (!permitted) {
+                result.put("success", false);
+                result.put("message", "无权使用该模型");
+                return result;
+            }
+            // 短时限流：标题生成同样调用模型 API，纳入每分钟滑动窗口，避免绕过限流
+            int ratePerMinute = storageService.getRateLimitPerMinute();
+            if (!rateLimitService.tryAcquire(user.getId(), ratePerMinute)) {
+                result.put("success", false);
+                result.put("message", "操作过于频繁，请稍后再试");
+                return result;
+            }
         }
         try {
             String title = chatService.generateTitle(modelConfigId, userContent, assistantContent);

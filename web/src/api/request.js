@@ -17,15 +17,18 @@ request.interceptors.request.use(config => {
 })
 
 // 响应拦截器：处理 401/403
+// - 401：登录失效（未登录/过期/账号禁用/IP变更）→ 清除登录态并跳转登录页
+// - 403：仅表示无权限访问某接口（如普通用户误触管理员接口），只提示、不登出
 let authRedirecting = false
 request.interceptors.response.use(
   response => response.data,
   error => {
     const status = error.response?.status
-    if (status === 401 || status === 403) {
+    const reason = error.response?.headers?.['x-auth-reason']
+    // 仅 401、或带鉴权原因头的响应视为会话失效，触发登出跳转
+    if (status === 401 || (status === 403 && reason)) {
       if (!authRedirecting) {
         authRedirecting = true
-        const reason = error.response?.headers?.['x-auth-reason']
         const msg = reason === 'ip_changed' ? '登录IP已变更，请重新登录'
           : reason === 'account_disabled' ? '账号已被禁用，请联系管理员'
           : '登录已过期，请重新登录'
@@ -39,6 +42,11 @@ request.interceptors.response.use(
         }, 1500)
       }
       return Promise.reject(new Error('Auth failed'))
+    }
+    // 纯 403：无权限，仅提示不登出
+    if (status === 403) {
+      ElMessage.error(error.response?.data?.message || '无权限执行此操作')
+      return Promise.reject(new Error('Forbidden'))
     }
     const msg = error.response?.data?.message || error.message || '请求失败'
     ElMessage.error(msg)

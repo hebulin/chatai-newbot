@@ -78,17 +78,16 @@ export function useStreamChat() {
       const read = async () => {
         const result = await reader.read()
         if (result.done) {
-          // 处理buffer中残留数据
-          if (buffer.trim()) {
-            const remainingLine = buffer.trim()
-            if (remainingLine.startsWith('{')) {
-              try {
-                const json = JSON.parse(remainingLine)
-                if (json.error) {
-                  answerContent.value += '\n\n**错误:** ' + (json.error.message || '未知错误')
-                }
-              } catch (e) { /* skip */ }
-            }
+          // 处理 buffer 中残留数据（可能是未以换行结尾的最后一行 data: 事件）
+          let remaining = buffer.trim()
+          if (remaining.startsWith('data:')) remaining = remaining.slice(5).trim()
+          if (remaining && remaining !== '[DONE]' && remaining.startsWith('{')) {
+            try {
+              const json = JSON.parse(remaining)
+              if (json.error) {
+                answerContent.value += '\n\n**错误:** ' + (json.error.message || '未知错误')
+              }
+            } catch (e) { /* skip */ }
           }
           isStreaming.value = false
           // 流结束时若只有思考没有正文（或正文 delta 未触发结算），补结算思考用时
@@ -104,16 +103,20 @@ export function useStreamChat() {
 
         const chunk = decoder.decode(result.value, { stream: true })
         buffer += chunk
-        const lines = buffer.split('data:')
+        // 按行解析 SSE：仅保留最后一行（可能不完整）在 buffer 中，其余整行处理。
+        // 此前用字面量 'data:' 切分，当模型正文本身包含 'data:' 时会解析错乱、内容丢失。
+        const lines = buffer.split('\n')
         buffer = lines.pop() || ''
         let updated = false
 
-        for (const line of lines) {
-          const trimmed = line.trim()
-          if (!trimmed || trimmed === '[DONE]') continue
-          if (trimmed.startsWith('{')) {
+        for (const rawLine of lines) {
+          const line = rawLine.trim()
+          if (!line || !line.startsWith('data:')) continue
+          const payload = line.slice(5).trim()
+          if (!payload || payload === '[DONE]') continue
+          if (payload.startsWith('{')) {
             try {
-              const json = JSON.parse(trimmed)
+              const json = JSON.parse(payload)
               if (json.error) {
                 answerContent.value += '\n\n**错误:** ' + (json.error.message || '未知错误')
                 updated = true

@@ -90,9 +90,9 @@ public class AuthController {
             return result;
         }
 
-        if (password.length() < 4) {
+        if (!isPasswordStrong(password)) {
             result.put("success", false);
-            result.put("message", "密码长度不能少于4个字符");
+            result.put("message", "密码长度至少 8 位，且需同时包含字母和数字");
             return result;
         }
 
@@ -220,9 +220,9 @@ public class AuthController {
             return result;
         }
 
-        if (newPassword.length() < 4) {
+        if (!isPasswordStrong(newPassword)) {
             result.put("success", false);
-            result.put("message", "新密码长度不能少于4个字符");
+            result.put("message", "新密码长度至少 8 位，且需同时包含字母和数字");
             return result;
         }
 
@@ -248,6 +248,23 @@ public class AuthController {
 
     private String getClientIp(HttpServletRequest request) {
         return com.chatai.newbot.config.IpUtils.getClientIp(request);
+    }
+
+    /**
+     * 密码强度校验：至少 8 位，且同时包含字母与数字，降低弱口令被爆破风险。
+     */
+    private boolean isPasswordStrong(String password) {
+        if (password == null || password.length() < 8) {
+            return false;
+        }
+        boolean hasLetter = false;
+        boolean hasDigit = false;
+        for (int i = 0; i < password.length(); i++) {
+            char c = password.charAt(i);
+            if (Character.isLetter(c)) hasLetter = true;
+            else if (Character.isDigit(c)) hasDigit = true;
+        }
+        return hasLetter && hasDigit;
     }
 
     /**

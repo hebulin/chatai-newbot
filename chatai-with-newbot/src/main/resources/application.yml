@@ -35,8 +35,9 @@ server:
 
 logging:
   level:
-    org.springframework.web: DEBUG
-    reactor.netty.http.client: DEBUG
+    # 避免 DEBUG 级别把含 Authorization 头（厂商 API Key）的出站请求细节写入日志
+    org.springframework.web: INFO
+    reactor.netty.http.client: WARN
 
 # DeepSeek AI配置
 ai:

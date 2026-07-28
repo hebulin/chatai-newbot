@@ -60,9 +60,9 @@ public final class ApiKeyCrypto {
             System.arraycopy(cipherText, 0, combined, iv.length, cipherText.length);
             return PREFIX + Base64.getEncoder().encodeToString(combined);
         } catch (Exception e) {
-            // 加密失败时保留明文落盘（保证功能可用），仅记录告警
-            log.error("API Key 加密失败，本次按明文存储", e);
-            return plain;
+            // 失败时快速报错（fail-closed），避免静默将明文 Key 落盘造成拖库泄露
+            log.error("API Key 加密失败，为防止明文存储已中止本次保存", e);
+            throw new IllegalStateException("API Key 加密失败，未保存", e);
         }
     }
 

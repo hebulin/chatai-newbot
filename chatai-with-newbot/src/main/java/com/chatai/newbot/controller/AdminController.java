@@ -602,6 +602,9 @@ public class AdminController {
         });
 
         int total = logs.size();
+        if (page < 1) page = 1;
+        if (size < 1) size = 20;
+        if (size > 500) size = 500;
         int totalPages = Math.max(1, (int) Math.ceil((double) total / size));
         int fromIndex = Math.min((page - 1) * size, total);
         int toIndex = Math.min(fromIndex + size, total);
@@ -719,6 +722,9 @@ public class AdminController {
         });
 
         int total = statsList.size();
+        if (page < 1) page = 1;
+        if (size < 1) size = 20;
+        if (size > 500) size = 500;
         result.put("success", true);
         result.put("total", total);
 
