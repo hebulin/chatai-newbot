@@ -1051,6 +1051,99 @@ function downloadMedia(url, filename) {
   })
 }
 
+// ===== 表格下载（Excel/CSV）=====
+// 在表格下方插入下载工具栏，点击弹出格式菜单（交互与 mermaid 下载菜单一致）
+function attachTableDownload(wrapper, table) {
+  const toolbar = document.createElement('div')
+  toolbar.className = 'md-table-toolbar'
+  toolbar.innerHTML = '<button class="md-table-btn" title="下载表格"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> 下载表格</button>'
+  const btn = toolbar.querySelector('button')
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation()
+    showTableDownloadMenu(toolbar, btn, table)
+  })
+  wrapper.parentNode.insertBefore(toolbar, wrapper.nextSibling)
+}
+
+// 表格下载格式菜单（Excel/CSV），点击外部关闭
+function showTableDownloadMenu(toolbar, btn, table) {
+  const existing = toolbar.querySelector('.md-table-menu')
+  if (existing) { existing.remove(); return }
+  const menu = document.createElement('div')
+  menu.className = 'md-table-menu'
+  menu.innerHTML =
+    '<div class="md-table-menu-item" data-fmt="xlsx"><span>下载 Excel (.xlsx)</span></div>' +
+    '<div class="md-table-menu-item" data-fmt="csv"><span>下载 CSV</span></div>'
+  toolbar.appendChild(menu)
+  menu.querySelectorAll('.md-table-menu-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const fmt = item.getAttribute('data-fmt')
+      const rows = extractTableRows(table)
+      menu.remove()
+      if (!rows.length) { showToast('表格内容为空'); return }
+      if (fmt === 'csv') downloadTableCsv(rows)
+      else downloadTableXlsx(rows)
+    })
+  })
+  setTimeout(() => {
+    const onDocClick = (e) => {
+      if (menu.contains(e.target) || btn.contains(e.target)) return
+      menu.remove()
+      document.removeEventListener('click', onDocClick)
+    }
+    document.addEventListener('click', onDocClick)
+  }, 0)
+}
+
+// 提取表格单元格文本为二维数组（含表头行）
+function extractTableRows(table) {
+  const rows = []
+  table.querySelectorAll('tr').forEach(tr => {
+    const cells = Array.from(tr.querySelectorAll('th, td')).map(c => (c.innerText || '').trim())
+    if (cells.length && cells.some(v => v !== '')) rows.push(cells)
+  })
+  return rows
+}
+
+// CSV 导出：含逗号/引号/换行的单元格加引号转义，BOM 保证 Excel 直接打开中文不乱码
+function downloadTableCsv(rows) {
+  const csv = rows.map(cols =>
+    cols.map(v => /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v).join(',')
+  ).join('\r\n')
+  downloadFile('\ufeff' + csv, 'table-' + Date.now() + '.csv', 'text/csv;charset=utf-8')
+}
+
+// Excel 导出：SheetJS 懒加载（不计入首屏体积），纯数字单元格转数值类型便于后续计算
+async function downloadTableXlsx(rows) {
+  try {
+    const XLSX = await import('xlsx')
+    const aoa = rows.map(cols => cols.map(v =>
+      /^-?(0|[1-9]\d*)(\.\d+)?$/.test(v) ? Number(v) : v
+    ))
+    const ws = XLSX.utils.aoa_to_sheet(aoa)
+    // 列宽按内容自适应（CJK 按 2 字符计，上限 50）
+    const colCount = Math.max(...rows.map(r => r.length))
+    const cols = []
+    for (let c = 0; c < colCount; c++) {
+      let w = 6
+      rows.forEach(r => {
+        const v = String(r[c] == null ? '' : r[c])
+        let len = 0
+        for (const ch of v) len += /[\u2e80-\u9fff\uf900-\ufaff\uff00-\uffef]/.test(ch) ? 2 : 1
+        if (len > w) w = len
+      })
+      cols.push({ wch: Math.min(w + 2, 50) })
+    }
+    ws['!cols'] = cols
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Sheet1')
+    XLSX.writeFile(wb, 'table-' + Date.now() + '.xlsx')
+  } catch (e) {
+    console.warn('[useMarkdown] xlsx export failed:', e?.message || e)
+    showToast('Excel 导出失败，请改用 CSV 下载')
+  }
+}
+
 // 处理特殊内容：代码高亮、表格包裹、AI 图片/视频增强
 export function processSpecialContent(container) {
   if (!container) return
@@ -1069,6 +1162,8 @@ export function processSpecialContent(container) {
       const isScrolledToEnd = this.scrollLeft + this.clientWidth >= this.scrollWidth - 2
       this.classList.toggle('has-overflow', !isScrolledToEnd)
     })
+    // 表格下载工具栏（Excel/CSV）
+    attachTableDownload(wrapper, table)
   })
 
   // 代码块高亮
