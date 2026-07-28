@@ -6,6 +6,7 @@ import com.chatai.newbot.model.NewBotMessage;
 import com.chatai.newbot.model.PromptPreset;
 import com.chatai.newbot.model.UsageLog;
 import com.chatai.newbot.model.User;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -708,9 +709,11 @@ public class UnifiedChatService {
     }
 
     /**
-     * 模型连通性测试：向厂商 API 发一条最小非流式请求，验证 API Key/URL/模型ID 是否可用
+     * 模型连通性测试：向厂商 API 发一条最小非流式请求，验证 API Key/URL/模型ID 是否可用。
+     * 连通成功后追加一次短生成请求测算生成速度（token/s），并将延迟/速度/测试时间持久化到模型配置。
+     * 仅由管理员在后台手动触发，不做任何自动测试。
      * @param modelConfigId 模型配置ID
-     * @return success/message/latencyMs，失败时 message 携带厂商返回的错误信息
+     * @return success/message/latencyMs/speed，失败时 message 携带厂商返回的错误信息
      */
     public Map<String, Object> testConnection(String modelConfigId) {
         Map<String, Object> result = new HashMap<>();
@@ -729,29 +732,6 @@ public class UnifiedChatService {
 
         boolean anthropic = "anthropic".equalsIgnoreCase(config.getProtocol());
 
-        // 构建最小请求体：非流式 + 单条短消息 + 最小 max_tokens，尽量降低测试成本
-        Map<String, Object> body = new HashMap<>();
-        body.put("model", config.getModelId());
-        body.put("stream", false);
-        body.put("max_tokens", 16);
-        Map<String, Object> msg = new HashMap<>();
-        msg.put("role", "user");
-        msg.put("content", "hi");
-        body.put("messages", List.of(msg));
-        // 支持思考的模型需显式关闭思考（部分厂商非流式调用不允许开启思考，且避免消耗额外 token）
-        if (!anthropic && config.isSupportsThinking()) {
-            String type = config.getThinkingParamType() == null ? "default" : config.getThinkingParamType();
-            switch (type) {
-                case "qwen" -> body.put("enable_thinking", false);
-                case "deepseek", "kimi", "doubao", "zhipu" -> {
-                    Map<String, Object> thinkingOff = new HashMap<>();
-                    thinkingOff.put("type", "disabled");
-                    body.put("thinking", thinkingOff);
-                }
-                default -> { }
-            }
-        }
-
         // 拼接端点：OpenAI 兼容协议 /chat/completions，Anthropic /messages
         String fullUrl = config.getApiUrl();
         if (!fullUrl.endsWith("/")) {
@@ -767,21 +747,43 @@ public class UnifiedChatService {
         } else {
             builder.defaultHeader("Authorization", "Bearer " + config.getApiKey());
         }
+        WebClient client = builder.build();
 
         long start = System.currentTimeMillis();
         try {
-            builder.build().post()
+            // 第一次：最小请求（"hi" + max_tokens=16）测连通与延迟
+            client.post()
                     .uri(fullUrl)
-                    .bodyValue(body)
+                    .bodyValue(buildTestBody(config, anthropic, "hi", 16))
                     .retrieve()
                     .bodyToMono(String.class)
                     .block(Duration.ofSeconds(20));
             long cost = System.currentTimeMillis() - start;
+
+            // 第二次：短生成请求测速度（失败不影响连通结论，速度记为未知）
+            Double speed = measureSpeed(client, fullUrl, config, anthropic);
+
+            // 持久化测试指标（config 来自存储层含真实 apiKey，写回时会重新加密）
+            config.setTestLatencyMs((int) cost);
+            config.setTestSpeed(speed);
+            config.setTestedAt(nowString());
+            storageService.updateModelConfig(config);
+
             result.put("success", true);
             result.put("latencyMs", cost);
-            result.put("message", "连接成功，耗时 " + cost + " ms");
+            result.put("speed", speed);
+            String msg = "连接成功，延迟 " + cost + " ms";
+            if (speed != null) {
+                msg += "，速度 " + speed + " token/s";
+            }
+            result.put("message", msg);
         } catch (Exception e) {
             long cost = System.currentTimeMillis() - start;
+            // 测试失败清空历史指标并记录测试时间，避免展示过期数据造成误导
+            config.setTestLatencyMs(null);
+            config.setTestSpeed(null);
+            config.setTestedAt(nowString());
+            storageService.updateModelConfig(config);
             String reason;
             // 剥离响应式异常包装，取出厂商真实错误
             Throwable cause = e;
@@ -816,6 +818,77 @@ public class UnifiedChatService {
             result.put("message", reason);
         }
         return result;
+    }
+
+    /**
+     * 构建连通测试用的非流式请求体（支持思考的模型显式关闭思考，降低测试成本）
+     */
+    private Map<String, Object> buildTestBody(ModelConfig config, boolean anthropic, String prompt, int maxTokens) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("model", config.getModelId());
+        body.put("stream", false);
+        body.put("max_tokens", maxTokens);
+        Map<String, Object> msg = new HashMap<>();
+        msg.put("role", "user");
+        msg.put("content", prompt);
+        body.put("messages", List.of(msg));
+        // 支持思考的模型需显式关闭思考（部分厂商非流式调用不允许开启思考，且避免消耗额外 token）
+        if (!anthropic && config.isSupportsThinking()) {
+            String type = config.getThinkingParamType() == null ? "default" : config.getThinkingParamType();
+            switch (type) {
+                case "qwen" -> body.put("enable_thinking", false);
+                case "deepseek", "kimi", "doubao", "zhipu" -> {
+                    Map<String, Object> thinkingOff = new HashMap<>();
+                    thinkingOff.put("type", "disabled");
+                    body.put("thinking", thinkingOff);
+                }
+                default -> { }
+            }
+        }
+        return body;
+    }
+
+    /**
+     * 测算生成速度：发一条短生成请求，用 usage 中的输出 token 数 / 总耗时估算 token/s。
+     * 任一环节失败返回 null（速度未知），不影响连通测试结论。
+     */
+    private Double measureSpeed(WebClient client, String fullUrl, ModelConfig config, boolean anthropic) {
+        try {
+            String prompt = "请从1数到50，用逗号分隔，不要输出任何其他内容";
+            long start = System.currentTimeMillis();
+            String resp = client.post()
+                    .uri(fullUrl)
+                    .bodyValue(buildTestBody(config, anthropic, prompt, 256))
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block(Duration.ofSeconds(30));
+            long elapsed = System.currentTimeMillis() - start;
+            if (resp == null || elapsed <= 0) {
+                return null;
+            }
+            // OpenAI 兼容: usage.completion_tokens；Anthropic: usage.output_tokens
+            Map<String, Object> parsed = objectMapper.readValue(resp, new TypeReference<Map<String, Object>>() {});
+            Object usageObj = parsed.get("usage");
+            if (!(usageObj instanceof Map)) {
+                return null;
+            }
+            Object tokens = ((Map<?, ?>) usageObj).get(anthropic ? "output_tokens" : "completion_tokens");
+            if (!(tokens instanceof Number) || ((Number) tokens).intValue() <= 0) {
+                return null;
+            }
+            // token/s 保留一位小数
+            return Math.round(((Number) tokens).intValue() * 10000.0 / elapsed) / 10.0;
+        } catch (Exception e) {
+            log.warn("模型测速失败（不影响连通结论）: {} ({}) -> {}",
+                    config.getDisplayName(), config.getModelId(), e.getMessage());
+            return null;
+        }
+    }
+
+    /** 当前时间字符串（与存储层 createdAt 格式一致） */
+    private String nowString() {
+        return java.time.LocalDateTime.now()
+                .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
     }
 
     /**

@@ -242,6 +242,7 @@ html.dark {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 .model-name-cell .provider-icon {
   width: 20px;
@@ -250,11 +251,33 @@ html.dark {
   object-fit: contain;
   flex-shrink: 0;
 }
+/* 名称文本：超长单行截断（配合 title 展示全文），避免换行拉高行 */
+.model-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .model-id-text {
   font-family: var(--mono);
   font-size: 12px;
   color: var(--ink-3);
 }
+/* 连通测试指标（延迟/速度） */
+.metric-text {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.metric-empty {
+  color: var(--ink-4);
+}
+/* 延迟颜色分级：<800ms 绿 / 800ms~2s 黄 / >2s 红 */
+.metric-text.latency-good { color: #34a853; }
+.metric-text.latency-warn { color: #f59e0b; }
+.metric-text.latency-bad { color: #ef4444; }
 
 /* 厂商卡片网格 */
 .provider-grid {
@@ -318,6 +341,12 @@ html.dark {
   font-weight: 500;
 }
 
+/* 后台表格：单元格强制单行展示，超出列宽省略（配合列宽自适应上限） */
+.admin-card .el-table .cell {
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 /* 筛选栏 */
 .filter-bar {
   display: flex;
@@ -333,6 +362,10 @@ html.dark {
 .filter-bar .el-input,
 .filter-bar .el-select {
   width: 160px;
+}
+/* 手机端“更多筛选/收起”按钮，桌面端筛选条件全部平铺无需展示 */
+.filter-bar .filter-toggle-btn {
+  display: none;
 }
 
 /* 图标选择器 */
@@ -483,8 +516,10 @@ html.dark {
     margin-bottom: 14px;
   }
 
-  /* 筛选栏：单列紧凑 */
+  /* 筛选栏：两列网格，每行展示两个查询条件 */
   .filter-bar {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     padding: 12px;
     gap: 8px;
   }
@@ -494,6 +529,17 @@ html.dark {
   }
   .filter-bar .el-input {
     max-width: 100%;
+  }
+  .filter-bar .el-button {
+    margin-left: 0;
+    width: 100%;
+  }
+  /* 收起时隐藏前两个之外的查询条件，通过“更多筛选”按钮展开 */
+  .filter-bar.filter-collapsed .filter-extra {
+    display: none;
+  }
+  .filter-bar .filter-toggle-btn {
+    display: inline-flex;
   }
 
   /* 分页器：换行居中 */

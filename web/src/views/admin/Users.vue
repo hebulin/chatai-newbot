@@ -17,38 +17,38 @@
         <el-button @click="filterUsername = ''; userPage = 1">重置</el-button>
       </div>
 
-      <!-- 用户表格 -->
-      <el-table :data="pagedUsers" v-loading="loading" stripe style="width:100%">
-        <el-table-column prop="username" label="用户名" min-width="120" />
-        <el-table-column label="角色" width="100" align="center">
+      <!-- 用户表格：列宽按内容自适应（上限 50 汉字），border 模式支持拖拽表头调宽，超宽时横向滚动 -->
+      <el-table :data="pagedUsers" v-loading="loading" stripe border style="width:100%">
+        <el-table-column prop="username" label="用户名" :width="colW.username" show-overflow-tooltip />
+        <el-table-column label="角色" :width="colW.role" align="center">
           <template #default="{ row }">
             <span class="status-badge" :class="row.role === 'admin' ? 'status-enabled' : 'vis-admin'">
               {{ row.role === 'admin' ? '管理员' : '普通用户' }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="90" align="center">
+        <el-table-column label="状态" :width="colW.status" align="center">
           <template #default="{ row }">
             <span class="status-badge" :class="row.disabled ? 'status-disabled' : 'status-enabled'">
               {{ row.disabled ? '已禁用' : '正常' }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="每日限额" width="130" align="center">
+        <el-table-column label="每日限额" :width="colW.limit" align="center">
           <template #default="{ row }">
             <span v-if="row.dailyLimitType === 'count'" style="font-size:12px;">{{ row.dailyLimitValue }} 次/日</span>
             <span v-else-if="row.dailyLimitType === 'token'" style="font-size:12px;">{{ row.dailyLimitValue }} Token/日</span>
             <span v-else style="font-size:12px;color:var(--ink-3);">全局配额</span>
           </template>
         </el-table-column>
-        <el-table-column prop="createdAt" label="注册时间" width="170" />
-        <el-table-column prop="lastLoginAt" label="最近登录" width="170">
+        <el-table-column prop="createdAt" label="注册时间" :width="colW.createdAt" show-overflow-tooltip />
+        <el-table-column prop="lastLoginAt" label="最近登录" :width="colW.lastLoginAt" show-overflow-tooltip>
           <template #default="{ row }">{{ row.lastLoginAt || '-' }}</template>
         </el-table-column>
-        <el-table-column prop="lastLoginIp" label="登录IP" width="130">
+        <el-table-column prop="lastLoginIp" label="登录IP" :width="colW.lastLoginIp" show-overflow-tooltip>
           <template #default="{ row }">{{ row.lastLoginIp || '-' }}</template>
         </el-table-column>
-        <el-table-column prop="lastLoginBrowser" label="浏览器" width="90">
+        <el-table-column prop="lastLoginBrowser" label="浏览器" :width="colW.browser" show-overflow-tooltip>
           <template #default="{ row }">{{ row.lastLoginBrowser || '-' }}</template>
         </el-table-column>
         <el-table-column label="操作" width="180" align="center" fixed="right">
@@ -66,11 +66,12 @@
               <el-button
                 v-if="row.username !== 'admin'"
                 size="small" text
-                :type="row.disabled ? 'success' : 'warning'"
-                :title="row.disabled ? '启用账号' : '禁用账号'"
+                :type="row.disabled ? 'danger' : 'success'"
+                :title="row.disabled ? '已禁用，点击启用账号' : '正常，点击禁用账号'"
                 @click="handleToggleDisabled(row)"
               >
-                <el-icon><component :is="row.disabled ? 'Unlock' : 'Lock'" /></el-icon>
+                <!-- icon 展示当前状态：正常=绿色解锁，禁用=红色锁定 -->
+                <el-icon><component :is="row.disabled ? 'Lock' : 'Unlock'" /></el-icon>
               </el-button>
             </el-button-group>
           </template>
@@ -159,7 +160,7 @@
 
     <!-- 权限弹窗 -->
     <el-dialog v-model="permsVisible" :title="'用户权限 - ' + permsUsername" width="520px" destroy-on-close>
-      <div style="margin-bottom:12px;color:var(--ink-2);font-size:13px;">勾选该用户允许使用的模型：</div>
+      <div style="margin-bottom:12px;color:var(--ink-2);font-size:13px;">勾选后该用户将<b>仅能使用</b>勾选的模型；全部不勾选表示不限制（可用所有公开模型）：</div>
       <div style="display:flex;flex-direction:column;gap:8px;max-height:360px;overflow-y:auto;">
         <el-checkbox
           v-for="m in allModels"
@@ -187,6 +188,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Edit, Delete, Key, Lock, Unlock } from '@element-plus/icons-vue'
 import { getUsers, addUser, updateUser, deleteUser, updateUserPermissions } from '@/api/users'
 import { getModels } from '@/api/models'
+import { autoColWidth } from '@/composables/useTableAutoWidth'
 
 const providerIconMap = {
   deepseek: '/icons/deepseek-icon.svg',
@@ -217,6 +219,27 @@ const pagedUsers = computed(() => {
   return filteredUsers.value.slice(start, start + userPageSize.value)
 })
 const userTotalPages = computed(() => Math.max(1, Math.ceil(filteredUsers.value.length / userPageSize.value)))
+
+// 列宽自适应：按当前列最长内容计算，上限 50 个汉字
+// 每日限额列的展示文本
+function limitText(u) {
+  if (u.dailyLimitType === 'count') return `${u.dailyLimitValue} 次/日`
+  if (u.dailyLimitType === 'token') return `${u.dailyLimitValue} Token/日`
+  return '全局配额'
+}
+const colW = computed(() => {
+  const list = allUsers.value
+  return {
+    username: autoColWidth(list.map(u => u.username), { header: '用户名', min: 100 }),
+    role: autoColWidth(['管理员', '普通用户'], { header: '角色', extra: 24 }),
+    status: autoColWidth(['已禁用', '正常'], { header: '状态', extra: 24 }),
+    limit: autoColWidth(list.map(limitText), { header: '每日限额' }),
+    createdAt: autoColWidth(list.map(u => u.createdAt), { header: '注册时间' }),
+    lastLoginAt: autoColWidth(list.map(u => u.lastLoginAt || '-'), { header: '最近登录' }),
+    lastLoginIp: autoColWidth(list.map(u => u.lastLoginIp || '-'), { header: '登录IP' }),
+    browser: autoColWidth(list.map(u => u.lastLoginBrowser || '-'), { header: '浏览器' })
+  }
+})
 
 function getModelIcon(m) {
   if (m.providerId && providerIconMap[m.providerId]) return providerIconMap[m.providerId]

@@ -19,44 +19,44 @@
         <el-button @click="resetFilter">重置</el-button>
       </div>
 
-      <!-- 厂商表格 -->
-      <el-table :data="pagedProviders" v-loading="loading" stripe style="width:100%">
-        <el-table-column label="厂商" min-width="160">
+      <!-- 厂商表格：列宽按内容自适应（上限 50 汉字），border 模式支持拖拽表头调宽，超宽时横向滚动 -->
+      <el-table :data="pagedProviders" v-loading="loading" stripe border style="width:100%">
+        <el-table-column label="厂商" :width="colW.name">
           <template #default="{ row }">
             <div class="model-name-cell">
               <img v-if="providerIconMap[row.id]" :src="providerIconMap[row.id]" class="provider-icon" />
               <span v-else-if="row.icon" style="font-size:18px;">{{ row.icon }}</span>
               <span v-else style="width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;background:var(--paper-3);border-radius:4px;font-size:11px;color:var(--ink-3);">{{ row.id?.[0]?.toUpperCase() }}</span>
-              <span>{{ row.name }}</span>
+              <span class="model-name-text" :title="row.name">{{ row.name }}</span>
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="类型" width="90" align="center">
+        <el-table-column label="类型" :width="colW.type" align="center">
           <template #default="{ row }">
             <span class="status-badge" :class="row.type === 'custom' ? 'vis-admin' : 'status-enabled'">
               {{ row.type === 'custom' ? '自定义' : '预置' }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="厂商ID" width="140">
+        <el-table-column label="厂商ID" :width="colW.id" show-overflow-tooltip>
           <template #default="{ row }">
             <span class="model-id-text">{{ row.id }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="模型数" width="80" align="center">
+        <el-table-column label="模型数" :width="colW.count" align="center">
           <template #default="{ row }">{{ getModelCount(row) }}</template>
         </el-table-column>
-        <el-table-column label="预设名称" width="120">
+        <el-table-column label="预设名称" :width="colW.defaultName" show-overflow-tooltip>
           <template #default="{ row }">
             <span style="color:var(--ink-3)">{{ row.type === 'custom' ? '-' : (row.defaultName || row.name) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="显示名称" width="120">
+        <el-table-column label="显示名称" :width="colW.displayName" show-overflow-tooltip>
           <template #default="{ row }">
             <span style="font-weight:500;">{{ row.name }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="图标" width="70" align="center">
+        <el-table-column label="图标" :width="colW.icon" align="center">
           <template #default="{ row }">
             <span v-if="row.icon" style="font-size:18px;">{{ row.icon }}</span>
             <span v-else style="color:var(--ink-4)">未设置</span>
@@ -131,6 +131,7 @@ import { ElMessage } from 'element-plus'
 import { Edit } from '@element-plus/icons-vue'
 import { getProviders, renameProvider } from '@/api/providers'
 import { getModels } from '@/api/models'
+import { autoColWidth } from '@/composables/useTableAutoWidth'
 
 const PRESET_ICONS = ['🔮','🟣','🌙','🟢','⚡','🫘','⭐','🚀','🤖','💎','🎨','🛠️']
 
@@ -170,6 +171,22 @@ const pagedProviders = computed(() => {
   return filteredProviders.value.slice(start, start + providerPageSize.value)
 })
 const providerTotalPages = computed(() => Math.max(1, Math.ceil(filteredProviders.value.length / providerPageSize.value)))
+
+// 列宽自适应：按当前列最长内容计算，上限 50 个汉字
+const colW = computed(() => {
+  const list = allProviders.value
+  return {
+    // 名称列：图标(20+间距8) extra 34
+    name: autoColWidth(list.map(p => p.name), { header: '厂商', extra: 34, min: 110 }),
+    type: autoColWidth(['自定义', '预置'], { header: '类型', extra: 24 }),
+    // 厂商ID列以等宽字体渲染，按 mono 测宽
+    id: autoColWidth(list.map(p => p.id), { header: '厂商ID', min: 100, mono: true }),
+    count: autoColWidth(list.map(getModelCount), { header: '模型数' }),
+    defaultName: autoColWidth(list.map(p => p.type === 'custom' ? '-' : (p.defaultName || p.name)), { header: '预设名称', min: 100 }),
+    displayName: autoColWidth(list.map(p => p.name), { header: '显示名称', min: 100 }),
+    icon: autoColWidth(list.map(p => p.icon || '未设置'), { header: '图标' })
+  }
+})
 
 function resetFilter() {
   filterName.value = ''

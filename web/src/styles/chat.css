@@ -1651,6 +1651,64 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
     align-items: center;
 }
 
+/* 窄屏单列模型下拉：触发器透明化，与级联触发器视觉一致 */
+.model-select-area .el-select__wrapper,
+.model-select-area .el-select__wrapper:hover,
+.model-select-area .el-select__wrapper.is-focused {
+    background: transparent !important;
+    box-shadow: none !important;
+    padding: 0 6px;
+    min-height: 28px;
+    height: 28px;
+    cursor: pointer;
+}
+.model-select-area .el-select__wrapper:hover {
+    background: var(--primary-soft) !important;
+    border-radius: var(--radius-sm);
+}
+.model-select-area .el-select__placeholder,
+.model-select-area .el-select__selected-item {
+    color: var(--fg-2);
+    font-size: 11.5px;
+    font-family: var(--sans);
+}
+.model-select-area .el-select__suffix {
+    color: var(--fg-4);
+}
+/* 窄屏单列模型下拉浮层：主题适配 + 厂商分组标题 + 触摸友好行高 */
+.model-select-popper-mobile.el-popper {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-lg);
+    max-width: calc(100vw - 24px);
+}
+.model-select-popper-mobile .el-select-dropdown__wrap {
+    max-height: 50vh;
+}
+.model-select-popper-mobile .el-select-group__title {
+    color: var(--fg-4);
+    font-size: 11px;
+    padding-left: 12px;
+    line-height: 26px;
+}
+.model-select-popper-mobile .el-select-dropdown__item {
+    display: flex;
+    align-items: center;
+    color: var(--fg-2);
+    font-size: 12.5px;
+    height: auto;
+    line-height: 1.4;
+    padding: 10px 12px;
+}
+.model-select-popper-mobile .el-select-dropdown__item.is-hovering {
+    background: var(--primary-soft);
+    color: var(--fg);
+}
+.model-select-popper-mobile .el-select-dropdown__item.is-selected {
+    color: var(--primary);
+    font-weight: 500;
+}
+
 /* Send button */
 .send-btn {
     width: 32px; height: 32px;

@@ -1028,6 +1028,9 @@ public class AdminController {
         copy.setVisibleToAll(m.getVisibleToAll());
         copy.setBuiltIn(m.isBuiltIn());
         copy.setCreatedAt(m.getCreatedAt());
+        copy.setTestLatencyMs(m.getTestLatencyMs());
+        copy.setTestSpeed(m.getTestSpeed());
+        copy.setTestedAt(m.getTestedAt());
         return copy;
     }
 }

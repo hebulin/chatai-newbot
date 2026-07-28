@@ -151,12 +151,14 @@ public class UsageController {
     /**
      * 使用统计 - 按用户+日期+模型聚合（普通用户仅限本人）
      * getAll=true 时不分页，返回全量聚合数据（图表专用）
+     * usernames 支持多用户筛选（仅管理员，逗号分隔，用于多用户对比图表）
      */
     @GetMapping("/stats")
     public Map<String, Object> getUsageStats(
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) String username,
+            @RequestParam(required = false) String usernames,
             @RequestParam(required = false) String modelName,
             @RequestParam(required = false) String startDate,
             @RequestParam(required = false) String endDate,
@@ -168,6 +170,17 @@ public class UsageController {
 
         String effectiveUsername = resolveUsernameScope(request, username);
         List<UsageLog> logs = filterLogs(storageService.getAllUsageLogs(), effectiveUsername, modelName, startDate, endDate);
+
+        // 多用户筛选：仅管理员生效，普通用户已被 resolveUsernameScope 限制为本人
+        if (isAdmin(request) && usernames != null && !usernames.isEmpty()) {
+            Set<String> nameSet = Arrays.stream(usernames.split(","))
+                    .map(String::trim)
+                    .filter(s -> !s.isEmpty())
+                    .collect(Collectors.toSet());
+            if (!nameSet.isEmpty()) {
+                logs = logs.stream().filter(l -> nameSet.contains(l.getUsername())).collect(Collectors.toList());
+            }
+        }
 
         Map<String, List<UsageLog>> grouped = logs.stream()
                 .collect(Collectors.groupingBy(l ->

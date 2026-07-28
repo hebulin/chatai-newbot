@@ -129,8 +129,14 @@ public class SqliteStorageService implements StorageService {
                 "enabled INTEGER DEFAULT 1," +
                 "visible_to_all INTEGER DEFAULT 1," +
                 "built_in INTEGER DEFAULT 0," +
-                "created_at TEXT" +
+                "created_at TEXT," +
+                "test_latency_ms INTEGER," +
+                "test_speed REAL," +
+                "tested_at TEXT" +
                 ")");
+
+        // 老数据库补充连通测试指标列（幂等迁移）
+        ensureModelTestColumns();
 
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_usage_log (" +
                 "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -215,6 +221,22 @@ public class SqliteStorageService implements StorageService {
         if (!hasColumn) {
             jdbcTemplate.execute("ALTER TABLE t_token ADD COLUMN browser TEXT");
             log.info("SQLite: t_token 表已补充 browser 列");
+        }
+    }
+
+    /**
+     * 为 t_model_config 表补充连通测试指标列（幂等迁移）。
+     * 记录管理员手动测试的延迟(ms)/生成速度(token/s)/测试时间。
+     */
+    private void ensureModelTestColumns() {
+        List<Map<String, Object>> columns = jdbcTemplate.queryForList("PRAGMA table_info(t_model_config)");
+        boolean hasColumn = columns.stream()
+                .anyMatch(c -> "test_latency_ms".equals(String.valueOf(c.get("name"))));
+        if (!hasColumn) {
+            jdbcTemplate.execute("ALTER TABLE t_model_config ADD COLUMN test_latency_ms INTEGER");
+            jdbcTemplate.execute("ALTER TABLE t_model_config ADD COLUMN test_speed REAL");
+            jdbcTemplate.execute("ALTER TABLE t_model_config ADD COLUMN tested_at TEXT");
+            log.info("SQLite: t_model_config 表已补充连通测试指标列");
         }
     }
 
@@ -522,6 +544,12 @@ public class SqliteStorageService implements StorageService {
         m.setVisibleToAll(rs.wasNull() ? true : vta == 1);
         m.setBuiltIn(rs.getInt("built_in") == 1);
         m.setCreatedAt(rs.getString("created_at"));
+        // 连通测试指标（可空，null=未测试）
+        int latency = rs.getInt("test_latency_ms");
+        m.setTestLatencyMs(rs.wasNull() ? null : latency);
+        double speed = rs.getDouble("test_speed");
+        m.setTestSpeed(rs.wasNull() ? null : speed);
+        m.setTestedAt(rs.getString("tested_at"));
         return m;
     };
 
@@ -532,12 +560,21 @@ public class SqliteStorageService implements StorageService {
 
     @Override
     public List<ModelConfig> getVisibleModels(User user) {
+        // 权限语义：admin 全部可见；配置了 allowedModelIds（非空）的用户仅可见白名单内模型；
+        // 未配置则不限制，可见所有公开（visibleToAll）模型
         return getAllModelConfigs().stream()
                 .filter(ModelConfig::isEnabled)
-                .filter(m -> Boolean.TRUE.equals(m.getVisibleToAll())
-                        || user.isAdmin()
-                        || user.getAllowedModelIds().contains(m.getId()))
+                .filter(m -> isModelPermitted(user, m))
                 .collect(Collectors.toList());
+    }
+
+    private boolean isModelPermitted(User user, ModelConfig m) {
+        if (user.isAdmin()) return true;
+        List<String> allowed = user.getAllowedModelIds();
+        if (allowed != null && !allowed.isEmpty()) {
+            return allowed.contains(m.getId());
+        }
+        return Boolean.TRUE.equals(m.getVisibleToAll());
     }
 
     @Override
@@ -566,28 +603,31 @@ public class SqliteStorageService implements StorageService {
     /** 插入模型配置记录 */
     private void insertModelConfig(ModelConfig m) {
         jdbcTemplate.update(
-                "INSERT INTO t_model_config (id, provider_id, provider_name, provider_icon, model_id, display_name, api_key, api_url, protocol, thinking_param_type, supports_thinking, supports_multimodal, enabled, visible_to_all, built_in, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO t_model_config (id, provider_id, provider_name, provider_icon, model_id, display_name, api_key, api_url, protocol, thinking_param_type, supports_thinking, supports_multimodal, enabled, visible_to_all, built_in, created_at, test_latency_ms, test_speed, tested_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 m.getId(), m.getProviderId(), m.getProviderName(), m.getProviderIcon(),
                 m.getModelId(), m.getDisplayName(), ApiKeyCrypto.encrypt(m.getApiKey()), m.getApiUrl(),
                 m.getProtocol(), m.getThinkingParamType(),
                 m.isSupportsThinking() ? 1 : 0, m.isSupportsMultimodal() ? 1 : 0,
                 m.isEnabled() ? 1 : 0,
                 m.getVisibleToAll() == null ? 1 : (m.getVisibleToAll() ? 1 : 0),
-                m.isBuiltIn() ? 1 : 0, m.getCreatedAt());
+                m.isBuiltIn() ? 1 : 0, m.getCreatedAt(),
+                m.getTestLatencyMs(), m.getTestSpeed(), m.getTestedAt());
     }
 
     @Override
     public void updateModelConfig(ModelConfig config) {
         fillProviderInfo(config);
         jdbcTemplate.update(
-                "UPDATE t_model_config SET provider_id=?, provider_name=?, provider_icon=?, model_id=?, display_name=?, api_key=?, api_url=?, protocol=?, thinking_param_type=?, supports_thinking=?, supports_multimodal=?, enabled=?, visible_to_all=?, built_in=?, created_at=? WHERE id=?",
+                "UPDATE t_model_config SET provider_id=?, provider_name=?, provider_icon=?, model_id=?, display_name=?, api_key=?, api_url=?, protocol=?, thinking_param_type=?, supports_thinking=?, supports_multimodal=?, enabled=?, visible_to_all=?, built_in=?, created_at=?, test_latency_ms=?, test_speed=?, tested_at=? WHERE id=?",
                 config.getProviderId(), config.getProviderName(), config.getProviderIcon(),
                 config.getModelId(), config.getDisplayName(), ApiKeyCrypto.encrypt(config.getApiKey()), config.getApiUrl(),
                 config.getProtocol(), config.getThinkingParamType(),
                 config.isSupportsThinking() ? 1 : 0, config.isSupportsMultimodal() ? 1 : 0,
                 config.isEnabled() ? 1 : 0,
                 config.getVisibleToAll() == null ? 1 : (config.getVisibleToAll() ? 1 : 0),
-                config.isBuiltIn() ? 1 : 0, config.getCreatedAt(), config.getId());
+                config.isBuiltIn() ? 1 : 0, config.getCreatedAt(),
+                config.getTestLatencyMs(), config.getTestSpeed(), config.getTestedAt(),
+                config.getId());
     }
 
     @Override

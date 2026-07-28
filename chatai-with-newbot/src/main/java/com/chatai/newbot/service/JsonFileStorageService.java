@@ -218,12 +218,21 @@ public class JsonFileStorageService implements StorageService {
 
     @Override
     public List<ModelConfig> getVisibleModels(User user) {
+        // 权限语义：admin 全部可见；配置了 allowedModelIds（非空）的用户仅可见白名单内模型；
+        // 未配置则不限制，可见所有公开（visibleToAll）模型
         return modelConfigs.stream()
                 .filter(ModelConfig::isEnabled)
-                .filter(m -> Boolean.TRUE.equals(m.getVisibleToAll())
-                        || user.isAdmin()
-                        || user.getAllowedModelIds().contains(m.getId()))
+                .filter(m -> isModelPermitted(user, m))
                 .collect(Collectors.toList());
+    }
+
+    private boolean isModelPermitted(User user, ModelConfig m) {
+        if (user.isAdmin()) return true;
+        List<String> allowed = user.getAllowedModelIds();
+        if (allowed != null && !allowed.isEmpty()) {
+            return allowed.contains(m.getId());
+        }
+        return Boolean.TRUE.equals(m.getVisibleToAll());
     }
 
     @Override
