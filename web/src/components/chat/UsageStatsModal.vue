@@ -24,17 +24,15 @@
             <div class="us-search-bar">
               <div v-if="isAdmin" class="us-field">
                 <label class="us-label">用户</label>
-                <select v-model="usageFilter.username" class="us-input us-select">
-                  <option value="">全部用户</option>
-                  <option v-for="u in usernames" :key="u" :value="u">{{ u }}</option>
-                </select>
+                <el-select v-model="usageFilter.username" class="us-el-select" placeholder="全部用户" clearable filterable size="small">
+                  <el-option v-for="u in usernames" :key="u" :label="u" :value="u" />
+                </el-select>
               </div>
               <div class="us-field">
                 <label class="us-label">模型</label>
-                <select v-model="usageFilter.modelName" class="us-input us-select">
-                  <option value="">全部模型</option>
-                  <option v-for="m in modelNames" :key="m" :value="m">{{ m }}</option>
-                </select>
+                <el-select v-model="usageFilter.modelName" class="us-el-select us-el-select-wide" placeholder="全部模型" clearable filterable size="small">
+                  <el-option v-for="m in modelNames" :key="m" :label="m" :value="m" />
+                </el-select>
               </div>
               <div class="us-field">
                 <label class="us-label">日期范围</label>
@@ -55,35 +53,29 @@
                 <button class="us-btn" @click="resetUsageFilter">重置</button>
               </div>
             </div>
-            <div class="us-table-wrap">
-              <table class="us-table">
-                <thead>
-                  <tr>
-                    <th>时间</th>
-                    <th v-if="isAdmin">用户</th>
-                    <th>模型</th>
-                    <th>输入Token</th>
-                    <th>输出Token</th>
-                    <th>思考Token</th>
-                    <th>缓存Token</th>
-                    <th>思考模式</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-if="usageLogs.length === 0"><td :colspan="isAdmin ? 8 : 7" class="us-empty">暂无数据</td></tr>
-                  <tr v-for="(log, i) in usageLogs" :key="i">
-                    <td>{{ log.time }}</td>
-                    <td v-if="isAdmin">{{ log.username }}</td>
-                    <td>{{ log.modelName }}</td>
-                    <td>{{ fmt(log.promptTokens) }}</td>
-                    <td>{{ fmt(log.completionTokens) }}</td>
-                    <td>{{ fmt(log.reasoningTokens) }}</td>
-                    <td>{{ fmt(log.cachedTokens) }}</td>
-                    <td><span class="us-thinking-badge" :class="{ on: log.deepThinking }">{{ log.deepThinking ? '深度' : '标准' }}</span></td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+            <!-- 使用记录列表：与后台管理统一使用 el-table（自适应列宽 + 拖拽调宽 + 横向滚动） -->
+            <el-table :data="usageLogs" class="us-el-table" stripe border empty-text="暂无数据" style="width: 100%">
+              <el-table-column prop="timestamp" label="时间" :width="usageColW.timestamp" show-overflow-tooltip />
+              <el-table-column v-if="isAdmin" prop="username" label="用户" :width="usageColW.username" show-overflow-tooltip />
+              <el-table-column prop="modelName" label="模型" :width="usageColW.modelName" show-overflow-tooltip />
+              <el-table-column label="输入Token" :width="usageColW.prompt">
+                <template #default="{ row }">{{ fmt(row.promptTokens) }}</template>
+              </el-table-column>
+              <el-table-column label="输出Token" :width="usageColW.completion">
+                <template #default="{ row }">{{ fmt(row.completionTokens) }}</template>
+              </el-table-column>
+              <el-table-column label="思考Token" :width="usageColW.reasoning">
+                <template #default="{ row }">{{ fmt(row.reasoningTokens) }}</template>
+              </el-table-column>
+              <el-table-column label="缓存Token" :width="usageColW.cached">
+                <template #default="{ row }">{{ fmt(row.cachedTokens) }}</template>
+              </el-table-column>
+              <el-table-column label="思考模式" :width="usageColW.thinking">
+                <template #default="{ row }">
+                  <span class="us-thinking-badge" :class="{ on: row.deepThinking }">{{ row.deepThinking ? '深度' : '标准' }}</span>
+                </template>
+              </el-table-column>
+            </el-table>
             <div class="us-pagination">
               <select v-model.number="usageSize" class="us-page-size" @change="usagePage = 1; loadUsageLogs()">
                 <option :value="10">10条/页</option>
@@ -100,11 +92,21 @@
           <div v-show="subTab === 'stats'" class="us-sub-content">
             <div class="us-search-bar">
               <div v-if="isAdmin" class="us-field">
-                <label class="us-label">用户</label>
-                <select v-model="statsFilter.username" class="us-input us-select">
-                  <option value="">全部用户</option>
-                  <option v-for="u in usernames" :key="u" :value="u">{{ u }}</option>
-                </select>
+                <label class="us-label">用户（可多选对比）</label>
+                <el-select
+                  v-model="statsFilter.usernames"
+                  class="us-el-select us-el-select-multi"
+                  placeholder="全部用户"
+                  multiple
+                  clearable
+                  filterable
+                  collapse-tags
+                  collapse-tags-tooltip
+                  :max-collapse-tags="2"
+                  size="small"
+                >
+                  <el-option v-for="u in usernames" :key="u" :label="u" :value="u" />
+                </el-select>
               </div>
               <div class="us-field">
                 <label class="us-label">日期范围</label>
@@ -155,37 +157,28 @@
 
             <!-- 列表 -->
             <div v-show="miniTab === 'list'">
-              <div class="us-table-wrap">
-                <table class="us-table">
-                  <thead>
-                    <tr>
-                      <th v-if="isAdmin">用户</th>
-                      <th>日期</th>
-                      <th>模型</th>
-                      <th>调用次数</th>
-                      <th>输入Token</th>
-                      <th>输出Token</th>
-                      <th>思考Token</th>
-                      <th>缓存Token</th>
-                      <th>思考模式次数</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-if="userStats.length === 0"><td :colspan="isAdmin ? 9 : 8" class="us-empty">点击「搜索」查看统计结果</td></tr>
-                    <tr v-for="(s, i) in userStats" :key="i">
-                      <td v-if="isAdmin">{{ s.username }}</td>
-                      <td>{{ s.date }}</td>
-                      <td>{{ s.modelName }}</td>
-                      <td>{{ s.count }}</td>
-                      <td>{{ fmt(s.promptTokens) }}</td>
-                      <td>{{ fmt(s.completionTokens) }}</td>
-                      <td>{{ fmt(s.reasoningTokens) }}</td>
-                      <td>{{ fmt(s.cachedTokens) }}</td>
-                      <td>{{ s.thinkingCount || 0 }}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
+              <!-- 统计结果列表：与后台管理统一使用 el-table（自适应列宽 + 拖拽调宽 + 横向滚动） -->
+              <el-table :data="userStats" class="us-el-table" stripe border empty-text="点击「搜索」查看统计结果" style="width: 100%">
+                <el-table-column v-if="isAdmin" prop="username" label="用户" :width="statsColW.username" show-overflow-tooltip />
+                <el-table-column prop="date" label="日期" :width="statsColW.date" show-overflow-tooltip />
+                <el-table-column prop="modelName" label="模型" :width="statsColW.modelName" show-overflow-tooltip />
+                <el-table-column prop="count" label="调用次数" :width="statsColW.count" />
+                <el-table-column label="输入Token" :width="statsColW.prompt">
+                  <template #default="{ row }">{{ fmt(row.promptTokens) }}</template>
+                </el-table-column>
+                <el-table-column label="输出Token" :width="statsColW.completion">
+                  <template #default="{ row }">{{ fmt(row.completionTokens) }}</template>
+                </el-table-column>
+                <el-table-column label="思考Token" :width="statsColW.reasoning">
+                  <template #default="{ row }">{{ fmt(row.reasoningTokens) }}</template>
+                </el-table-column>
+                <el-table-column label="缓存Token" :width="statsColW.cached">
+                  <template #default="{ row }">{{ fmt(row.cachedTokens) }}</template>
+                </el-table-column>
+                <el-table-column label="思考模式次数" :width="statsColW.thinkingCount">
+                  <template #default="{ row }">{{ row.thinkingCount || 0 }}</template>
+                </el-table-column>
+              </el-table>
               <div class="us-pagination">
                 <select v-model.number="statsPageSize" class="us-page-size" @change="statsPage = 1; loadUserStats()">
                   <option :value="10">10条/页</option>
@@ -227,10 +220,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import { getUsageLogs, getUserStats, getUsernames } from '@/api/usage'
+import { autoColWidth } from '@/composables/useTableAutoWidth'
 
 defineEmits(['close'])
 
@@ -257,7 +251,10 @@ const usernames = ref([])
 const modelNames = ref([])
 
 const usageFilter = ref({ username: '', modelName: '' })
-const statsFilter = ref({ username: '' })
+// 用户统计用户维度：多选数组（仅管理员可见），选多个时图表按用户对比展示
+const statsFilter = ref({ usernames: [] })
+// 最近一次搜索的用户维度快照（避免下拉未搜索就影响图表分组）
+const chartUserDim = ref([])
 
 // 日期范围（el-date-picker daterange 绑定数组）
 function getLast30Days() {
@@ -340,7 +337,6 @@ onMounted(() => {
   loadFilters()
   loadUsageLogs()
   loadCharts()
-  nextTick(setupScrollShadow)
 })
 
 onBeforeUnmount(() => {
@@ -431,7 +427,7 @@ async function loadUserStats() {
   if (err) { ElMessage.warning(err); return }
   try {
     const params = { page: statsPage.value, size: statsPageSize.value }
-    if (statsFilter.value.username) params.username = statsFilter.value.username
+    if (statsFilter.value.usernames.length) params.usernames = statsFilter.value.usernames.join(',')
     if (statsDateRange.value && statsDateRange.value[0]) params.startDate = statsDateRange.value[0]
     if (statsDateRange.value && statsDateRange.value[1]) params.endDate = statsDateRange.value[1]
     const data = await getUserStats(params)
@@ -446,12 +442,14 @@ async function loadUserStats() {
 async function loadCharts() {
   try {
     const params = { getAll: true, size: 10000 }
-    if (statsFilter.value.username) params.username = statsFilter.value.username
+    if (statsFilter.value.usernames.length) params.usernames = statsFilter.value.usernames.join(',')
     if (statsDateRange.value && statsDateRange.value[0]) params.startDate = statsDateRange.value[0]
     if (statsDateRange.value && statsDateRange.value[1]) params.endDate = statsDateRange.value[1]
     const data = await getUserStats(params)
     if (data && data.success) {
       chartData.value = data.data || []
+      // 记录本次搜索的用户维度，驱动图表多用户对比模式
+      chartUserDim.value = [...statsFilter.value.usernames]
     }
   } catch (e) { ElMessage.error('加载统计数据失败') }
 }
@@ -473,24 +471,39 @@ function resetUsageFilter() {
 }
 
 function resetStatsFilter() {
-  statsFilter.value = { username: '' }
+  statsFilter.value = { usernames: [] }
   statsDateRange.value = getLast30Days()
   searchStats()
 }
 
-// 表格横向滚动阴影：滚动到非右边缘时显示右侧阴影提示
-function setupScrollShadow() {
-  document.querySelectorAll('.us-modal-container .us-table-wrap').forEach(wrap => {
-    if (wrap.__shadowBound) return
-    wrap.__shadowBound = true
-    const update = () => {
-      const atEnd = wrap.scrollLeft + wrap.clientWidth >= wrap.scrollWidth - 2
-      wrap.classList.toggle('is-scrolled', !atEnd && wrap.scrollWidth > wrap.clientWidth)
-    }
-    wrap.addEventListener('scroll', update)
-    update()
-  })
-}
+// 列宽自适应：与后台管理一致，按当前列最长内容计算（上限 50 汉字），配合 border 支持拖拽调宽
+const usageColW = computed(() => {
+  const list = usageLogs.value
+  return {
+    timestamp: autoColWidth(list.map(l => l.timestamp), { header: '时间', min: 110 }),
+    username: autoColWidth(list.map(l => l.username), { header: '用户', min: 80 }),
+    modelName: autoColWidth(list.map(l => l.modelName), { header: '模型', min: 100 }),
+    prompt: autoColWidth(list.map(l => fmt(l.promptTokens)), { header: '输入Token' }),
+    completion: autoColWidth(list.map(l => fmt(l.completionTokens)), { header: '输出Token' }),
+    reasoning: autoColWidth(list.map(l => fmt(l.reasoningTokens)), { header: '思考Token' }),
+    cached: autoColWidth(list.map(l => fmt(l.cachedTokens)), { header: '缓存Token' }),
+    thinking: autoColWidth(['深度', '标准'], { header: '思考模式', extra: 12 })
+  }
+})
+const statsColW = computed(() => {
+  const list = userStats.value
+  return {
+    username: autoColWidth(list.map(s => s.username), { header: '用户', min: 80 }),
+    date: autoColWidth(list.map(s => s.date), { header: '日期', min: 100 }),
+    modelName: autoColWidth(list.map(s => s.modelName), { header: '模型', min: 100 }),
+    count: autoColWidth(list.map(s => s.count), { header: '调用次数' }),
+    prompt: autoColWidth(list.map(s => fmt(s.promptTokens)), { header: '输入Token' }),
+    completion: autoColWidth(list.map(s => fmt(s.completionTokens)), { header: '输出Token' }),
+    reasoning: autoColWidth(list.map(s => fmt(s.reasoningTokens)), { header: '思考Token' }),
+    cached: autoColWidth(list.map(s => fmt(s.cachedTokens)), { header: '缓存Token' }),
+    thinkingCount: autoColWidth(list.map(s => s.thinkingCount || 0), { header: '思考模式次数' })
+  }
+})
 
 /* ========== 图表渲染 (纯SVG) ========== */
 function metricValue(r, metric) {
@@ -506,8 +519,20 @@ function aggregateBy(data, keyFn, metric) {
   return result
 }
 
+// 多用户对比调色板（系列按选择顺序取色，循环使用）
+const CHART_PALETTE = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7', '#ec4899', '#84cc16']
+
 const lineChartSvg = computed(() => {
   if (!chartData.value.length) return '<div class="us-chart-empty">暂无统计数据，请先搜索</div>'
+  // 多用户对比模式：每个用户一条折线
+  if (chartUserDim.value.length > 1) {
+    const dates = [...new Set(chartData.value.map(r => r.date))].sort()
+    const series = chartUserDim.value.map(u => {
+      const byDate = aggregateBy(chartData.value.filter(r => r.username === u), r => r.date, lineMetric.value)
+      return { name: u, values: dates.map(d => byDate[d] || 0) }
+    })
+    return buildMultiLineSvg(dates, series, lineMetric.value)
+  }
   const byDate = aggregateBy(chartData.value, r => r.date, lineMetric.value)
   const dates = Object.keys(byDate).sort()
   const values = dates.map(d => byDate[d])
@@ -516,6 +541,16 @@ const lineChartSvg = computed(() => {
 
 const barChartSvg = computed(() => {
   if (!chartData.value.length) return '<div class="us-chart-empty">暂无统计数据，请先搜索</div>'
+  // 多用户对比模式：按模型分组的并排柱
+  if (chartUserDim.value.length > 1) {
+    const byModelAll = aggregateBy(chartData.value, r => r.modelName, barMetric.value)
+    const models = Object.keys(byModelAll).sort((a, b) => byModelAll[b] - byModelAll[a]).slice(0, 8)
+    const series = chartUserDim.value.map(u => {
+      const byModel = aggregateBy(chartData.value.filter(r => r.username === u), r => r.modelName, barMetric.value)
+      return { name: u, values: models.map(m => byModel[m] || 0) }
+    })
+    return buildGroupedBarSvg(models, series, barMetric.value)
+  }
   const byModel = aggregateBy(chartData.value, r => r.modelName, barMetric.value)
   const models = Object.keys(byModel).sort((a, b) => byModel[b] - byModel[a]).slice(0, 10)
   const values = models.map(m => byModel[m])
@@ -587,6 +622,107 @@ function buildBarSvg(labels, values, metric) {
     svg += `<text class="us-chart-label" x="${x + barW/2}" y="${padT + chartH + 16}" text-anchor="end" transform="rotate(-30 ${x + barW/2} ${padT + chartH + 16})">${esc(lbl)}</text>`
   })
   svg += `<text class="us-chart-axis-label" x="${padL}" y="${h - 12}">${esc(valueName + ' · 按模型 Top 10')}</text>`
+  svg += '</svg>'
+  return svg
+}
+
+/**
+ * 构建图例（色点 + 用户名），返回 svg 片段与占用高度。
+ * 宽度按字符估算（CJK≈12px，ASCII≈7px @font-size 11），超出画布宽度自动换行。
+ */
+function buildLegend(series, padL, w) {
+  const estW = name => [...String(name)].reduce((s, ch) => s + (ch.charCodeAt(0) > 255 ? 12 : 7), 0)
+  let x = padL, y = 16, svg = ''
+  series.forEach((s, i) => {
+    const itemW = 14 + estW(s.name) + 16
+    if (x + itemW > w - 10 && x > padL) { x = padL; y += 16 }
+    const color = CHART_PALETTE[i % CHART_PALETTE.length]
+    svg += `<rect x="${x}" y="${y - 8}" width="10" height="10" rx="2" fill="${color}"/>`
+    svg += `<text class="us-chart-label" x="${x + 14}" y="${y + 1}">${esc(s.name)}</text>`
+    x += itemW
+  })
+  return { svg, height: y + 8 }
+}
+
+/**
+ * 多用户折线对比图：series = [{ name, values }]，values 与 labels 等长（缺失日期已补 0）
+ */
+function buildMultiLineSvg(labels, series, metric) {
+  const w = 720, h = 340
+  const padL = 60, padR = 30, padB = 60
+  const legend = buildLegend(series, padL, w)
+  const padT = legend.height + 12
+  const chartW = w - padL - padR, chartH = h - padT - padB
+  const maxV = Math.max(...series.flatMap(s => s.values))
+  const niceMax = maxV > 0 ? Math.ceil(maxV * 1.15) : 1
+  const valueName = METRIC_NAMES[metric] || metric
+  const xAt = i => padL + (labels.length === 1 ? chartW / 2 : (i / (labels.length - 1)) * chartW)
+  let svg = `<svg viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" style="width:100%;height:100%;">`
+  svg += legend.svg
+  for (let i = 0; i <= 4; i++) {
+    const yy = padT + chartH - (i / 4) * chartH
+    svg += `<line class="us-chart-axis" x1="${padL}" y1="${yy}" x2="${w - padR}" y2="${yy}" stroke-opacity="0.15"/>`
+    svg += `<text class="us-chart-label" x="${padL - 8}" y="${yy + 4}" text-anchor="end">${fmtShort(niceMax * i / 4)}</text>`
+  }
+  series.forEach((s, si) => {
+    const color = CHART_PALETTE[si % CHART_PALETTE.length]
+    const points = s.values.map((v, i) => ({ x: xAt(i), y: padT + chartH - (v / niceMax) * chartH, v }))
+    if (points.length > 1) {
+      const path = 'M ' + points.map(p => `${p.x} ${p.y}`).join(' L ')
+      svg += `<path d="${path}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`
+    }
+    points.forEach((p, i) => {
+      svg += `<circle class="us-chart-point" cx="${p.x}" cy="${p.y}" r="4" fill="${color}" stroke="var(--bg-2, #1e1e2e)" stroke-width="1.5"><title>${esc(s.name)} · ${esc(labels[i])}\n${valueName}：${fmt(p.v)}</title></circle>`
+    })
+  })
+  const skipStep = labels.length > 8 ? Math.ceil(labels.length / 8) : 1
+  labels.forEach((lb, i) => {
+    if (i % skipStep !== 0 && i !== labels.length - 1) return
+    const dl = (lb && lb.length >= 10) ? lb.substring(5) : (lb || '')
+    svg += `<text class="us-chart-label" x="${xAt(i)}" y="${padT + chartH + 18}" text-anchor="middle">${esc(dl)}</text>`
+  })
+  svg += `<text class="us-chart-axis-label" x="${padL}" y="${h - 8}">${esc(valueName + ' · 按日期趋势（多用户对比）')}</text>`
+  svg += '</svg>'
+  return svg
+}
+
+/**
+ * 多用户分组柱状对比图：每个模型一组，组内每用户一根柱
+ */
+function buildGroupedBarSvg(labels, series, metric) {
+  const w = 720, h = 380
+  const padL = 60, padR = 20, padB = 110
+  const legend = buildLegend(series, padL, w)
+  const padT = legend.height + 12
+  const chartW = w - padL - padR, chartH = h - padT - padB
+  const maxV = Math.max(...series.flatMap(s => s.values))
+  const niceMax = maxV > 0 ? Math.ceil(maxV * 1.15) : 1
+  const step = chartW / Math.max(labels.length, 1)
+  const barW = Math.min(28, (step * 0.72) / Math.max(series.length, 1))
+  const valueName = METRIC_NAMES[metric] || metric
+  let svg = `<svg viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" style="width:100%;height:100%;">`
+  svg += legend.svg
+  for (let i = 0; i <= 4; i++) {
+    const yy = padT + chartH - (i / 4) * chartH
+    svg += `<line class="us-chart-axis" x1="${padL}" y1="${yy}" x2="${w - padR}" y2="${yy}" stroke-opacity="0.15"/>`
+    svg += `<text class="us-chart-label" x="${padL - 8}" y="${yy + 4}" text-anchor="end">${fmtShort(niceMax * i / 4)}</text>`
+  }
+  labels.forEach((m, i) => {
+    const groupX = padL + i * step + (step - barW * series.length) / 2
+    series.forEach((s, si) => {
+      const v = s.values[i]
+      const bh = (v / niceMax) * chartH
+      const x = groupX + si * barW
+      const y = padT + chartH - bh
+      const color = CHART_PALETTE[si % CHART_PALETTE.length]
+      svg += `<rect class="us-chart-bar-multi" x="${x}" y="${y}" width="${Math.max(barW - 2, 2)}" height="${bh}" rx="2" fill="${color}"><title>${esc(s.name)} · ${esc(m || '')}\n${valueName}：${fmt(v)}</title></rect>`
+    })
+    let lbl = m || ''
+    if (lbl.length > 14) lbl = lbl.substring(0, 13) + '…'
+    const cx = padL + i * step + step / 2
+    svg += `<text class="us-chart-label" x="${cx}" y="${padT + chartH + 16}" text-anchor="end" transform="rotate(-30 ${cx} ${padT + chartH + 16})">${esc(lbl)}</text>`
+  })
+  svg += `<text class="us-chart-axis-label" x="${padL}" y="${h - 12}">${esc(valueName + ' · 按模型 Top 8（多用户对比）')}</text>`
   svg += '</svg>'
   return svg
 }
@@ -740,16 +876,47 @@ function buildBarSvg(labels, values, metric) {
   outline: none;
   width: 130px;
 }
-.us-select {
-  cursor: pointer;
-  appearance: none;
-  -webkit-appearance: none;
-  /* 与 Element Plus 下拉一致的单个 chevron 箭头（替代原双三角拼接样式） */
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%237f8d9f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-  background-position: calc(100% - 8px) center;
-  background-size: 14px 14px;
-  background-repeat: no-repeat;
-  padding-right: 28px;
+/* 查询条件下拉（Element Plus el-select）暗色适配，风格对齐后台管理 */
+.us-el-select { width: 150px; }
+.us-el-select-wide { width: 190px; }
+.us-el-select-multi { width: 250px; }
+.us-el-select :deep(.el-select__wrapper) {
+  background: var(--paper, #252536);
+  box-shadow: 0 0 0 1px var(--border, #333) inset;
+  min-height: 30px;
+  font-size: 12px;
+}
+.us-el-select :deep(.el-select__wrapper:hover) {
+  box-shadow: 0 0 0 1px var(--primary, #6366f1) inset;
+}
+.us-el-select :deep(.el-select__wrapper.is-focused) {
+  box-shadow: 0 0 0 1px var(--primary, #6366f1) inset;
+}
+.us-el-select :deep(.el-select__placeholder) {
+  color: var(--ink, #eee);
+  font-size: 12px;
+}
+.us-el-select :deep(.el-select__placeholder.is-transparent) {
+  color: var(--ink-3, #999);
+}
+.us-el-select :deep(.el-select__selected-item) {
+  color: var(--ink, #eee);
+}
+.us-el-select :deep(.el-select__input) {
+  color: var(--ink, #eee);
+  font-size: 12px;
+}
+.us-el-select :deep(.el-select__caret),
+.us-el-select :deep(.el-select__clear) {
+  color: var(--ink-3, #999);
+}
+.us-el-select :deep(.el-tag) {
+  background: rgba(99,102,241,0.15);
+  color: #818cf8;
+  border-color: transparent;
+}
+.us-el-select :deep(.el-tag .el-tag__close) {
+  color: #818cf8;
 }
 .us-actions {
   display: flex;
@@ -773,40 +940,28 @@ function buildBarSvg(labels, values, metric) {
   border-color: var(--primary, #6366f1);
   color: #fff;
 }
-.us-table-wrap {
-  overflow-x: auto;
-  border: 1px solid var(--border, #333);
-  border-radius: 8px;
-  position: relative;
-  transition: box-shadow 0.15s;
-}
-/* 横向滚动阴影：未滚动到右边缘时显示右侧阴影提示 */
-.us-table-wrap.is-scrolled {
-  box-shadow: inset -10px 0 8px -8px rgba(0,0,0,0.25);
-}
-.us-table {
-  width: 100%;
-  border-collapse: collapse;
+/* el-table 弹窗主题适配：跟随弹窗 CSS 变量，暗色/亮色自动切换 */
+.us-el-table {
+  --el-table-border-color: var(--border, #333);
+  --el-table-header-bg-color: var(--paper, #252536);
+  --el-table-header-text-color: var(--ink-3, #999);
+  --el-table-bg-color: transparent;
+  --el-table-tr-bg-color: transparent;
+  --el-table-row-hover-bg-color: var(--paper-2, #2a2a3e);
+  --el-table-text-color: var(--ink-2, #ccc);
+  --el-fill-color-lighter: var(--paper, #252536);
+  --el-text-color-secondary: var(--ink-4, #666);
   font-size: 12px;
+  border-radius: 8px;
+  overflow: hidden;
 }
-.us-table th {
-  padding: 10px 12px;
-  text-align: left;
-  background: var(--paper, #252536);
-  color: var(--ink-3, #999);
-  font-weight: 500;
+/* 单元格强制单行展示，超出列宽省略（与后台管理一致） */
+.us-el-table :deep(.cell) {
   white-space: nowrap;
+  text-overflow: ellipsis;
 }
-.us-table td {
-  padding: 9px 12px;
-  border-top: 1px solid var(--border, #333);
-  color: var(--ink-2, #ccc);
-  white-space: nowrap;
-}
-.us-empty {
-  text-align: center;
-  color: var(--ink-4, #666);
-  padding: 24px !important;
+.us-el-table :deep(.el-table__cell) {
+  padding: 6px 0;
 }
 .us-thinking-badge {
   font-size: 10px;
@@ -916,6 +1071,8 @@ function buildBarSvg(labels, values, metric) {
 }
 .us-chart-canvas :deep(.us-chart-bar) { fill: var(--primary, #6366f1); fill-opacity: 0.85; transition: fill-opacity 0.15s; cursor: pointer; }
 .us-chart-canvas :deep(.us-chart-bar:hover) { fill-opacity: 1; }
+.us-chart-canvas :deep(.us-chart-bar-multi) { fill-opacity: 0.85; transition: fill-opacity 0.15s; cursor: pointer; }
+.us-chart-canvas :deep(.us-chart-bar-multi:hover) { fill-opacity: 1; }
 .us-chart-canvas :deep(.us-chart-axis) { stroke: var(--ink-3, #999); stroke-width: 1; }
 .us-chart-canvas :deep(.us-chart-label) { fill: var(--ink-3, #999); font-size: 11px; }
 .us-chart-canvas :deep(.us-chart-value-label) { fill: var(--ink-2, #ccc); font-size: 11px; text-anchor: middle; }

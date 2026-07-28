@@ -36,24 +36,23 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
           </div>
           <div class="upload-image-btn" title="清除上下文（后续对话不再携带以上历史）" @click="emit('clear-context')">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m13 11 9-9"/><path d="M14.6 12.6c.8.8.9 2.1.2 3L10 22l-8-8 6.4-4.8c.9-.7 2.2-.6 3 .2Z"/><path d="m6.8 10.4 6.8 6.8"/><path d="m5 17 1.4-1.4"/></svg>
           </div>
           <input type="file" ref="fileInputRef" accept="image/*" multiple style="display:none" @change="handleFileUpload">
           <div class="model-select-area">
             <img v-if="currentIconIsImg" :src="currentIcon" class="model-area-icon" />
             <span v-else-if="currentIcon" class="model-area-icon model-area-emoji">{{ currentIcon }}</span>
             <el-cascader
+              v-if="!isMobile"
               v-model="cascaderValue"
               :options="cascaderOptions"
               :props="cascaderProps"
               :show-all-levels="false"
               :style="{ width: modelInputWidth }"
-              :filterable="!isMobile"
-              :key="'cascader-' + (isMobile ? 'mobile' : 'desktop')"
+              filterable
               placement="top"
               popper-class="model-cascader-popper"
               @change="handleModelChange"
-              @visible-change="onCascaderVisibleChange"
             >
               <template #default="{ data }">
                 <img v-if="data.icon && data.icon.startsWith('/')" :src="data.icon" class="cascader-node-icon" />
@@ -61,6 +60,24 @@
                 <span class="cascader-node-label">{{ data.label }}</span>
               </template>
             </el-cascader>
+            <!-- 窄屏：单列下拉按厂商分组展示，避免级联两列在手机上过窄 -->
+            <el-select
+              v-else
+              v-model="mobileModelId"
+              :style="{ width: modelInputWidth }"
+              placement="top"
+              popper-class="model-select-popper-mobile"
+              @change="handleMobileModelChange"
+              @visible-change="onCascaderVisibleChange"
+            >
+              <el-option-group v-for="g in cascaderOptions" :key="g.value" :label="g.label">
+                <el-option v-for="m in g.children" :key="m.value" :value="m.value" :label="m.label">
+                  <img v-if="m.icon && m.icon.startsWith('/')" :src="m.icon" class="cascader-node-icon" />
+                  <span v-else-if="m.icon" class="cascader-node-icon cascader-node-emoji">{{ m.icon }}</span>
+                  <span class="cascader-node-label">{{ m.label }}</span>
+                </el-option>
+              </el-option-group>
+            </el-select>
           </div>
           <button class="send-btn" :class="{ stop: isStreaming }" @click="handleSendClick" :title="isStreaming ? '停止' : '发送'">
             <svg v-if="!isStreaming" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
@@ -81,7 +98,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useModelsStore } from '@/stores/models'
 import { useTheme } from '@/composables/useTheme'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElNotification } from 'element-plus'
 import { APP_VERSION } from '@/config/version'
 import { uploadChatImage } from '@/api/chat'
 
@@ -105,8 +122,8 @@ const fileInputRef = ref(null)
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024
 
-// 移动端判定：窄屏(≤768px)关闭 el-cascader 的 filterable，
-// 避免点击模型选择器时内部搜索 input 获焦而唤起手机软键盘
+// 移动端判定：窄屏(≤768px)改用单列分组下拉(el-select)选模型，
+// 同时避免级联选择器搜索 input 获焦唤起手机软键盘
 const isMobile = ref(typeof window !== 'undefined' && window.innerWidth <= 768)
 function handleResize() {
   isMobile.value = window.innerWidth <= 768
@@ -119,6 +136,7 @@ onBeforeUnmount(() => {
   if (container) {
     container.style.overflow = ''
     container.style.touchAction = ''
+    container.style.paddingRight = ''
   }
   document.body.style.touchAction = ''
 })
@@ -209,11 +227,38 @@ function handleModelChange(val) {
   if (!val || val.length < 2) return
   // bot 输出未结束前不可切换模型：允许打开选择器浏览，但选中不生效并回退到当前模型
   if (props.isStreaming) {
-    ElMessage.warning('回复生成中，暂不可切换模型')
+    notifyStreamingBlocked()
     syncCascaderFromStore()
     return
   }
   const modelId = val[1]
+  applyModelSelect(modelId)
+}
+
+// 窄屏单列下拉的选中值（模型 id），与 store 保持同步
+const mobileModelId = ref('')
+watch(() => modelsStore.currentModelId, id => { mobileModelId.value = id || '' }, { immediate: true })
+
+function handleMobileModelChange(modelId) {
+  if (props.isStreaming) {
+    notifyStreamingBlocked()
+    mobileModelId.value = modelsStore.currentModelId || ''
+    return
+  }
+  applyModelSelect(modelId)
+}
+
+// 右上角通知比顶部居中的 ElMessage 更醒目，避免被对话内容掩盖忽略
+function notifyStreamingBlocked() {
+  ElNotification.warning({
+    title: '暂不可切换模型',
+    message: '回复生成中，请等待当前回答完成后再切换',
+    position: 'top-right',
+    duration: 3000
+  })
+}
+
+function applyModelSelect(modelId) {
   const model = modelsStore.findModelById(modelId)
   if (model) modelsStore.selectModel(model)
   // 切换模型后重置深度思考开关（与旧版一致，避免上一模型的思考状态带到新模型）
@@ -229,6 +274,14 @@ function onCascaderVisibleChange(visible) {
   if (visible) {
     if (container) {
       savedContainerScrollTop = container.scrollTop
+      // overflow:hidden 会使经典滚动条消失、内容区变宽导致文字回流（每行多排一字），
+      // 锁定前测量滚动条实占宽度，用等宽 padding-right 补偿保持行宽不变
+      const cs = getComputedStyle(container)
+      const scrollbarW = container.offsetWidth - container.clientWidth
+        - (parseFloat(cs.borderLeftWidth) || 0) - (parseFloat(cs.borderRightWidth) || 0)
+      if (scrollbarW > 0) {
+        container.style.paddingRight = ((parseFloat(cs.paddingRight) || 0) + scrollbarW) + 'px'
+      }
       container.style.overflow = 'hidden'
       container.style.touchAction = 'none'
     }
@@ -237,6 +290,7 @@ function onCascaderVisibleChange(visible) {
     if (container) {
       container.style.overflow = ''
       container.style.touchAction = ''
+      container.style.paddingRight = ''
       container.scrollTop = savedContainerScrollTop
     }
     document.body.style.touchAction = ''

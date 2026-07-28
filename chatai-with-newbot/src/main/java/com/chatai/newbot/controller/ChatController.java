@@ -58,10 +58,16 @@ public class ChatController {
             return Flux.just("{\"error\":{\"message\":\"该模型已被禁用\",\"type\":\"config_error\"}}");
         }
 
-        // 权限检查：visibleToAll 或 admin 或 在用户的allowedModelIds中
-        if (!Boolean.TRUE.equals(config.getVisibleToAll()) && !user.isAdmin()
-                && !user.getAllowedModelIds().contains(config.getId())) {
-            return Flux.just("{\"error\":{\"message\":\"无权使用该模型\",\"type\":\"permission_error\"}}");
+        // 权限检查（与 getVisibleModels 语义一致）：admin 不限；配置了 allowedModelIds（非空）
+        // 的用户仅能使用白名单内模型；未配置则可使用所有公开（visibleToAll）模型
+        if (!user.isAdmin()) {
+            List<String> allowed = user.getAllowedModelIds();
+            boolean permitted = (allowed != null && !allowed.isEmpty())
+                    ? allowed.contains(config.getId())
+                    : Boolean.TRUE.equals(config.getVisibleToAll());
+            if (!permitted) {
+                return Flux.just("{\"error\":{\"message\":\"无权使用该模型\",\"type\":\"permission_error\"}}");
+            }
         }
 
         // 限流与配额检查（admin 豁免）

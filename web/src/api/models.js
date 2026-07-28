@@ -20,9 +20,9 @@ export function deleteModel(id) {
   return request.delete(`/admin/models/${id}`)
 }
 
-// 模型连通性测试（发一条最小请求验证 API Key/URL 是否可用）
+// 模型连通性测试（手动触发：连通验证 + 测速两次请求，超时适当放宽）
 export function testModel(id) {
-  return request.post(`/admin/models/${id}/test`, null, { timeout: 30000 })
+  return request.post(`/admin/models/${id}/test`, null, { timeout: 60000 })
 }
 
 // 批量快速接入

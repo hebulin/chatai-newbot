@@ -164,6 +164,12 @@ onMounted(async () => {
   await modelsStore.loadModels()
   await nextTick()
   scrollFollow.init()
+  // 刷新/首次进入时定位到当前会话最新消息：init 只绑定事件不主动滚动，
+  // 纯文本会话无后续 DOM 变化时 MutationObserver 不会触发，导致停在顶部
+  scrollFollow.scrollToBottomImmediate()
+  // 兜底：首屏图片/字体加载完成后高度可能继续增长且不触发 DOM 变更，
+  // 延迟再贴底一次（requestScrollToBottom 会尊重用户已主动上滑的状态）
+  setTimeout(() => scrollFollow.requestScrollToBottom(), 300)
 
   window.addEventListener('resize', handleResize)
 })
@@ -445,8 +451,8 @@ function handleStop() {
   streamChat.stop()
 }
 
-// 清除上下文：向当前会话插入一条分隔线，后续对话不再携带此前历史
-function handleClearContext() {
+// 清除上下文：二次确认后向当前会话插入一条分隔线，后续对话不再携带此前历史
+async function handleClearContext() {
   if (streamChat.isStreaming.value) {
     ElMessage.warning('请等待回答完成')
     return
@@ -462,6 +468,13 @@ function handleClearContext() {
     ElMessage.info('上下文已清除')
     return
   }
+  try {
+    await ElMessageBox.confirm('清除后，后续对话将不再携带以上历史消息，确定清除上下文？', '清除上下文', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch { return }
   chatStore.addMessage(chatId, { role: 'divider', time: null })
   nextTick(() => scrollFollow.scrollToBottomImmediate())
 }
