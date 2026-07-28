@@ -1848,6 +1848,53 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
 }
 .image-preview-remove:hover { background: #dc2626; }
 
+/* 附件文档预览区（输入框上方） */
+.file-preview-area {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 0 4px;
+    margin-bottom: 4px;
+}
+.file-preview-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 260px;
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 11px;
+    font-family: var(--mono);
+    color: var(--fg-2, inherit);
+}
+.file-preview-item svg { flex-shrink: 0; }
+.file-preview-item.uploading { opacity: 0.6; }
+.file-preview-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.file-preview-meta {
+    flex-shrink: 0;
+    color: var(--fg-3);
+}
+.file-preview-remove {
+    flex-shrink: 0;
+    width: 16px; height: 16px;
+    background: transparent;
+    border: none;
+    color: var(--fg-3);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition: color 0.15s;
+    border-radius: 50%;
+}
+.file-preview-remove:hover { color: var(--danger); }
+
 .paste-warning {
     color: var(--warn);
     font-size: 11px;
@@ -1874,6 +1921,30 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
     border-radius: var(--radius);
 }
 .user-msg-img:hover { opacity: 0.85; }
+
+/* 用户消息内的附件文档 chip（仅展示文件名，解析文本由后端合并进模型请求） */
+.user-msg-files {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 4px 0;
+}
+.user-msg-file {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    max-width: 240px;
+    padding: 4px 8px;
+    border: 1px solid rgba(255,255,255,0.2);
+    background: rgba(255,255,255,0.1);
+    border-radius: var(--radius);
+    font-size: 11px;
+    font-family: var(--mono);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.user-msg-file svg { flex-shrink: 0; }
 
 .ai-image-wrapper {
     position: relative;

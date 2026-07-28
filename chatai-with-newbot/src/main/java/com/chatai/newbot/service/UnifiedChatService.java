@@ -1,5 +1,6 @@
 package com.chatai.newbot.service;
 
+import com.chatai.newbot.model.ChatAttachment;
 import com.chatai.newbot.model.ChatRequest;
 import com.chatai.newbot.model.ModelConfig;
 import com.chatai.newbot.model.NewBotMessage;
@@ -102,6 +103,8 @@ public class UnifiedChatService {
                 }
                 Map<String, Object> m = new HashMap<>();
                 m.put("role", msg.getRole());
+                // 附件文档：解析文本合并进文本内容（纯文本方式，不依赖多模态）
+                String textContent = contentWithAttachments(msg);
                 // 多模态：当消息含图片时，content转为 OpenAI Vision 格式的数组
                 if (msg.getImages() != null && !msg.getImages().isEmpty() && config.isSupportsMultimodal()) {
                     List<Map<String, Object>> contentParts = new ArrayList<>();
@@ -119,15 +122,15 @@ public class UnifiedChatService {
                         contentParts.add(imagePart);
                     }
                     // 添加文本部分
-                    if (msg.getContent() != null && !msg.getContent().trim().isEmpty()) {
+                    if (textContent != null && !textContent.trim().isEmpty()) {
                         Map<String, Object> textPart = new HashMap<>();
                         textPart.put("type", "text");
-                        textPart.put("text", msg.getContent());
+                        textPart.put("text", textContent);
                         contentParts.add(textPart);
                     }
                     m.put("content", contentParts);
                 } else {
-                    m.put("content", msg.getContent());
+                    m.put("content", textContent);
                 }
                 messages.add(m);
             }
@@ -295,6 +298,8 @@ public class UnifiedChatService {
                 }
                 Map<String, Object> m = new HashMap<>();
                 m.put("role", msg.getRole());
+                // 附件文档：解析文本合并进文本内容（纯文本方式，不依赖多模态）
+                String textContent = contentWithAttachments(msg);
                 // 多模态：Anthropic 图片格式为 {type:"image", source:{type:"base64",...}}
                 if (msg.getImages() != null && !msg.getImages().isEmpty() && config.isSupportsMultimodal()) {
                     List<Map<String, Object>> contentParts = new ArrayList<>();
@@ -327,15 +332,15 @@ public class UnifiedChatService {
                         imagePart.put("source", source);
                         contentParts.add(imagePart);
                     }
-                    if (msg.getContent() != null && !msg.getContent().trim().isEmpty()) {
+                    if (textContent != null && !textContent.trim().isEmpty()) {
                         Map<String, Object> textPart = new HashMap<>();
                         textPart.put("type", "text");
-                        textPart.put("text", msg.getContent());
+                        textPart.put("text", textContent);
                         contentParts.add(textPart);
                     }
                     m.put("content", contentParts);
                 } else {
-                    m.put("content", msg.getContent());
+                    m.put("content", textContent);
                 }
                 messages.add(m);
             }
@@ -576,6 +581,33 @@ public class UnifiedChatService {
             return messages;
         }
         return messages.subList(messages.size() - max, messages.size());
+    }
+
+    /**
+     * 将消息携带的附件文档内容合并进文本内容（附件在前、用户输入在后）。
+     * 附件在上传时已解析为纯文本落盘，此处直接读回拼接，
+     * 因此附件能力不依赖模型多模态，任意文本模型均可理解文档内容。
+     * @param msg 待处理消息（无附件时原样返回 content）
+     * @return 合并附件后的文本内容
+     */
+    private String contentWithAttachments(NewBotMessage msg) {
+        String content = msg.getContent() == null ? "" : msg.getContent();
+        if (msg.getAttachments() == null || msg.getAttachments().isEmpty()) {
+            return msg.getContent();
+        }
+        StringBuilder sb = new StringBuilder();
+        for (ChatAttachment att : msg.getAttachments()) {
+            if (att == null) {
+                continue;
+            }
+            String name = att.getName() == null ? "未命名文档" : att.getName();
+            String text = fileStorageService.readDocumentText(att.getUrl());
+            sb.append("【附件文档：").append(name).append("】\n");
+            sb.append(text != null ? text : "（该附件内容已失效，无法读取）");
+            sb.append("\n【附件文档结束】\n\n");
+        }
+        sb.append(content);
+        return sb.toString();
     }
 
     /**

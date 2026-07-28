@@ -303,12 +303,12 @@ async function handleLogout() {
   } catch (e) { /* cancelled */ }
 }
 
-async function handleSend({ text, images, deepThinking }) {
+async function handleSend({ text, images, attachments, deepThinking }) {
   if (streamChat.isStreaming.value) {
     ElMessage.warning('当前还有内容没回答完，请点击右侧停止按钮中断')
     return
   }
-  if (!text && (!images || images.length === 0)) return
+  if (!text && (!images || images.length === 0) && (!attachments || attachments.length === 0)) return
   if (!modelsStore.currentModelId) {
     ElMessage.warning('请先选择模型')
     return
@@ -321,9 +321,12 @@ async function handleSend({ text, images, deepThinking }) {
   chatStore.suspendSync()
   try {
     // 添加用户消息（本地先渲染）
-    const userMsg = { role: 'user', content: text || '(图片)', time: nowStr() }
+    const userMsg = { role: 'user', content: text || (images && images.length ? '(图片)' : '(附件)'), time: nowStr() }
     if (images && images.length > 0) {
       userMsg.images = images.slice()
+    }
+    if (attachments && attachments.length > 0) {
+      userMsg.attachments = attachments.slice()
     }
     chatStore.addMessage(chatId, userMsg)
 
@@ -366,10 +369,13 @@ async function startStream(chatId, deepThinking) {
   const messages = source.slice(startIdx)
     .filter(m => m.role === 'user' || (m.role === 'assistant' && m.content && m.content.trim()))
     .map(m => {
-      if (m.role === 'user' && m.images && m.images.length > 0) {
-        return { role: m.role, content: m.content, images: m.images }
+      const base = { role: m.role, content: m.content }
+      if (m.role === 'user') {
+        if (m.images && m.images.length > 0) base.images = m.images
+        // 附件引用随历史消息携带，后端每轮读回解析文本合并进内容，不依赖多模态
+        if (m.attachments && m.attachments.length > 0) base.attachments = m.attachments
       }
-      return { role: m.role, content: m.content }
+      return base
     })
 
   const requestBody = {
@@ -543,14 +549,16 @@ async function handleEditResend(idx) {
     newText = (res.value || '').trim()
   } catch { return }
 
-  // 保留原消息携带的图片
+  // 保留原消息携带的图片与附件
   const images = msg.images && msg.images.length ? msg.images.slice() : null
+  const attachments = msg.attachments && msg.attachments.length ? msg.attachments.slice() : null
   // 同样挂起全量同步，bot 输出结束后再统一上传
   chatStore.suspendSync()
   try {
     chatStore.truncateMessages(chatId, idx)
     const userMsg = { role: 'user', content: newText, time: nowStr() }
     if (images) userMsg.images = images
+    if (attachments) userMsg.attachments = attachments
     chatStore.addMessage(chatId, userMsg)
     nextTick(() => scrollFollow.scrollToBottomImmediate())
     await startStream(chatId, isDeepThinking.value)
