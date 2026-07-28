@@ -43,6 +43,16 @@ public class AuthInterceptor implements HandlerInterceptor {
             return false;
         }
 
+        // 被禁用账号：立即注销登录态并拒绝请求
+        if (user.isDisabled()) {
+            storageService.removeTokensByUserId(user.getId());
+            response.setStatus(401);
+            response.setHeader("X-Auth-Reason", "account_disabled");
+            response.setContentType("application/json;charset=UTF-8");
+            response.getWriter().write("{\"error\":\"账号已被禁用，请联系管理员\"}");
+            return false;
+        }
+
         // IP 校验：登录时已将 IP 绑定到 token，若当前请求 IP 与登录 IP 不一致，则要求重新登录
         String loginIp = storageService.getTokenIp(token);
         if (loginIp != null && !loginIp.isEmpty()) {

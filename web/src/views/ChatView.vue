@@ -17,6 +17,9 @@
         </div>
       </div>
       <div class="top-right">
+        <button class="icon-btn share-chat-btn" @click="handleShareChat" title="分享当前会话" aria-label="分享">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+        </button>
         <button class="theme-toggle-btn" @click="toggleTheme" title="切换主题" aria-label="主题">
           <span class="toggle-track"><span class="toggle-knob"></span></span>
         </button>
@@ -30,6 +33,7 @@
       @new-chat="handleNewChat"
       @switch-chat="handleSwitchChat"
       @delete-chat="handleDeleteChat"
+      @share-chat="doShare"
       @open-settings="showSettings = true"
       @open-about="showAbout = true"
       @open-stats="showStats = true"
@@ -49,6 +53,8 @@
             :streaming-msg="streamingMsg"
             @copy="copyMsgContent"
             @lightbox="lightboxSrc = $event"
+            @regenerate="handleRegenerate"
+            @edit-resend="handleEditResend"
           />
         </div>
 
@@ -60,6 +66,9 @@
         </div>
       </div>
 
+      <!-- 当前会话同步提示（同步超过 3 秒才显示） -->
+      <div v-if="syncTipVisible" class="chat-sync-tip">当前会话记录同步中…</div>
+
       <!-- 输入区 -->
       <ChatInput
         :is-streaming="streamChat.isStreaming.value"
@@ -67,6 +76,7 @@
         :supports-multimodal="modelsStore.currentModelSupportsMultimodal"
         @send="handleSend"
         @stop="handleStop"
+        @clear-context="handleClearContext"
       />
     </main>
 
@@ -96,6 +106,8 @@ import { useStreamChat } from '@/composables/useStreamChat'
 import { useScrollFollow } from '@/composables/useScrollFollow'
 import { useTheme } from '@/composables/useTheme'
 import { logout as apiLogout } from '@/api/auth'
+import { saveChatHistory, generateChatTitle } from '@/api/chat'
+import { createShare } from '@/api/share'
 import ChatSidebar from '@/components/chat/ChatSidebar.vue'
 import ChatMessages from '@/components/chat/ChatMessages.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
@@ -125,6 +137,7 @@ const isDeepThinking = ref(false)
 const pendingImages = ref([])
 
 const streamingMsg = ref(null)
+const syncTipVisible = ref(false)
 
 const brandIconSrc = computed(() => {
   const theme = getTheme()
@@ -132,6 +145,8 @@ const brandIconSrc = computed(() => {
 })
 
 const chatTitle = computed(() => {
+  const meta = chatStore.chatMeta[chatStore.currentChatId] || {}
+  if (meta.title && meta.title.trim()) return meta.title
   const msgs = chatStore.currentMessages
   const firstUser = msgs.find(m => m.role === 'user')
   if (firstUser) {
@@ -171,6 +186,61 @@ function toggleSidebar() {
     sidebarCollapsed.value = false
   } else {
     sidebarCollapsed.value = !sidebarCollapsed.value
+  }
+}
+
+// 顶栏分享按钮：分享当前会话
+function handleShareChat() {
+  doShare(chatStore.currentChatId)
+}
+
+// 分享指定会话：先选择有效期，再强制同步会话到服务端，最后生成只读分享链接并复制
+async function doShare(chatId) {
+  const msgs = chatStore.chats[chatId] || []
+  if (!msgs.some(m => m.role === 'user')) {
+    ElMessage.info('该会话还没有内容，无法分享')
+    return
+  }
+  let expireDays = 0
+  try {
+    const { value } = await ElMessageBox.prompt('设置分享链接有效期（天）。0 或留空表示永久有效', '分享会话', {
+      confirmButtonText: '生成链接',
+      cancelButtonText: '取消',
+      inputValue: '0',
+      inputValidator: (v) => {
+        if (v === '' || v == null) return true
+        return /^\d+$/.test(String(v).trim()) || '请输入非负整数'
+      }
+    })
+    const n = parseInt(String(value || '0').trim(), 10)
+    expireDays = isNaN(n) ? 0 : n
+  } catch { return }
+  try {
+    // 绕过 500ms 防抖，确保服务端已持有最新会话
+    await saveChatHistory({
+      lastChatId: chatStore.currentChatId,
+      chats: chatStore.chats,
+      chatMeta: chatStore.chatMeta,
+      deletedChatIds: chatStore.deletedChatIds
+    })
+    const res = await createShare(chatId, expireDays)
+    if (res && res.success) {
+      const url = location.origin + '/share/' + res.data.id
+      let copied = false
+      try {
+        await navigator.clipboard.writeText(url)
+        copied = true
+      } catch (e) { /* 非 https 环境剪贴板可能不可用 */ }
+      const expiryTip = res.data.expiresAt ? ('\n有效期至：' + res.data.expiresAt) : '\n永久有效'
+      ElMessageBox.alert(url + expiryTip, '分享链接已生成' + (copied ? '（已复制到剪贴板）' : ''), {
+        confirmButtonText: '知道了',
+        dangerouslyUseHTMLString: false
+      })
+    } else {
+      ElMessage.error((res && res.message) || '分享失败')
+    }
+  } catch (e) {
+    // 异常提示已由 request 拦截器统一处理
   }
 }
 
@@ -241,17 +311,53 @@ async function handleSend({ text, images, deepThinking }) {
   isDeepThinking.value = deepThinking
   const chatId = chatStore.currentChatId
 
-  // 添加用户消息
-  const userMsg = { role: 'user', content: text || '(图片)', time: nowStr() }
-  if (images && images.length > 0) {
-    userMsg.images = images.slice()
+  // 挂起全量同步：发送阶段只做当前会话同步，全量上传延后到 bot 输出结束
+  chatStore.suspendSync()
+  try {
+    // 添加用户消息（本地先渲染）
+    const userMsg = { role: 'user', content: text || '(图片)', time: nowStr() }
+    if (images && images.length > 0) {
+      userMsg.images = images.slice()
+    }
+    chatStore.addMessage(chatId, userMsg)
+
+    nextTick(() => scrollFollow.scrollToBottomImmediate())
+
+    // 正式发送前先同步当前会话：其他端可能已在该会话新增记录，合并渲染后再对话
+    await syncCurrentChatBeforeSend(chatId, 1)
+
+    await startStream(chatId, deepThinking)
+  } finally {
+    chatStore.resumeSync()
   }
-  chatStore.addMessage(chatId, userMsg)
+}
 
-  nextTick(() => scrollFollow.scrollToBottomImmediate())
+// 发送前同步当前会话；超过 3 秒在输入框上方提示“同步中”，完成后才开始对话；同步失败不阻塞发送
+async function syncCurrentChatBeforeSend(chatId, pendingCount) {
+  const tipTimer = setTimeout(() => { syncTipVisible.value = true }, 3000)
+  try {
+    const merged = await chatStore.syncCurrentChatFromServer(chatId, pendingCount)
+    if (merged) {
+      await nextTick()
+      scrollFollow.scrollToBottomImmediate()
+    }
+  } catch (e) {
+    console.error('当前会话同步失败:', e)
+  } finally {
+    clearTimeout(tipTimer)
+    syncTipVisible.value = false
+  }
+}
 
-  // 准备请求
-  const messages = chatStore.chats[chatId]
+// 基于当前会话已有消息历史发起流式请求（发送/重新生成/编辑重发共用）
+async function startStream(chatId, deepThinking) {
+  // 只携带最后一个“清除上下文”分隔线之后的消息
+  const source = chatStore.chats[chatId] || []
+  let startIdx = 0
+  for (let i = source.length - 1; i >= 0; i--) {
+    if (source[i].role === 'divider') { startIdx = i + 1; break }
+  }
+  const messages = source.slice(startIdx)
     .filter(m => m.role === 'user' || (m.role === 'assistant' && m.content && m.content.trim()))
     .map(m => {
       if (m.role === 'user' && m.images && m.images.length > 0) {
@@ -320,6 +426,8 @@ async function handleSend({ text, images, deepThinking }) {
       }
       chatStore.addMessage(chatId, msg)
       streamingMsg.value = null
+      // 首次问答完成后尝试 AI 自动命名（未手动命名时）
+      maybeGenerateTitle(chatId)
       nextTick(() => {
         scrollFollow.syncScrollToBottom()
         scrollFollow.updateNavButtons()
@@ -335,6 +443,107 @@ async function handleSend({ text, images, deepThinking }) {
 
 function handleStop() {
   streamChat.stop()
+}
+
+// 清除上下文：向当前会话插入一条分隔线，后续对话不再携带此前历史
+function handleClearContext() {
+  if (streamChat.isStreaming.value) {
+    ElMessage.warning('请等待回答完成')
+    return
+  }
+  const chatId = chatStore.currentChatId
+  const msgs = chatStore.chats[chatId] || []
+  if (msgs.length === 0) {
+    ElMessage.info('当前会话为空，无需清除')
+    return
+  }
+  // 避免连续插入多条分隔线
+  if (msgs[msgs.length - 1].role === 'divider') {
+    ElMessage.info('上下文已清除')
+    return
+  }
+  chatStore.addMessage(chatId, { role: 'divider', time: null })
+  nextTick(() => scrollFollow.scrollToBottomImmediate())
+}
+
+// 首次问答完成后 AI 自动命名会话（仅当仅有一轮问答且未手动命名）
+async function maybeGenerateTitle(chatId) {
+  const msgs = chatStore.chats[chatId] || []
+  const userMsgs = msgs.filter(m => m.role === 'user')
+  const assistantMsgs = msgs.filter(m => m.role === 'assistant' && m.content && !m.interrupted)
+  if (userMsgs.length !== 1 || assistantMsgs.length < 1) return
+  const meta = chatStore.chatMeta[chatId] || {}
+  if (meta.title && meta.title.trim()) return
+  try {
+    const res = await generateChatTitle(modelsStore.currentModelId, userMsgs[0].content, assistantMsgs[0].content)
+    if (res && res.success && res.title) {
+      chatStore.setAutoTitleIfEmpty(chatId, res.title)
+    }
+  } catch { /* 失败则保留默认标题 */ }
+}
+
+// 重新生成：删除最后一条 AI 回复，基于其前的历史重新请求
+async function handleRegenerate(idx) {
+  if (streamChat.isStreaming.value) {
+    ElMessage.warning('请等待回答完成')
+    return
+  }
+  if (!modelsStore.currentModelId) {
+    ElMessage.warning('请先选择模型')
+    return
+  }
+  const chatId = chatStore.currentChatId
+  // 同样挂起全量同步，bot 输出结束后再统一上传（截断+新回复一次性同步）
+  chatStore.suspendSync()
+  try {
+    chatStore.truncateMessages(chatId, idx)
+    nextTick(() => scrollFollow.scrollToBottomImmediate())
+    await startStream(chatId, isDeepThinking.value)
+  } finally {
+    chatStore.resumeSync()
+  }
+}
+
+// 编辑重发：弹窗编辑用户消息，删除该消息及其后所有消息后重新发送
+async function handleEditResend(idx) {
+  if (streamChat.isStreaming.value) {
+    ElMessage.warning('请等待回答完成')
+    return
+  }
+  if (!modelsStore.currentModelId) {
+    ElMessage.warning('请先选择模型')
+    return
+  }
+  const chatId = chatStore.currentChatId
+  const msg = (chatStore.chats[chatId] || [])[idx]
+  if (!msg || msg.role !== 'user') return
+
+  let newText
+  try {
+    const res = await ElMessageBox.prompt('确认后将删除该消息及其后的所有回复，并重新发送', '编辑重发', {
+      inputType: 'textarea',
+      inputValue: msg.content,
+      confirmButtonText: '重新发送',
+      cancelButtonText: '取消',
+      inputValidator: (v) => (v && v.trim()) ? true : '内容不能为空'
+    })
+    newText = (res.value || '').trim()
+  } catch { return }
+
+  // 保留原消息携带的图片
+  const images = msg.images && msg.images.length ? msg.images.slice() : null
+  // 同样挂起全量同步，bot 输出结束后再统一上传
+  chatStore.suspendSync()
+  try {
+    chatStore.truncateMessages(chatId, idx)
+    const userMsg = { role: 'user', content: newText, time: nowStr() }
+    if (images) userMsg.images = images
+    chatStore.addMessage(chatId, userMsg)
+    nextTick(() => scrollFollow.scrollToBottomImmediate())
+    await startStream(chatId, isDeepThinking.value)
+  } finally {
+    chatStore.resumeSync()
+  }
 }
 
 function copyMsgContent(content) {

@@ -205,6 +205,22 @@ public interface StorageService {
     List<UsageLog> getUsageLogsByUser(String userId);
 
     /**
+     * 统计指定用户在指定日期的调用次数（用于每日配额限流）
+     * @param userId 用户ID
+     * @param day 日期字符串（yyyy-MM-dd）
+     * @return 当日调用次数
+     */
+    int countUsageByUserAndDay(String userId, String day);
+
+    /**
+     * 统计指定用户在指定日期消耗的 Token 总量（prompt + completion，用于每日 Token 限额）
+     * @param userId 用户ID
+     * @param day 日期字符串（yyyy-MM-dd）
+     * @return 当日 Token 总量
+     */
+    long sumTokensByUserAndDay(String userId, String day);
+
+    /**
      * 更新使用记录（匹配 userId+timestamp+modelId）
      * @param log 更新后的使用记录
      */

@@ -3,6 +3,7 @@ package com.chatai.newbot.service;
 import com.chatai.newbot.model.ChatRequest;
 import com.chatai.newbot.model.ModelConfig;
 import com.chatai.newbot.model.NewBotMessage;
+import com.chatai.newbot.model.PromptPreset;
 import com.chatai.newbot.model.UsageLog;
 import com.chatai.newbot.model.User;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -13,6 +14,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Flux;
 
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -28,10 +30,12 @@ public class UnifiedChatService {
     private static final String DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant.";
     private static final String ANTHROPIC_VERSION = "2023-06-01";
     private final StorageManager storageService;
+    private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public UnifiedChatService(StorageManager storageService) {
+    public UnifiedChatService(StorageManager storageService, FileStorageService fileStorageService) {
         this.storageService = storageService;
+        this.fileStorageService = fileStorageService;
     }
 
     public Flux<String> chat(ChatRequest request, String modelConfigId, UsageLog usageLog) {
@@ -83,8 +87,10 @@ public class UnifiedChatService {
         messages.add(systemMsg);
 
         // 2) 追加对话历史与当前用户输入（忽略客户端自带的 system 消息，统一由后端注入）
-        if (request.getMessages() != null) {
-            for (NewBotMessage msg : request.getMessages()) {
+        // 上下文截断：仅保留最近 N 条（后端兜底，system 不占名额）
+        List<NewBotMessage> historyMessages = applyContextLimit(request.getMessages());
+        if (historyMessages != null) {
+            for (NewBotMessage msg : historyMessages) {
                 // 跳过客户端携带的 system 消息，避免与后端注入的全局提示词重复或冲突
                 if ("system".equals(msg.getRole())) {
                     continue;
@@ -98,8 +104,12 @@ public class UnifiedChatService {
                 // 多模态：当消息含图片时，content转为 OpenAI Vision 格式的数组
                 if (msg.getImages() != null && !msg.getImages().isEmpty() && config.isSupportsMultimodal()) {
                     List<Map<String, Object>> contentParts = new ArrayList<>();
-                    // 添加图片部分
-                    for (String imageBase64 : msg.getImages()) {
+                    // 添加图片部分（本地上传 URL 先还原为 base64 data URL，存量 base64 原样透传）
+                    for (String image : msg.getImages()) {
+                        String imageBase64 = fileStorageService.toDataUrl(image);
+                        if (imageBase64 == null) {
+                            continue; // 本地文件已被删除，跳过该图片
+                        }
                         Map<String, Object> imagePart = new HashMap<>();
                         imagePart.put("type", "image_url");
                         Map<String, String> imageUrl = new HashMap<>();
@@ -272,8 +282,10 @@ public class UnifiedChatService {
 
         // 构建消息列表（Anthropic 不允许 system role 在 messages 中）
         List<Object> messages = new ArrayList<>();
-        if (request.getMessages() != null) {
-            for (NewBotMessage msg : request.getMessages()) {
+        // 上下文截断：仅保留最近 N 条（后端兜底，system 已单独传参）
+        List<NewBotMessage> historyMessages = applyContextLimit(request.getMessages());
+        if (historyMessages != null) {
+            for (NewBotMessage msg : historyMessages) {
                 if ("system".equals(msg.getRole())) {
                     continue;
                 }
@@ -285,7 +297,12 @@ public class UnifiedChatService {
                 // 多模态：Anthropic 图片格式为 {type:"image", source:{type:"base64",...}}
                 if (msg.getImages() != null && !msg.getImages().isEmpty() && config.isSupportsMultimodal()) {
                     List<Map<String, Object>> contentParts = new ArrayList<>();
-                    for (String imageBase64 : msg.getImages()) {
+                    for (String image : msg.getImages()) {
+                        // 本地上传 URL 先还原为 base64 data URL，存量 base64 原样透传
+                        String imageBase64 = fileStorageService.toDataUrl(image);
+                        if (imageBase64 == null) {
+                            continue; // 本地文件已被删除，跳过该图片
+                        }
                         Map<String, Object> imagePart = new HashMap<>();
                         imagePart.put("type", "image");
                         Map<String, Object> source = new HashMap<>();
@@ -522,12 +539,283 @@ public class UnifiedChatService {
         String systemPrompt = DEFAULT_SYSTEM_PROMPT;
         if (usageLog != null && usageLog.getUserId() != null) {
             User currentUser = storageService.getUserById(usageLog.getUserId());
-            if (currentUser != null && currentUser.getSystemPrompt() != null
-                    && !currentUser.getSystemPrompt().trim().isEmpty()) {
-                systemPrompt = currentUser.getSystemPrompt().trim();
+            if (currentUser != null) {
+                // 1) 优先使用用户已启用的提示词预设（最多 1 条）
+                if (currentUser.getPromptPresets() != null) {
+                    for (PromptPreset p : currentUser.getPromptPresets()) {
+                        if (p != null && p.isEnabled() && p.getContent() != null
+                                && !p.getContent().trim().isEmpty()) {
+                            return p.getContent().trim();
+                        }
+                    }
+                }
+                // 2) 兼容旧版单条全局提示词
+                if (currentUser.getSystemPrompt() != null
+                        && !currentUser.getSystemPrompt().trim().isEmpty()) {
+                    systemPrompt = currentUser.getSystemPrompt().trim();
+                }
             }
         }
         return systemPrompt;
+    }
+
+    /**
+     * 上下文截断：仅保留最近 N 条消息（后端兜底，避免上下文无限增长）。
+     * N 由全局配置 context_max_messages 控制，<=0 或消息数未超限时原样返回。
+     * 后端注入的 system 消息不包含在此列表中，因此不占名额。
+     * @param messages 客户端传入的完整消息列表
+     * @return 截断后的消息列表
+     */
+    private List<NewBotMessage> applyContextLimit(List<NewBotMessage> messages) {
+        if (messages == null) {
+            return null;
+        }
+        int max = storageService.getContextMaxMessages();
+        if (max <= 0 || messages.size() <= max) {
+            return messages;
+        }
+        return messages.subList(messages.size() - max, messages.size());
+    }
+
+    /**
+     * AI 自动命名会话：基于首轮对话内容生成一个简短标题（非流式最小请求）。
+     * 复用 testConnection 的同步 WebClient 模式：stream=false、小 max_tokens、短超时、思考显式关闭。
+     * @param modelConfigId 模型配置ID
+     * @param userContent 用户首条消息内容
+     * @param assistantContent 助手首条回复内容（可为空）
+     * @return 生成的标题（已去除引号/换行、截断长度）；失败返回 null
+     */
+    public String generateTitle(String modelConfigId, String userContent, String assistantContent) {
+        ModelConfig config = storageService.getModelConfigById(modelConfigId);
+        if (config == null || !config.isEnabled()) {
+            return null;
+        }
+        if (config.getApiUrl() == null || config.getApiUrl().trim().isEmpty()
+                || config.getApiKey() == null || config.getApiKey().trim().isEmpty()) {
+            return null;
+        }
+        if (userContent == null || userContent.trim().isEmpty()) {
+            return null;
+        }
+
+        boolean anthropic = "anthropic".equalsIgnoreCase(config.getProtocol());
+        StringBuilder convo = new StringBuilder("用户: ").append(clip(userContent, 500));
+        if (assistantContent != null && !assistantContent.trim().isEmpty()) {
+            convo.append("\n助手: ").append(clip(assistantContent, 500));
+        }
+        String prompt = "请为以下对话生成一个不超过 15 个字的简短中文标题，只返回标题本身，不要加引号、标点或解释：\n\n" + convo;
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("model", config.getModelId());
+        body.put("stream", false);
+        body.put("max_tokens", 64);
+        Map<String, Object> msg = new HashMap<>();
+        msg.put("role", "user");
+        msg.put("content", prompt);
+        body.put("messages", List.of(msg));
+        // 显式关闭思考，避免额外耗时与 token
+        if (!anthropic && config.isSupportsThinking()) {
+            String type = config.getThinkingParamType() == null ? "default" : config.getThinkingParamType();
+            switch (type) {
+                case "qwen" -> body.put("enable_thinking", false);
+                case "deepseek", "kimi", "doubao", "zhipu" -> {
+                    Map<String, Object> thinkingOff = new HashMap<>();
+                    thinkingOff.put("type", "disabled");
+                    body.put("thinking", thinkingOff);
+                }
+                default -> { }
+            }
+        }
+
+        String fullUrl = config.getApiUrl();
+        if (!fullUrl.endsWith("/")) {
+            fullUrl += "/";
+        }
+        fullUrl += anthropic ? "messages" : "chat/completions";
+
+        WebClient.Builder builder = WebClient.builder()
+                .defaultHeader("Content-Type", "application/json");
+        if (anthropic) {
+            builder.defaultHeader("x-api-key", config.getApiKey())
+                    .defaultHeader("anthropic-version", ANTHROPIC_VERSION);
+        } else {
+            builder.defaultHeader("Authorization", "Bearer " + config.getApiKey());
+        }
+
+        try {
+            String resp = builder.build().post()
+                    .uri(fullUrl)
+                    .bodyValue(body)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block(Duration.ofSeconds(20));
+            return parseTitleFromResponse(resp, anthropic);
+        } catch (Exception e) {
+            log.warn("AI 自动命名失败: {} ({}) -> {}", config.getDisplayName(), config.getModelId(), e.getMessage());
+            return null;
+        }
+    }
+
+    /** 从非流式应答中提取标题文本（OpenAI: choices[0].message.content；Anthropic: content[0].text） */
+    @SuppressWarnings("unchecked")
+    private String parseTitleFromResponse(String resp, boolean anthropic) {
+        if (resp == null || resp.isEmpty()) {
+            return null;
+        }
+        try {
+            Map<String, Object> parsed = objectMapper.readValue(resp, Map.class);
+            String text = null;
+            if (anthropic) {
+                Object contentObj = parsed.get("content");
+                if (contentObj instanceof List<?> list && !list.isEmpty()
+                        && list.get(0) instanceof Map<?, ?> first) {
+                    Object t = ((Map<String, Object>) first).get("text");
+                    text = t == null ? null : String.valueOf(t);
+                }
+            } else {
+                Object choicesObj = parsed.get("choices");
+                if (choicesObj instanceof List<?> list && !list.isEmpty()
+                        && list.get(0) instanceof Map<?, ?> choice) {
+                    Object messageObj = ((Map<String, Object>) choice).get("message");
+                    if (messageObj instanceof Map<?, ?> message) {
+                        Object c = ((Map<String, Object>) message).get("content");
+                        text = c == null ? null : String.valueOf(c);
+                    }
+                }
+            }
+            if (text == null) {
+                return null;
+            }
+            // 清理：去换行/首尾引号/多余空白，限长 30 字
+            String title = text.replaceAll("[\\r\\n]+", " ").trim();
+            title = title.replaceAll("^[\"'“「『]+|[\"'”」』]+$", "").trim();
+            if (title.isEmpty()) {
+                return null;
+            }
+            return clip(title, 30);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 截断字符串到指定最大长度 */
+    private String clip(String s, int max) {
+        if (s == null) {
+            return "";
+        }
+        s = s.trim();
+        return s.length() <= max ? s : s.substring(0, max);
+    }
+
+    /**
+     * 模型连通性测试：向厂商 API 发一条最小非流式请求，验证 API Key/URL/模型ID 是否可用
+     * @param modelConfigId 模型配置ID
+     * @return success/message/latencyMs，失败时 message 携带厂商返回的错误信息
+     */
+    public Map<String, Object> testConnection(String modelConfigId) {
+        Map<String, Object> result = new HashMap<>();
+        ModelConfig config = storageService.getModelConfigById(modelConfigId);
+        if (config == null) {
+            result.put("success", false);
+            result.put("message", "模型配置不存在");
+            return result;
+        }
+        if (config.getApiUrl() == null || config.getApiUrl().trim().isEmpty()
+                || config.getApiKey() == null || config.getApiKey().trim().isEmpty()) {
+            result.put("success", false);
+            result.put("message", "API 地址或 API Key 未配置");
+            return result;
+        }
+
+        boolean anthropic = "anthropic".equalsIgnoreCase(config.getProtocol());
+
+        // 构建最小请求体：非流式 + 单条短消息 + 最小 max_tokens，尽量降低测试成本
+        Map<String, Object> body = new HashMap<>();
+        body.put("model", config.getModelId());
+        body.put("stream", false);
+        body.put("max_tokens", 16);
+        Map<String, Object> msg = new HashMap<>();
+        msg.put("role", "user");
+        msg.put("content", "hi");
+        body.put("messages", List.of(msg));
+        // 支持思考的模型需显式关闭思考（部分厂商非流式调用不允许开启思考，且避免消耗额外 token）
+        if (!anthropic && config.isSupportsThinking()) {
+            String type = config.getThinkingParamType() == null ? "default" : config.getThinkingParamType();
+            switch (type) {
+                case "qwen" -> body.put("enable_thinking", false);
+                case "deepseek", "kimi", "doubao", "zhipu" -> {
+                    Map<String, Object> thinkingOff = new HashMap<>();
+                    thinkingOff.put("type", "disabled");
+                    body.put("thinking", thinkingOff);
+                }
+                default -> { }
+            }
+        }
+
+        // 拼接端点：OpenAI 兼容协议 /chat/completions，Anthropic /messages
+        String fullUrl = config.getApiUrl();
+        if (!fullUrl.endsWith("/")) {
+            fullUrl += "/";
+        }
+        fullUrl += anthropic ? "messages" : "chat/completions";
+
+        WebClient.Builder builder = WebClient.builder()
+                .defaultHeader("Content-Type", "application/json");
+        if (anthropic) {
+            builder.defaultHeader("x-api-key", config.getApiKey())
+                    .defaultHeader("anthropic-version", ANTHROPIC_VERSION);
+        } else {
+            builder.defaultHeader("Authorization", "Bearer " + config.getApiKey());
+        }
+
+        long start = System.currentTimeMillis();
+        try {
+            builder.build().post()
+                    .uri(fullUrl)
+                    .bodyValue(body)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block(Duration.ofSeconds(20));
+            long cost = System.currentTimeMillis() - start;
+            result.put("success", true);
+            result.put("latencyMs", cost);
+            result.put("message", "连接成功，耗时 " + cost + " ms");
+        } catch (Exception e) {
+            long cost = System.currentTimeMillis() - start;
+            String reason;
+            // 剥离响应式异常包装，取出厂商真实错误
+            Throwable cause = e;
+            while (cause.getCause() != null && !(cause instanceof WebClientResponseException)) {
+                cause = cause.getCause();
+            }
+            if (cause instanceof WebClientResponseException wce) {
+                String respBody = wce.getResponseBodyAsString();
+                reason = "HTTP " + wce.getStatusCode().value();
+                try {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> parsed = objectMapper.readValue(respBody, Map.class);
+                    Object errorObj = parsed.get("error");
+                    if (errorObj instanceof Map && ((Map<?, ?>) errorObj).get("message") != null) {
+                        reason += " - " + ((Map<?, ?>) errorObj).get("message");
+                    } else if (respBody != null && !respBody.isEmpty()) {
+                        reason += " - " + (respBody.length() > 200 ? respBody.substring(0, 200) : respBody);
+                    }
+                } catch (Exception parseEx) {
+                    if (respBody != null && !respBody.isEmpty()) {
+                        reason += " - " + (respBody.length() > 200 ? respBody.substring(0, 200) : respBody);
+                    }
+                }
+            } else if (cause.getMessage() != null && cause.getMessage().contains("Timeout")) {
+                reason = "连接超时（20 秒），请检查 API 地址是否可达";
+            } else {
+                reason = cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage();
+            }
+            log.warn("模型连通性测试失败: {} ({}) -> {}", config.getDisplayName(), config.getModelId(), reason);
+            result.put("success", false);
+            result.put("latencyMs", cost);
+            result.put("message", reason);
+        }
+        return result;
     }
 
     /**

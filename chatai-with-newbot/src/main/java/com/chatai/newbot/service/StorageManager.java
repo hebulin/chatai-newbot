@@ -23,7 +23,8 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * 存储管理器（门面 + 开关控制 + 数据迁移）
  * 根据 storageMode 开关，将所有数据操作委托给 JsonFileStorageService 或 SqliteStorageService。
- * Token 管理为内存共享（两种模式共用），不随存储切换而丢失。
+ * Token 管理为内存缓存 + SQLite 持久化（两种存储模式共用，重启不丢登录态），
+ * 带过期时间与滑动续期。
  * 管理员可通过后台页面实时切换存储模式，无需重启。
  */
 @Service
@@ -38,9 +39,25 @@ public class StorageManager implements StorageService {
     /** 存储模式开关：false=JSON文件，true=SQLite */
     private volatile boolean useSqlite = false;
 
-    // ========== Token 管理（内存共享，两种模式通用） ==========
-    private final Map<String, String> activeTokens = new ConcurrentHashMap<>(); // token -> userId
-    private final Map<String, String> tokenIps = new ConcurrentHashMap<>();     // token -> 登录时绑定的IP
+    // ========== Token 管理（内存缓存 + SQLite 持久化，两种模式通用） ==========
+
+    /** Token 有效期：7 天 */
+    private static final long TOKEN_TTL_MS = 7L * 24 * 60 * 60 * 1000;
+
+    /** Token 内存记录：用户ID + 登录IP + 过期时间 */
+    private static class TokenInfo {
+        final String userId;
+        final String ip;
+        volatile long expiresAt;
+
+        TokenInfo(String userId, String ip, long expiresAt) {
+            this.userId = userId;
+            this.ip = ip;
+            this.expiresAt = expiresAt;
+        }
+    }
+
+    private final Map<String, TokenInfo> activeTokens = new ConcurrentHashMap<>(); // token -> TokenInfo
 
     public StorageManager(JsonFileStorageService jsonStorage, SqliteStorageService sqliteStorage) {
         this.jsonStorage = jsonStorage;
@@ -53,6 +70,8 @@ public class StorageManager implements StorageService {
      */
     @PostConstruct
     public void init() {
+        // 恢复持久化的登录 Token（清理过期 + 加载未过期到内存）
+        restoreTokens();
         try {
             String mode = sqliteStorage.getSetting("storage_mode");
             // 仅当管理员显式切换为 JSON 模式时才使用 JSON；否则一律默认使用 SQLite
@@ -125,33 +144,74 @@ public class StorageManager implements StorageService {
         }
     }
 
-    // ========== Token 管理（内存共享） ==========
+    // ========== Token 管理（内存缓存 + SQLite 持久化） ==========
 
     /**
-     * 创建登录 Token
+     * 启动时从 SQLite 恢复未过期的 Token，服务重启后用户无需重新登录
+     */
+    private void restoreTokens() {
+        try {
+            long now = System.currentTimeMillis();
+            int purged = sqliteStorage.deleteExpiredTokens(now);
+            List<Map<String, Object>> rows = sqliteStorage.loadActiveTokens(now);
+            for (Map<String, Object> row : rows) {
+                String token = (String) row.get("token");
+                String userId = (String) row.get("user_id");
+                String ip = (String) row.get("ip");
+                long expiresAt = ((Number) row.get("expires_at")).longValue();
+                if (token != null && userId != null) {
+                    activeTokens.put(token, new TokenInfo(userId, ip, expiresAt));
+                }
+            }
+            log.info("已恢复 {} 个登录Token（清理过期 {} 个）", rows.size(), purged);
+        } catch (Exception e) {
+            log.warn("恢复登录Token失败，本次运行仅使用内存Token", e);
+        }
+    }
+
+    /**
+     * 创建登录 Token（内存 + SQLite 持久化，有效期 7 天）
      * @param userId 用户ID
      * @param ip 登录IP
      * @return 生成的 token 字符串
      */
     public String createToken(String userId, String ip) {
         String token = UUID.randomUUID().toString().replace("-", "");
-        activeTokens.put(token, userId);
-        if (ip != null && !ip.isEmpty()) {
-            tokenIps.put(token, ip);
+        long expiresAt = System.currentTimeMillis() + TOKEN_TTL_MS;
+        String boundIp = (ip == null || ip.isEmpty()) ? null : ip;
+        activeTokens.put(token, new TokenInfo(userId, boundIp, expiresAt));
+        try {
+            sqliteStorage.insertToken(token, userId, boundIp, expiresAt);
+        } catch (Exception e) {
+            log.warn("持久化Token失败（不影响本次登录）", e);
         }
         return token;
     }
 
     /**
-     * 根据 Token 获取用户
+     * 根据 Token 获取用户（校验过期 + 滑动续期：剩余寿命不足一半时自动续满 7 天）
      * @param token token 字符串
-     * @return 用户对象，无效 token 返回 null
+     * @return 用户对象，无效/过期 token 返回 null
      */
     public User getUserByToken(String token) {
         if (token == null) return null;
-        String userId = activeTokens.get(token);
-        if (userId == null) return null;
-        return active().getUserById(userId);
+        TokenInfo info = activeTokens.get(token);
+        if (info == null) return null;
+        long now = System.currentTimeMillis();
+        if (now >= info.expiresAt) {
+            removeToken(token);
+            return null;
+        }
+        // 滑动续期：剩余寿命低于 TTL 一半时续期，避免每次请求都写库
+        if (info.expiresAt - now < TOKEN_TTL_MS / 2) {
+            info.expiresAt = now + TOKEN_TTL_MS;
+            try {
+                sqliteStorage.updateTokenExpiry(token, info.expiresAt);
+            } catch (Exception e) {
+                log.debug("Token续期持久化失败", e);
+            }
+        }
+        return active().getUserById(info.userId);
     }
 
     /**
@@ -161,17 +221,22 @@ public class StorageManager implements StorageService {
      */
     public String getTokenIp(String token) {
         if (token == null) return null;
-        return tokenIps.get(token);
+        TokenInfo info = activeTokens.get(token);
+        return info == null ? null : info.ip;
     }
 
     /**
-     * 移除 Token（注销登录）
+     * 移除 Token（注销登录，内存 + SQLite 同步删除）
      * @param token token 字符串
      */
     public void removeToken(String token) {
         if (token != null) {
             activeTokens.remove(token);
-            tokenIps.remove(token);
+            try {
+                sqliteStorage.deleteToken(token);
+            } catch (Exception e) {
+                log.debug("删除持久化Token失败", e);
+            }
         }
     }
 
@@ -180,9 +245,77 @@ public class StorageManager implements StorageService {
      * @param userId 用户ID
      */
     public void removeTokensByUserId(String userId) {
-        activeTokens.entrySet().removeIf(e -> userId.equals(e.getValue()));
-        // tokenIps 中对应的条目也一并清理
-        tokenIps.keySet().removeIf(k -> !activeTokens.containsKey(k));
+        activeTokens.entrySet().removeIf(e -> userId.equals(e.getValue().userId));
+        try {
+            sqliteStorage.deleteTokensByUser(userId);
+        } catch (Exception e) {
+            log.debug("删除用户持久化Token失败", e);
+        }
+    }
+
+    // ========== 每日调用配额（存于 t_setting，两种存储模式通用） ==========
+
+    /**
+     * 获取每用户每日调用上限
+     * @return 上限次数，0=不限制
+     */
+    public int getDailyChatLimit() {
+        try {
+            String val = sqliteStorage.getSetting("daily_chat_limit");
+            return (val == null || val.isEmpty()) ? 0 : Math.max(0, Integer.parseInt(val));
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    /**
+     * 设置每用户每日调用上限
+     * @param limit 上限次数，0=不限制
+     */
+    public void setDailyChatLimit(int limit) {
+        sqliteStorage.setSetting("daily_chat_limit", String.valueOf(Math.max(0, limit)));
+    }
+
+    /**
+     * 获取每分钟请求上限（短时滑动窗口限流）
+     * @return 每分钟上限，0=不限制
+     */
+    public int getRateLimitPerMinute() {
+        try {
+            String val = sqliteStorage.getSetting("rate_limit_per_minute");
+            return (val == null || val.isEmpty()) ? 0 : Math.max(0, Integer.parseInt(val));
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    /**
+     * 设置每分钟请求上限
+     * @param limit 每分钟上限，0=不限制
+     */
+    public void setRateLimitPerMinute(int limit) {
+        sqliteStorage.setSetting("rate_limit_per_minute", String.valueOf(Math.max(0, limit)));
+    }
+
+    /**
+     * 获取上下文最大携带消息条数（不含后端注入的 system 消息）
+     * @return 最大条数，0=不限制
+     */
+    public int getContextMaxMessages() {
+        try {
+            String val = sqliteStorage.getSetting("context_max_messages");
+            return (val == null || val.isEmpty()) ? 0 : Math.max(0, Integer.parseInt(val));
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    /**
+     * 设置上下文最大携带消息条数
+     * @param max 最大条数，0=不限制
+     */
+    public void setContextMaxMessages(int max) {
+        sqliteStorage.setSetting("context_max_messages", String.valueOf(Math.max(0, max)));
     }
 
     // ========== 委托方法：用户相关 ==========
@@ -333,6 +466,16 @@ public class StorageManager implements StorageService {
     }
 
     @Override
+    public int countUsageByUserAndDay(String userId, String day) {
+        return active().countUsageByUserAndDay(userId, day);
+    }
+
+    @Override
+    public long sumTokensByUserAndDay(String userId, String day) {
+        return active().sumTokensByUserAndDay(userId, day);
+    }
+
+    @Override
     public void updateUsageLog(UsageLog logEntry) {
         active().updateUsageLog(logEntry);
     }
@@ -340,6 +483,63 @@ public class StorageManager implements StorageService {
     @Override
     public List<String> getUsageLogDates() {
         return active().getUsageLogDates();
+    }
+
+    // ========== 会话分享（恒走 SQLite，两种存储模式通用） ==========
+
+    /**
+     * 新增会话分享记录
+     * @param s 分享记录
+     * @return 保存后的记录（含自动生成的分享码）
+     */
+    public ChatShare addChatShare(ChatShare s) {
+        return sqliteStorage.addChatShare(s);
+    }
+
+    /**
+     * 根据分享码获取分享记录
+     * @param id 分享码
+     * @return 分享记录，不存在返回 null
+     */
+    public ChatShare getChatShareById(String id) {
+        return sqliteStorage.getChatShareById(id);
+    }
+
+    /**
+     * 获取用户创建的所有分享记录
+     * @param userId 用户ID
+     * @return 分享列表
+     */
+    public List<ChatShare> getChatSharesByUser(String userId) {
+        return sqliteStorage.getChatSharesByUser(userId);
+    }
+
+    /**
+     * 查找某用户对某会话已有的分享记录
+     * @param userId 用户ID
+     * @param chatId 会话ID
+     * @return 分享记录，不存在返回 null
+     */
+    public ChatShare getChatShareByChat(String userId, String chatId) {
+        return sqliteStorage.getChatShareByChat(userId, chatId);
+    }
+
+    /**
+     * 删除分享记录（撤销只读链接）
+     * @param id 分享码
+     * @return true=删除成功
+     */
+    public boolean deleteChatShare(String id) {
+        return sqliteStorage.deleteChatShare(id);
+    }
+
+    /**
+     * 更新分享记录的过期时间（重新分享可续期或改为永久）
+     * @param id 分享码
+     * @param expiresAt 过期时间（null 表示永久有效）
+     */
+    public void updateChatShareExpiry(String id, String expiresAt) {
+        sqliteStorage.updateChatShareExpiry(id, expiresAt);
     }
 
     // ========== 数据迁移（JSON → SQLite） ==========

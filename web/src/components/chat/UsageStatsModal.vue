@@ -744,11 +744,12 @@ function buildBarSvg(labels, values, metric) {
   cursor: pointer;
   appearance: none;
   -webkit-appearance: none;
-  background-image: linear-gradient(45deg, transparent 50%, var(--ink-3, #999) 50%), linear-gradient(135deg, var(--ink-3, #999) 50%, transparent 50%);
-  background-position: calc(100% - 14px) center, calc(100% - 9px) center;
-  background-size: 5px 5px, 5px 5px;
+  /* 与 Element Plus 下拉一致的单个 chevron 箭头（替代原双三角拼接样式） */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%237f8d9f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-position: calc(100% - 8px) center;
+  background-size: 14px 14px;
   background-repeat: no-repeat;
-  padding-right: 26px;
+  padding-right: 28px;
 }
 .us-actions {
   display: flex;
@@ -831,14 +832,21 @@ function buildBarSvg(labels, values, metric) {
   font-variant-numeric: tabular-nums;
 }
 .us-page-size {
-  padding: 5px 8px;
+  padding: 5px 28px 5px 8px;
   border: 1px solid var(--border, #333);
   border-radius: 6px;
-  background: var(--paper, #252536);
+  background-color: var(--paper, #252536);
+  /* 与 Element Plus 下拉一致的单个 chevron 箭头 */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%237f8d9f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-position: calc(100% - 8px) center;
+  background-size: 14px 14px;
+  background-repeat: no-repeat;
   color: var(--ink-2, #ccc);
   font-size: 12px;
   outline: none;
   cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
 }
 .us-page-size:hover { border-color: var(--primary, #6366f1); }
 /* Mini tabs */

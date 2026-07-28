@@ -2,6 +2,7 @@ package com.chatai.newbot.controller;
 
 import com.chatai.newbot.model.*;
 import com.chatai.newbot.service.ChatHistoryService;
+import com.chatai.newbot.service.RateLimitService;
 import com.chatai.newbot.service.StorageManager;
 import com.chatai.newbot.service.UnifiedChatService;
 import org.slf4j.Logger;
@@ -23,12 +24,14 @@ public class ChatController {
     private final UnifiedChatService chatService;
     private final StorageManager storageService;
     private final ChatHistoryService chatHistoryService;
+    private final RateLimitService rateLimitService;
 
     public ChatController(UnifiedChatService chatService, StorageManager storageService,
-                          ChatHistoryService chatHistoryService) {
+                          ChatHistoryService chatHistoryService, RateLimitService rateLimitService) {
         this.chatService = chatService;
         this.storageService = storageService;
         this.chatHistoryService = chatHistoryService;
+        this.rateLimitService = rateLimitService;
     }
 
     @GetMapping("/heartbeat")
@@ -59,6 +62,40 @@ public class ChatController {
         if (!Boolean.TRUE.equals(config.getVisibleToAll()) && !user.isAdmin()
                 && !user.getAllowedModelIds().contains(config.getId())) {
             return Flux.just("{\"error\":{\"message\":\"无权使用该模型\",\"type\":\"permission_error\"}}");
+        }
+
+        // 限流与配额检查（admin 豁免）
+        if (!user.isAdmin()) {
+            // 1) 每分钟短时限流（滑动窗口）
+            int ratePerMinute = storageService.getRateLimitPerMinute();
+            if (!rateLimitService.tryAcquire(user.getId(), ratePerMinute)) {
+                return Flux.just("{\"error\":{\"message\":\"操作过于频繁，请稍后再试（每分钟最多 " + ratePerMinute + " 次）\",\"type\":\"rate_limit_error\"}}");
+            }
+
+            // 2) 每日限额：用户个人限额（次数/Token，二选一）优先，未设置则回退全局配额
+            String today = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+            String personalType = user.getDailyLimitType();
+            int personalValue = user.getDailyLimitValue();
+            if ("count".equals(personalType) && personalValue > 0) {
+                int used = storageService.countUsageByUserAndDay(user.getId(), today);
+                if (used >= personalValue) {
+                    return Flux.just("{\"error\":{\"message\":\"今日调用次数已达上限（" + personalValue + " 次），请明日再试\",\"type\":\"quota_error\"}}");
+                }
+            } else if ("token".equals(personalType) && personalValue > 0) {
+                long usedTokens = storageService.sumTokensByUserAndDay(user.getId(), today);
+                if (usedTokens >= personalValue) {
+                    return Flux.just("{\"error\":{\"message\":\"今日 Token 用量已达上限（" + personalValue + "），请明日再试\",\"type\":\"quota_error\"}}");
+                }
+            } else {
+                // 无个人限额，回退到全局每日调用次数配额
+                int limit = storageService.getDailyChatLimit();
+                if (limit > 0) {
+                    int used = storageService.countUsageByUserAndDay(user.getId(), today);
+                    if (used >= limit) {
+                        return Flux.just("{\"error\":{\"message\":\"今日调用次数已达上限（" + limit + " 次），请明日再试\",\"type\":\"quota_error\"}}");
+                    }
+                }
+            }
         }
 
         // 记录使用
@@ -178,6 +215,46 @@ public class ChatController {
     }
 
     /**
+     * 获取单个会话的最新记录（发送消息前的当前会话同步，避免拉全量历史）
+     * 参数: chatId=会话ID；返回 { success, messages, meta }
+     */
+    @GetMapping("/chat/history/single")
+    public Map<String, Object> getSingleChatHistory(@RequestParam String chatId,
+                                                    HttpServletRequest request) {
+        User user = (User) request.getAttribute("currentUser");
+        Map<String, Object> result = new HashMap<>();
+        try {
+            Map<String, Object> data = chatHistoryService.loadSingleChat(user.getId(), chatId);
+            result.put("success", true);
+            result.put("messages", data.get("messages"));
+            result.put("meta", data.get("meta"));
+        } catch (Exception e) {
+            log.error("加载单会话历史失败: userId={}, chatId={}", user.getId(), chatId, e);
+            result.put("success", false);
+            result.put("message", "加载失败: " + e.getMessage());
+        }
+        return result;
+    }
+
+    /**
+     * 跨会话全文搜索当前用户的会话消息
+     * 参数: q=关键字；返回最多 50 条匹配（chatId/chatTitle/role/time/snippet）
+     */
+    @GetMapping("/chat/history/search")
+    public Map<String, Object> searchChatHistory(@RequestParam(required = false) String q,
+                                                 HttpServletRequest request) {
+        User user = (User) request.getAttribute("currentUser");
+        Map<String, Object> result = new HashMap<>();
+        result.put("success", true);
+        if (q == null || q.trim().isEmpty()) {
+            result.put("data", Collections.emptyList());
+            return result;
+        }
+        result.put("data", chatHistoryService.searchChatHistory(user.getId(), q.trim(), 50));
+        return result;
+    }
+
+    /**
      * 删除当前用户的所有会话历史
      */
     @DeleteMapping("/chat/history")
@@ -195,44 +272,91 @@ public class ChatController {
         return result;
     }
 
-    // ========== 用户全局提示词（System Prompt） ==========
+   // ========== 用户提示词预设（多条可自定义，最多启用 1 条） ==========
+
+    /** 单条提示词内容上限 */
+    private static final int PROMPT_CONTENT_MAX = 20000;
+    /** 提示词名称上限 */
+    private static final int PROMPT_TITLE_MAX = 50;
+    /** 预设条数上限 */
+    private static final int PROMPT_PRESET_MAX = 20;
 
     /**
-     * 获取当前登录用户的全局提示词。
-     * @return { "success": true, "systemPrompt": "..." }，未设置时 systemPrompt 为空字符串
+     * 获取当前登录用户的提示词预设列表。
+     * 兼容旧版：若预设为空但存在旧的单条 systemPrompt，则自动迁移为一条启用的预设。
+     * @return { "success": true, "presets": [ { id, title, content, enabled } ] }
      */
-    @GetMapping("/user/system-prompt")
-    public Map<String, Object> getSystemPrompt(HttpServletRequest request) {
+    @GetMapping("/user/prompt-presets")
+    public Map<String, Object> getPromptPresets(HttpServletRequest request) {
         User user = (User) request.getAttribute("currentUser");
         Map<String, Object> result = new HashMap<>();
-        // 重新从存储读取，避免使用登录时缓存的快照
         User fresh = storageService.getUserById(user.getId());
-        String prompt = (fresh != null && fresh.getSystemPrompt() != null) ? fresh.getSystemPrompt() : "";
+        List<PromptPreset> presets = (fresh != null && fresh.getPromptPresets() != null)
+                ? fresh.getPromptPresets() : new ArrayList<>();
+        // 旧版单条全局提示词 → 迁移为一条启用预设
+        if (fresh != null && presets.isEmpty()
+                && fresh.getSystemPrompt() != null && !fresh.getSystemPrompt().trim().isEmpty()) {
+            PromptPreset p = new PromptPreset();
+            p.setId(UUID.randomUUID().toString());
+            p.setTitle("默认提示词");
+            p.setContent(fresh.getSystemPrompt().trim());
+            p.setEnabled(true);
+            presets = new ArrayList<>();
+            presets.add(p);
+            fresh.setPromptPresets(presets);
+            fresh.setSystemPrompt(null);
+            storageService.updateUser(fresh);
+        }
         result.put("success", true);
-        result.put("systemPrompt", prompt);
+        result.put("presets", presets);
         return result;
     }
 
     /**
-     * 保存当前登录用户的全局提示词。
-     * 请求体: { "systemPrompt": "..." }。
-     * 该提示词会在每次调用 LLM API 时作为 system 消息置于消息列表首位，优先级最高。
+     * 保存当前登录用户的提示词预设列表（整体替换）。
+     * 请求体: { "presets": [ { id?, title, content, enabled } ] }。
+     * 规则：最多 PROMPT_PRESET_MAX 条；最多启用 1 条（多余自动置为未启用）；空行忽略。
      */
-    @PutMapping("/user/system-prompt")
-    public Map<String, Object> updateSystemPrompt(@RequestBody Map<String, String> body,
-                                                  HttpServletRequest request) {
+    @PutMapping("/user/prompt-presets")
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> updatePromptPresets(@RequestBody Map<String, Object> body,
+                                                   HttpServletRequest request) {
         User user = (User) request.getAttribute("currentUser");
         Map<String, Object> result = new HashMap<>();
-        String prompt = body.get("systemPrompt");
-        if (prompt == null) {
-            prompt = "";
-        }
-        prompt = prompt.trim();
-        // 长度保护：避免超长提示词过度挤占上下文窗口
-        if (prompt.length() > 20000) {
-            result.put("success", false);
-            result.put("message", "全局提示词过长（最多 20000 字符）");
-            return result;
+        Object raw = body.get("presets");
+        List<PromptPreset> presets = new ArrayList<>();
+        boolean enabledUsed = false;
+        if (raw instanceof List<?> list) {
+            if (list.size() > PROMPT_PRESET_MAX) {
+                result.put("success", false);
+                result.put("message", "提示词条数过多（最多 " + PROMPT_PRESET_MAX + " 条）");
+                return result;
+            }
+            for (Object item : list) {
+                if (!(item instanceof Map)) continue;
+                Map<String, Object> m = (Map<String, Object>) item;
+                String title = m.get("title") instanceof String s ? s.trim() : "";
+                String content = m.get("content") instanceof String s ? s.trim() : "";
+                // 标题与内容均为空的行直接忽略
+                if (title.isEmpty() && content.isEmpty()) continue;
+                if (content.length() > PROMPT_CONTENT_MAX) {
+                    result.put("success", false);
+                    result.put("message", "单条提示词过长（最多 " + PROMPT_CONTENT_MAX + " 字符）");
+                    return result;
+                }
+                if (title.isEmpty()) title = "未命名提示词";
+                if (title.length() > PROMPT_TITLE_MAX) title = title.substring(0, PROMPT_TITLE_MAX);
+                boolean enabled = Boolean.TRUE.equals(m.get("enabled"));
+                if (enabled && enabledUsed) enabled = false; // 最多启用 1 条
+                if (enabled) enabledUsed = true;
+                PromptPreset p = new PromptPreset();
+                String id = m.get("id") instanceof String s ? s.trim() : "";
+                p.setId(id.isEmpty() ? UUID.randomUUID().toString() : id);
+                p.setTitle(title);
+                p.setContent(content);
+                p.setEnabled(enabled);
+                presets.add(p);
+            }
         }
         User fresh = storageService.getUserById(user.getId());
         if (fresh == null) {
@@ -240,10 +364,60 @@ public class ChatController {
             result.put("message", "用户不存在");
             return result;
         }
-        fresh.setSystemPrompt(prompt);
+        fresh.setPromptPresets(presets);
+        fresh.setSystemPrompt(null); // 预设已为唯一来源，清除旧版单条提示词
         storageService.updateUser(fresh);
         result.put("success", true);
-        result.put("message", "全局提示词已保存");
+        result.put("message", "提示词已保存");
+        result.put("presets", presets);
+        return result;
+    }
+
+    /**
+     * AI 自动命名会话。
+     * 请求体: { "modelConfigId": "xxx", "userContent": "...", "assistantContent": "..." }
+     * 返回: { "success": true, "title": "..." }；生成失败时 success=false（前端自行回退）
+     */
+    @PostMapping("/chat/generate-title")
+    public Map<String, Object> generateTitle(@RequestBody Map<String, Object> body,
+                                             HttpServletRequest request) {
+        User user = (User) request.getAttribute("currentUser");
+        Map<String, Object> result = new HashMap<>();
+        String modelConfigId = body.get("modelConfigId") instanceof String s ? s.trim() : "";
+        String userContent = body.get("userContent") instanceof String s ? s : "";
+        String assistantContent = body.get("assistantContent") instanceof String s ? s : "";
+        if (modelConfigId.isEmpty() || userContent.isEmpty()) {
+            result.put("success", false);
+            result.put("message", "参数不完整");
+            return result;
+        }
+        // 权限校验：模型存在、启用且用户可见
+        ModelConfig config = storageService.getModelConfigById(modelConfigId);
+        if (config == null || !config.isEnabled()) {
+            result.put("success", false);
+            result.put("message", "模型不可用");
+            return result;
+        }
+        if (!Boolean.TRUE.equals(config.getVisibleToAll()) && !user.isAdmin()
+                && !user.getAllowedModelIds().contains(config.getId())) {
+            result.put("success", false);
+            result.put("message", "无权使用该模型");
+            return result;
+        }
+        try {
+            String title = chatService.generateTitle(modelConfigId, userContent, assistantContent);
+            if (title == null || title.isEmpty()) {
+                result.put("success", false);
+                result.put("message", "生成失败");
+            } else {
+                result.put("success", true);
+                result.put("title", title);
+            }
+        } catch (Exception e) {
+            log.warn("AI 生成会话标题失败: {}", e.getMessage());
+            result.put("success", false);
+            result.put("message", "生成失败");
+        }
         return result;
     }
 }

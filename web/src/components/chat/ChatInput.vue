@@ -35,6 +35,9 @@
           <div class="upload-image-btn" title="上传图片" @click="triggerUpload">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
           </div>
+          <div class="upload-image-btn" title="清除上下文（后续对话不再携带以上历史）" @click="emit('clear-context')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+          </div>
           <input type="file" ref="fileInputRef" accept="image/*" multiple style="display:none" @change="handleFileUpload">
           <div class="model-select-area">
             <img v-if="currentIconIsImg" :src="currentIcon" class="model-area-icon" />
@@ -80,6 +83,7 @@ import { useModelsStore } from '@/stores/models'
 import { useTheme } from '@/composables/useTheme'
 import { ElMessage } from 'element-plus'
 import { APP_VERSION } from '@/config/version'
+import { uploadChatImage } from '@/api/chat'
 
 const props = defineProps({
   isStreaming: { type: Boolean, default: false },
@@ -87,7 +91,7 @@ const props = defineProps({
   supportsMultimodal: { type: Boolean, default: false }
 })
 
-const emit = defineEmits(['send', 'stop'])
+const emit = defineEmits(['send', 'stop', 'clear-context'])
 
 const modelsStore = useModelsStore()
 const { getTheme } = useTheme()
@@ -190,17 +194,25 @@ const modelInputWidth = computed(() => {
 })
 
 // 同步当前选中模型到 cascader 显示
-watch(() => modelsStore.currentModelId, (id) => {
+function syncCascaderFromStore() {
+  const id = modelsStore.currentModelId
   if (!id) { cascaderValue.value = []; return }
   const { groups, order } = modelsStore.groupedModels
   for (const key of order) {
     const found = groups[key].models.find(m => m.id === id)
     if (found) { cascaderValue.value = [key, id]; return }
   }
-}, { immediate: true })
+}
+watch(() => modelsStore.currentModelId, syncCascaderFromStore, { immediate: true })
 
 function handleModelChange(val) {
   if (!val || val.length < 2) return
+  // bot 输出未结束前不可切换模型：允许打开选择器浏览，但选中不生效并回退到当前模型
+  if (props.isStreaming) {
+    ElMessage.warning('回复生成中，暂不可切换模型')
+    syncCascaderFromStore()
+    return
+  }
   const modelId = val[1]
   const model = modelsStore.findModelById(modelId)
   if (model) modelsStore.selectModel(model)
@@ -281,19 +293,7 @@ function handlePaste(e) {
   e.preventDefault()
   imageItems.forEach(item => {
     const file = item.getAsFile()
-    if (!file) return
-    if (file.size > MAX_IMAGE_SIZE) {
-      ElMessage.warning('图片超过5MB限制')
-      return
-    }
-    const reader = new FileReader()
-    reader.onload = (event) => {
-      if (!props.supportsMultimodal) {
-        pasteWarning.value = '当前模型不支持图像理解，请切换支持多模态的模型或删除图片'
-      }
-      pendingImages.value.push(event.target.result)
-    }
-    reader.readAsDataURL(file)
+    if (file) addImageFile(file)
   })
 }
 
@@ -309,19 +309,29 @@ function handleFileUpload(e) {
   if (!files || files.length === 0) return
   Array.from(files).forEach(file => {
     if (!file.type.includes('image')) return
-    if (file.size > MAX_IMAGE_SIZE) {
-      ElMessage.warning('图片超过5MB限制')
-      return
-    }
-    const reader = new FileReader()
-    reader.onload = (event) => {
+    addImageFile(file)
+  })
+}
+
+// 上传图片到服务端，成功后以文件 URL 加入待发送列表（替代原 base64 内嵌）
+async function addImageFile(file) {
+  if (file.size > MAX_IMAGE_SIZE) {
+    ElMessage.warning('图片超过5MB限制')
+    return
+  }
+  try {
+    const res = await uploadChatImage(file)
+    if (res && res.success) {
       if (!props.supportsMultimodal) {
         pasteWarning.value = '当前模型不支持图像理解，请切换支持多模态的模型或删除图片'
       }
-      pendingImages.value.push(event.target.result)
+      pendingImages.value.push(res.url)
+    } else {
+      ElMessage.error((res && res.message) || '图片上传失败')
     }
-    reader.readAsDataURL(file)
-  })
+  } catch (e) {
+    // 错误提示已由 request 拦截器统一处理
+  }
 }
 
 function removeImage(idx) {

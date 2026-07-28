@@ -14,6 +14,13 @@ const routes = [
     meta: { title: '工作台' }
   },
   {
+    path: '/share/:id',
+    name: 'Share',
+    component: () => import('@/views/ShareView.vue'),
+    // allowAuthed：已登录用户也可直接查看分享页，不重定向回首页
+    meta: { public: true, allowAuthed: true, title: '分享的会话' }
+  },
+  {
     path: '/admin',
     component: () => import('@/layout/AdminLayout.vue'),
     redirect: '/admin/quick-start',
@@ -62,10 +69,10 @@ const router = createRouter({
 router.beforeEach(async (to, from, next) => {
   const token = localStorage.getItem('token')
 
-  // 公开页面（登录页）
+  // 公开页面（登录页 / 分享页）
   if (to.meta.public) {
-    // 已登录用户访问登录页 → 跳转到首页
-    if (token) {
+    // 已登录用户访问登录页 → 跳转到首页（分享页 allowAuthed 除外）
+    if (token && !to.meta.allowAuthed) {
       next('/')
       return
     }

@@ -37,18 +37,50 @@
         切换回 JSON 模式后，将读取 JSON 文件中的旧数据（迁移后新增的数据不会回写）。
       </div>
     </div>
+
+    <div class="admin-card" v-loading="quotaLoading" style="margin-top:20px;">
+      <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;color:var(--ink);">调用限制</h3>
+
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
+        <span style="font-size:13px;color:var(--ink-3);width:150px;">每个普通用户每日最多可调用</span>
+        <el-input-number v-model="dailyChatLimit" :min="0" :max="100000" :step="10" style="width:160px;" />
+        <span style="font-size:13px;color:var(--ink-3);">次（填 0 表示不限制）</span>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
+        <span style="font-size:13px;color:var(--ink-3);width:150px;">每个普通用户每分钟最多可发起</span>
+        <el-input-number v-model="rateLimitPerMinute" :min="0" :max="10000" :step="1" style="width:160px;" />
+        <span style="font-size:13px;color:var(--ink-3);">次（填 0 表示不限制）</span>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
+        <span style="font-size:13px;color:var(--ink-3);width:150px;">上下文最多携带消息条数</span>
+        <el-input-number v-model="contextMaxMessages" :min="0" :max="1000" :step="2" style="width:160px;" />
+        <span style="font-size:13px;color:var(--ink-3);">条（填 0 表示不限制）</span>
+        <el-button type="primary" @click="handleSaveQuota" :loading="quotaSaving">保存</el-button>
+      </div>
+
+      <div style="font-size:13px;color:var(--ink-3);line-height:1.8;background:var(--paper-2);padding:12px 16px;border-radius:8px;border:1px solid var(--line);">
+        以上限制均仅对非管理员用户生效。每日调用达上限后次日自动恢复；每分钟限流用于防止短时频繁请求；上下文条数限制只保留最近若干条消息发送给模型，可降低 Token 消耗。单个用户可在“用户管理”中单独设置每日限额（优先于全局配额）。
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getStorageSettings, setStorageMode, migrateData } from '@/api/settings'
+import { getStorageSettings, setStorageMode, migrateData, getQuotaSettings, setQuotaSettings } from '@/api/settings'
 
 const loading = ref(false)
 const migrating = ref(false)
 const switching = ref(false)
 const settings = ref({ useSqlite: false, dbFileSize: '' })
+const quotaLoading = ref(false)
+const quotaSaving = ref(false)
+const dailyChatLimit = ref(0)
+const rateLimitPerMinute = ref(0)
+const contextMaxMessages = ref(0)
 
 async function loadSettings() {
   loading.value = true
@@ -142,5 +174,42 @@ async function handleToggle() {
   }
 }
 
-onMounted(loadSettings)
+onMounted(() => {
+  loadSettings()
+  loadQuota()
+})
+
+// 加载每日配额设置
+async function loadQuota() {
+  quotaLoading.value = true
+  try {
+    const res = await getQuotaSettings()
+    if (res?.success) {
+      dailyChatLimit.value = res.data?.dailyChatLimit ?? 0
+      rateLimitPerMinute.value = res.data?.rateLimitPerMinute ?? 0
+      contextMaxMessages.value = res.data?.contextMaxMessages ?? 0
+    }
+  } finally {
+    quotaLoading.value = false
+  }
+}
+
+// 保存每日配额设置
+async function handleSaveQuota() {
+  quotaSaving.value = true
+  try {
+    const res = await setQuotaSettings({
+      dailyChatLimit: dailyChatLimit.value ?? 0,
+      rateLimitPerMinute: rateLimitPerMinute.value ?? 0,
+      contextMaxMessages: contextMaxMessages.value ?? 0
+    })
+    if (res?.success) {
+      ElMessage.success(res.message || '保存成功')
+    } else {
+      ElMessage.error(res?.message || '保存失败')
+    }
+  } finally {
+    quotaSaving.value = false
+  }
+}
 </script>

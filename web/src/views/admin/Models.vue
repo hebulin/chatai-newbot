@@ -86,7 +86,7 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="140" align="center" fixed="right">
+        <el-table-column label="操作" width="180" align="center" fixed="right">
           <template #default="{ row }">
             <el-button-group>
               <el-button size="small" text @click="handleDefault(row)">
@@ -94,6 +94,9 @@
                   <StarFilled v-if="row.id === defaultModelId" />
                   <Star v-else />
                 </el-icon>
+              </el-button>
+              <el-button size="small" text title="测试连接" :loading="testingId === row.id" @click="handleTest(row)">
+                <el-icon v-if="testingId !== row.id"><Connection /></el-icon>
               </el-button>
               <el-button size="small" text @click="editModel(row)">
                 <el-icon><Edit /></el-icon>
@@ -264,8 +267,8 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Edit, Delete, Star, StarFilled } from '@element-plus/icons-vue'
-import { getModels, addModel, updateModel, deleteModel, setDefaultModel, clearDefaultModel } from '@/api/models'
+import { Plus, Edit, Delete, Star, StarFilled, Connection } from '@element-plus/icons-vue'
+import { getModels, addModel, updateModel, deleteModel, testModel, setDefaultModel, clearDefaultModel } from '@/api/models'
 import { getProviders } from '@/api/providers'
 
 const providerIconMap = {
@@ -387,6 +390,23 @@ async function handleDelete(row) {
     if (res?.success) { ElMessage.success('已删除'); await loadData() }
     else ElMessage.error(res?.message || '删除失败')
   } catch { /* cancelled */ }
+}
+
+// 连通性测试：发一条最小请求验证 API Key/URL/模型ID 是否可用
+const testingId = ref('')
+async function handleTest(row) {
+  if (testingId.value) return
+  testingId.value = row.id
+  try {
+    const res = await testModel(row.id)
+    if (res?.success) {
+      ElMessage.success(res.message || '连接成功')
+    } else {
+      ElMessage.error({ message: `连接失败：${res?.message || '未知错误'}`, duration: 6000 })
+    }
+  } catch { /* 拦截器已提示 */ } finally {
+    testingId.value = ''
+  }
 }
 
 // ===== 编辑模型 =====

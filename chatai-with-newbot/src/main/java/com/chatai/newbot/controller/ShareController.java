@@ -1,0 +1,194 @@
+package com.chatai.newbot.controller;
+
+import com.chatai.newbot.model.ChatShare;
+import com.chatai.newbot.model.User;
+import com.chatai.newbot.service.ChatHistoryService;
+import com.chatai.newbot.service.StorageManager;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.web.bind.annotation.*;
+
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * 会话分享接口
+ * - 登录用户可为自己的会话生成只读分享链接、查看/撤销自己的分享
+ * - 匿名访问 GET /api/share/view/{id} 凭分享码查看会话内容（拦截器已豁免）
+ */
+@RestController
+@RequestMapping("/api/share")
+public class ShareController {
+
+    private final StorageManager storageManager;
+    private final ChatHistoryService chatHistoryService;
+
+    public ShareController(StorageManager storageManager, ChatHistoryService chatHistoryService) {
+        this.storageManager = storageManager;
+        this.chatHistoryService = chatHistoryService;
+    }
+
+    /**
+     * 获取当前用户创建的所有分享记录
+     */
+    @GetMapping
+    public Map<String, Object> list(HttpServletRequest request) {
+        User user = (User) request.getAttribute("currentUser");
+        Map<String, Object> result = new HashMap<>();
+        result.put("success", true);
+        result.put("data", storageManager.getChatSharesByUser(user.getId()));
+        return result;
+    }
+
+    /**
+     * 为指定会话生成只读分享链接（同一会话复用已有分享码）
+     */
+    @PostMapping
+    public Map<String, Object> create(@RequestBody Map<String, Object> body, HttpServletRequest request) {
+        User user = (User) request.getAttribute("currentUser");
+        Map<String, Object> result = new HashMap<>();
+
+        String chatId = body.get("chatId") instanceof String s ? s.trim() : "";
+        if (chatId.isEmpty()) {
+            result.put("success", false);
+            result.put("message", "会话ID不能为空");
+            return result;
+        }
+
+        // 校验会话属于当前用户且存在消息
+        List<Map<String, Object>> messages = extractChatMessages(user.getId(), chatId);
+        if (messages == null || messages.isEmpty()) {
+            result.put("success", false);
+            result.put("message", "会话不存在或没有消息，无法分享");
+            return result;
+        }
+
+        // 解析过期天数（expireDays：<=0 或缺省=永久有效）
+        int expireDays = 0;
+        Object expireObj = body.get("expireDays");
+        if (expireObj instanceof Number n) {
+            expireDays = n.intValue();
+        } else if (expireObj instanceof String es && !es.trim().isEmpty()) {
+            try { expireDays = Integer.parseInt(es.trim()); } catch (NumberFormatException ignore) { }
+        }
+        String expiresAt = expireDays > 0
+                ? LocalDateTime.now().plusDays(expireDays).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+                : null;
+
+        // 同一会话已分享过则复用分享码，并按本次选择更新过期时间（重新分享可续期/改为永久）
+        ChatShare existing = storageManager.getChatShareByChat(user.getId(), chatId);
+        if (existing != null) {
+            storageManager.updateChatShareExpiry(existing.getId(), expiresAt);
+            existing.setExpiresAt(expiresAt);
+            result.put("success", true);
+            result.put("data", existing);
+            return result;
+        }
+
+        ChatShare share = new ChatShare();
+        share.setChatId(chatId);
+        share.setUserId(user.getId());
+        share.setUserName(user.getUsername());
+        share.setTitle(buildTitle(messages));
+        share.setExpiresAt(expiresAt);
+        result.put("success", true);
+        result.put("data", storageManager.addChatShare(share));
+        return result;
+    }
+
+    /**
+     * 撤销分享（仅创建者本人或管理员）
+     */
+    @DeleteMapping("/{id}")
+    public Map<String, Object> delete(@PathVariable String id, HttpServletRequest request) {
+        User user = (User) request.getAttribute("currentUser");
+        Map<String, Object> result = new HashMap<>();
+
+        ChatShare share = storageManager.getChatShareById(id);
+        if (share == null) {
+            result.put("success", false);
+            result.put("message", "分享不存在");
+            return result;
+        }
+        if (!user.isAdmin() && !user.getId().equals(share.getUserId())) {
+            result.put("success", false);
+            result.put("message", "无权撤销该分享");
+            return result;
+        }
+        storageManager.deleteChatShare(id);
+        result.put("success", true);
+        return result;
+    }
+
+    /**
+     * 匿名查看分享的会话内容（只读，无需登录）
+     */
+    @GetMapping("/view/{id}")
+    public Map<String, Object> view(@PathVariable String id) {
+        Map<String, Object> result = new HashMap<>();
+
+        ChatShare share = storageManager.getChatShareById(id);
+        if (share == null) {
+            result.put("success", false);
+            result.put("message", "分享链接不存在或已被撤销");
+            return result;
+        }
+
+        // 过期校验：expiresAt 非空且已过期则拒绝访问
+        if (share.getExpiresAt() != null && !share.getExpiresAt().isEmpty()) {
+            try {
+                LocalDateTime expiry = LocalDateTime.parse(share.getExpiresAt(),
+                        DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+                if (LocalDateTime.now().isAfter(expiry)) {
+                    result.put("success", false);
+                    result.put("message", "分享链接已过期");
+                    return result;
+                }
+            } catch (Exception ignore) {
+                // 时间解析失败视为未设置过期，不阻断访问
+            }
+        }
+
+        List<Map<String, Object>> messages = extractChatMessages(share.getUserId(), share.getChatId());
+        if (messages == null) {
+            result.put("success", false);
+            result.put("message", "分享的会话已被删除");
+            return result;
+        }
+
+        result.put("success", true);
+        result.put("title", share.getTitle());
+        result.put("sharedBy", share.getUserName());
+        result.put("sharedAt", share.getCreatedAt());
+        result.put("expiresAt", share.getExpiresAt());
+        result.put("messages", messages);
+        return result;
+    }
+
+    /**
+     * 从用户会话历史中取出指定会话的消息列表
+     * @return 消息列表；会话不存在返回 null
+     */
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> extractChatMessages(String userId, String chatId) {
+        Map<String, Object> history = chatHistoryService.loadChatHistory(userId);
+        Object chatsObj = history.get("chats");
+        if (!(chatsObj instanceof Map)) return null;
+        Object msgs = ((Map<String, Object>) chatsObj).get(chatId);
+        return msgs instanceof List ? (List<Map<String, Object>>) msgs : null;
+    }
+
+    /**
+     * 生成会话标题：取第一条用户消息前 20 字（与侧边栏标题规则一致）
+     */
+    private String buildTitle(List<Map<String, Object>> messages) {
+        for (Map<String, Object> m : messages) {
+            if ("user".equals(m.get("role")) && m.get("content") instanceof String s && !s.isEmpty()) {
+                return s.length() > 20 ? s.substring(0, 20) : s;
+            }
+        }
+        return "分享的会话";
+    }
+}

@@ -23,8 +23,10 @@ onMounted(() => {
 /* 命令式弹窗（ElMessage / ElMessageBox）通过 append-to-body 挂载到 body，
    脱离 <el-config-provider> 组件树，无法读取其 z-index 配置，仍用默认值（2001 起），
    会被自定义模态框（z-index:3000）遮挡。此处兜底提升其层级至 4500：
-   高于自定义模态框(3000)与组件弹出层(4001+)、低于图片灯箱(5000)。 */
-.el-overlay-message-box,
+   高于自定义模态框(3000)与组件弹出层(4001+)、低于图片灯箱(5000)。
+   注意：ElMessageBox 的真实 z-index 落在外层遮罩 .el-overlay.is-message-box 上（内层
+   .el-overlay-message-box 不带 z-index），故必须提升外层遮罩层级才能盖住自定义模态框。 */
+.el-overlay.is-message-box,
 .el-message {
   z-index: 4500 !important;
 }
