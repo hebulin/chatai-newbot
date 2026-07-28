@@ -81,7 +81,7 @@ public class FileStorageService {
      * @return 图片字节；不存在或参数非法返回 null
      */
     public byte[] readImage(String month, String filename) {
-        if (!SAFE_NAME.matcher(month).matches() || !SAFE_NAME.matcher(filename).matches()) {
+        if (!isSafeSegment(month) || !isSafeSegment(filename)) {
             return null;
         }
         try {
@@ -116,6 +116,17 @@ public class FileStorageService {
             return null;
         }
         return "data:" + mimeOf(filename) + ";base64," + Base64.getEncoder().encodeToString(bytes);
+    }
+
+    /**
+     * 路径段安全校验：仅允许字母数字点横线，且显式拒绝 "."/".." 与任何 ".." 穿越序列。
+     * 正则本身允许 ".."（点在字符类中），故必须额外拦截，防止目录穿越读取上级敏感文件。
+     */
+    private static boolean isSafeSegment(String name) {
+        if (name == null || !SAFE_NAME.matcher(name).matches()) {
+            return false;
+        }
+        return !name.equals(".") && !name.equals("..") && !name.contains("..");
     }
 
     /**
