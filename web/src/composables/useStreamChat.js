@@ -14,6 +14,14 @@ export function useStreamChat() {
   let buffer = ''
   let thinkingStartTime = null
 
+  // 结算思考用时：最小记 1 秒，避免思考很快时 round 出 0（falsy）导致
+  // 历史消息渲染时误判为“正在思考”且持久化后刷新也无法恢复
+  function finalizeThinkingTime() {
+    if (thinkingStartTime && !thinkingTime.value) {
+      thinkingTime.value = Math.max(1, Math.round((Date.now() - thinkingStartTime) / 1000))
+    }
+  }
+
   function reset() {
     buffer = ''
     thinkingContent.value = ''
@@ -83,6 +91,8 @@ export function useStreamChat() {
             }
           }
           isStreaming.value = false
+          // 流结束时若只有思考没有正文（或正文 delta 未触发结算），补结算思考用时
+          finalizeThinkingTime()
           if (onDone) onDone({
             content: answerContent.value,
             reasoning_content: thinkingContent.value,
@@ -125,9 +135,7 @@ export function useStreamChat() {
                   updated = true
                 }
                 if (delta.content) {
-                  if (thinkingStartTime && !thinkingTime.value) {
-                    thinkingTime.value = Math.round((Date.now() - thinkingStartTime) / 1000)
-                  }
+                  if (thinkingStartTime) finalizeThinkingTime()
                   answerContent.value += delta.content
                   updated = true
                 }
@@ -152,7 +160,8 @@ export function useStreamChat() {
     } catch (err) {
       isStreaming.value = false
       if (err.name === 'AbortError') {
-        // 用户中断
+        // 用户中断：若已进入思考阶段同样补结算思考用时
+        finalizeThinkingTime()
         if (onDone) onDone({
           content: answerContent.value,
           reasoning_content: thinkingContent.value,

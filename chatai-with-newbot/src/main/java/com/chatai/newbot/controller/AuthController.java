@@ -1,6 +1,7 @@
 package com.chatai.newbot.controller;
 
 import com.chatai.newbot.model.User;
+import com.chatai.newbot.service.LoginAttemptService;
 import com.chatai.newbot.service.StorageManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,9 +16,11 @@ import java.util.Map;
 public class AuthController {
     private static final Logger log = LoggerFactory.getLogger(AuthController.class);
     private final StorageManager storageService;
+    private final LoginAttemptService loginAttemptService;
 
-    public AuthController(StorageManager storageService) {
+    public AuthController(StorageManager storageService, LoginAttemptService loginAttemptService) {
         this.storageService = storageService;
+        this.loginAttemptService = loginAttemptService;
     }
 
     @PostMapping("/login")
@@ -32,14 +35,31 @@ public class AuthController {
             return result;
         }
 
+        String ip = getClientIp(request);
+
+        // 防爆破：检查账户/IP 是否因连续失败被锁定
+        long lockRemain = loginAttemptService.getLockRemainSeconds(username.trim(), ip);
+        if (lockRemain > 0) {
+            result.put("success", false);
+            result.put("message", "登录失败次数过多，请 " + ((lockRemain + 59) / 60) + " 分钟后重试");
+            return result;
+        }
+
         User user = storageService.authenticate(username.trim(), password);
         if (user == null) {
+            loginAttemptService.onFailure(username.trim(), ip);
             result.put("success", false);
             result.put("message", "用户名或密码错误");
             return result;
         }
+        // 被禁用账号拒绝登录（不计入爆破失败次数，避免误锁）
+        if (user.isDisabled()) {
+            result.put("success", false);
+            result.put("message", "账号已被禁用，请联系管理员");
+            return result;
+        }
+        loginAttemptService.onSuccess(username.trim(), ip);
 
-        String ip = getClientIp(request);
         String browser = getClientBrowser(request);
         storageService.updateLoginInfo(user.getId(), ip, browser);
         String token = storageService.createToken(user.getId(), ip);

@@ -1,8 +1,9 @@
 package com.chatai.newbot.controller;
 
 import com.chatai.newbot.model.*;
-import com.chatai.newbot.service.JsonFileStorageService;
+import com.chatai.newbot.service.PasswordHasher;
 import com.chatai.newbot.service.StorageManager;
+import com.chatai.newbot.service.UnifiedChatService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
@@ -19,9 +20,11 @@ import java.util.stream.Collectors;
 public class AdminController {
     private static final Logger log = LoggerFactory.getLogger(AdminController.class);
     private final StorageManager storageService;
+    private final UnifiedChatService unifiedChatService;
 
-    public AdminController(StorageManager storageService) {
+    public AdminController(StorageManager storageService, UnifiedChatService unifiedChatService) {
         this.storageService = storageService;
+        this.unifiedChatService = unifiedChatService;
     }
 
     private boolean checkAdmin(HttpServletRequest request, HttpServletResponse response) {
@@ -105,6 +108,21 @@ public class AdminController {
         result.put("success", deleted);
         if (!deleted) result.put("message", "模型不存在");
         return result;
+    }
+
+    /**
+     * 模型连通性测试：向厂商 API 发一条最小请求，验证 API Key/URL/模型ID 是否可用
+     */
+    @PostMapping("/models/{id}/test")
+    public Map<String, Object> testModel(@PathVariable String id,
+                                          HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        return unifiedChatService.testConnection(id);
     }
 
     /**
@@ -369,6 +387,9 @@ public class AdminController {
             m.put("lastLoginIp", u.getLastLoginIp());
             m.put("lastLoginBrowser", u.getLastLoginBrowser());
             m.put("allowedModelIds", u.getAllowedModelIds());
+            m.put("disabled", u.isDisabled());
+            m.put("dailyLimitType", u.getDailyLimitType());
+            m.put("dailyLimitValue", u.getDailyLimitValue());
             return m;
         }).collect(Collectors.toList());
 
@@ -430,11 +451,53 @@ public class AdminController {
         if (role != null && !user.getUsername().equals("admin")) {
             user.setRole(role);
         }
+        boolean passwordReset = false;
         String password = (String) body.get("password");
         if (password != null && !password.trim().isEmpty()) {
-            user.setPassword(JsonFileStorageService.hashPassword(password));
+            user.setPassword(PasswordHasher.hash(password));
+            passwordReset = true;
+        }
+        // 禁用/启用：内置 admin 与当前登录账号不可禁用，防止把自己锁在门外
+        Object disabledRaw = body.get("disabled");
+        if (disabledRaw instanceof Boolean disabled) {
+            User current = (User) request.getAttribute("currentUser");
+            if (disabled && "admin".equals(user.getUsername())) {
+                result.put("success", false);
+                result.put("message", "内置管理员账号不可禁用");
+                return result;
+            }
+            if (disabled && current != null && current.getId().equals(user.getId())) {
+                result.put("success", false);
+                result.put("message", "不能禁用自己的账号");
+                return result;
+            }
+            user.setDisabled(disabled);
+        }
+        // 单用户每日限额：type 为 "count"（每日次数）或 "token"（每日Token量），二选一互斥；
+        // 传空/null 或 value<=0 视为清除个人限额（回退全局配额）
+        if (body.containsKey("dailyLimitType") || body.containsKey("dailyLimitValue")) {
+            Object typeRaw = body.get("dailyLimitType");
+            String limitType = typeRaw instanceof String s ? s.trim() : "";
+            int limitValue = 0;
+            Object valueRaw = body.get("dailyLimitValue");
+            if (valueRaw instanceof Number n) {
+                limitValue = n.intValue();
+            } else if (valueRaw instanceof String vs && !vs.trim().isEmpty()) {
+                try { limitValue = Integer.parseInt(vs.trim()); } catch (NumberFormatException ignore) { }
+            }
+            if (("count".equals(limitType) || "token".equals(limitType)) && limitValue > 0) {
+                user.setDailyLimitType(limitType);
+                user.setDailyLimitValue(limitValue);
+            } else {
+                user.setDailyLimitType(null);
+                user.setDailyLimitValue(0);
+            }
         }
         storageService.updateUser(user);
+        // 重置密码或禁用后强制下线，旧登录态立即失效
+        if (passwordReset || user.isDisabled()) {
+            storageService.removeTokensByUserId(user.getId());
+        }
         result.put("success", true);
         result.put("message", "保存成功");
         return result;
@@ -740,6 +803,88 @@ public class AdminController {
             log.error("切换存储模式失败", e);
             result.put("success", false);
             result.put("message", "切换失败: " + e.getMessage());
+        }
+        return result;
+    }
+
+    // ========== 系统设置（每日配额） ==========
+
+    /**
+     * 获取每日调用配额设置
+     * 返回: { "success": true, "data": { "dailyChatLimit": 100 } }（0 表示不限制）
+     */
+    @GetMapping("/settings/quota")
+    public Map<String, Object> getQuotaSettings(HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("dailyChatLimit", storageService.getDailyChatLimit());
+        data.put("rateLimitPerMinute", storageService.getRateLimitPerMinute());
+        data.put("contextMaxMessages", storageService.getContextMaxMessages());
+        result.put("success", true);
+        result.put("data", data);
+        return result;
+    }
+
+    /**
+     * 设置每日调用配额（对非 admin 用户生效，0 表示不限制）
+     * 请求体: { "dailyChatLimit": 100 }
+     */
+    @PutMapping("/settings/quota")
+    public Map<String, Object> setQuotaSettings(@RequestBody Map<String, Object> body,
+                                                 HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        Object raw = body == null ? null : body.get("dailyChatLimit");
+        if (!(raw instanceof Number)) {
+            result.put("success", false);
+            result.put("message", "请指定 dailyChatLimit 参数（整数，0 表示不限制）");
+            return result;
+        }
+        int limit = ((Number) raw).intValue();
+        if (limit < 0 || limit > 100000) {
+            result.put("success", false);
+            result.put("message", "配额范围应为 0 ~ 100000（0 表示不限制）");
+            return result;
+        }
+        // 每分钟限流（可选，0 表示不限制）
+        int ratePerMinute = -1;
+        if (body != null && body.get("rateLimitPerMinute") instanceof Number rn) {
+            ratePerMinute = rn.intValue();
+            if (ratePerMinute < 0 || ratePerMinute > 10000) {
+                result.put("success", false);
+                result.put("message", "每分钟限流范围应为 0 ~ 10000（0 表示不限制）");
+                return result;
+            }
+        }
+        // 上下文最大消息条数（可选，0 表示不限制）
+        int contextMax = -1;
+        if (body != null && body.get("contextMaxMessages") instanceof Number cn) {
+            contextMax = cn.intValue();
+            if (contextMax < 0 || contextMax > 1000) {
+                result.put("success", false);
+                result.put("message", "上下文最大条数范围应为 0 ~ 1000（0 表示不限制）");
+                return result;
+            }
+        }
+        try {
+            storageService.setDailyChatLimit(limit);
+            if (ratePerMinute >= 0) storageService.setRateLimitPerMinute(ratePerMinute);
+            if (contextMax >= 0) storageService.setContextMaxMessages(contextMax);
+            result.put("success", true);
+            result.put("message", limit == 0 ? "已取消每日调用限制" : "每日调用上限已设为 " + limit + " 次");
+        } catch (Exception e) {
+            log.error("保存配额设置失败", e);
+            result.put("success", false);
+            result.put("message", "保存失败: " + e.getMessage());
         }
         return result;
     }

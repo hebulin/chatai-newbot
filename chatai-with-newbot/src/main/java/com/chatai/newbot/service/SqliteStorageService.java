@@ -58,6 +58,9 @@ public class SqliteStorageService implements StorageService {
             // 建表（IF NOT EXISTS，幂等）
             createTables();
 
+            // 存量明文 API Key 一次性加密升级
+            encryptLegacyApiKeys();
+
             // 加载 classpath 内置厂商
             loadProviders();
             log.info("SQLite: 已加载 {} 个内置厂商", providers.size());
@@ -94,11 +97,21 @@ public class SqliteStorageService implements StorageService {
                 "last_login_ip TEXT," +
                 "last_login_browser TEXT," +
                 "allowed_model_ids TEXT DEFAULT '[]'," +
-                "system_prompt TEXT" +
+                "system_prompt TEXT," +
+                "disabled INTEGER DEFAULT 0," +
+                "daily_limit_type TEXT," +
+                "daily_limit_value INTEGER DEFAULT 0," +
+                "prompt_presets TEXT" +
                 ")");
 
         // 老数据库补充 system_prompt 列（幂等迁移）
         ensureUserSystemPromptColumn();
+        // 老数据库补充 disabled 列（幂等迁移）
+        ensureUserDisabledColumn();
+        // 老数据库补充单用户每日限额列（幂等迁移）
+        ensureUserDailyLimitColumns();
+        // 老数据库补充提示词预设列（幂等迁移）
+        ensureUserPromptPresetsColumn();
 
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_model_config (" +
                 "id TEXT PRIMARY KEY," +
@@ -147,6 +160,30 @@ public class SqliteStorageService implements StorageService {
                 "value TEXT" +
                 ")");
 
+        // 登录 Token 持久化表（服务重启后登录态不丢失）
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_token (" +
+                "token TEXT PRIMARY KEY," +
+                "user_id TEXT NOT NULL," +
+                "ip TEXT," +
+                "created_at TEXT," +
+                "expires_at INTEGER NOT NULL DEFAULT 0" +
+                ")");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_token_user ON t_token(user_id)");
+
+        // 会话分享表（只读链接，两种存储模式共用 SQLite）
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_chat_share (" +
+                "id TEXT PRIMARY KEY," +
+                "chat_id TEXT NOT NULL," +
+                "user_id TEXT NOT NULL," +
+                "user_name TEXT," +
+                "title TEXT," +
+                "created_at TEXT," +
+                "expires_at TEXT" +
+                ")");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_share_user ON t_chat_share(user_id)");
+        // 老数据库补充 expires_at 列（幂等迁移）
+        ensureChatShareExpiresColumn();
+
         log.info("SQLite: 数据表已就绪");
     }
 
@@ -161,6 +198,115 @@ public class SqliteStorageService implements StorageService {
         if (!hasColumn) {
             jdbcTemplate.execute("ALTER TABLE t_user ADD COLUMN system_prompt TEXT");
             log.info("SQLite: t_user 表已补充 system_prompt 列");
+        }
+    }
+
+    /**
+     * 为 t_user 表补充 prompt_presets 列（幂等迁移）。
+     * 存储用户自定义提示词预设列表的 JSON。
+     */
+    private void ensureUserPromptPresetsColumn() {
+        List<Map<String, Object>> columns = jdbcTemplate.queryForList("PRAGMA table_info(t_user)");
+        boolean hasColumn = columns.stream()
+                .anyMatch(c -> "prompt_presets".equals(String.valueOf(c.get("name"))));
+        if (!hasColumn) {
+            jdbcTemplate.execute("ALTER TABLE t_user ADD COLUMN prompt_presets TEXT");
+            log.info("SQLite: t_user 表已补充 prompt_presets 列");
+        }
+    }
+
+    /** 解析提示词预设 JSON 字符串为列表（空或解析失败返回空列表） */
+    private List<PromptPreset> parsePromptPresets(String json) {
+        if (json == null || json.trim().isEmpty()) {
+            return new ArrayList<>();
+        }
+        try {
+            List<PromptPreset> list = objectMapper.readValue(json, new TypeReference<List<PromptPreset>>() {});
+            return list != null ? list : new ArrayList<>();
+        } catch (Exception e) {
+            log.warn("解析 prompt_presets 失败: {}", e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    /** 序列化提示词预设列表为 JSON 字符串（空列表存 '[]'） */
+    private String toPromptPresetsJson(List<PromptPreset> presets) {
+        try {
+            return objectMapper.writeValueAsString(presets != null ? presets : new ArrayList<>());
+        } catch (Exception e) {
+            log.warn("序列化 prompt_presets 失败: {}", e.getMessage());
+            return "[]";
+        }
+    }
+
+    /**
+     * 存量明文 API Key 一次性加密升级（幂等迁移）。
+     * 扫描 t_model_config 中无 ENC: 前缀的明文 Key，加密后写回；已是密文则跳过。
+     */
+    private void encryptLegacyApiKeys() {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT id, api_key FROM t_model_config WHERE api_key IS NOT NULL AND api_key != ''");
+        int migrated = 0;
+        for (Map<String, Object> row : rows) {
+            String apiKey = String.valueOf(row.get("api_key"));
+            if (!ApiKeyCrypto.isEncrypted(apiKey)) {
+                String encrypted = ApiKeyCrypto.encrypt(apiKey);
+                if (ApiKeyCrypto.isEncrypted(encrypted)) {
+                    jdbcTemplate.update("UPDATE t_model_config SET api_key = ? WHERE id = ?",
+                            encrypted, row.get("id"));
+                    migrated++;
+                }
+            }
+        }
+        if (migrated > 0) {
+            log.info("SQLite: 已将 {} 个存量明文 API Key 加密存储", migrated);
+        }
+    }
+
+    /**
+     * 为 t_user 表补充 disabled 列（幂等迁移）。
+     * 老版本数据库没有该列时自动执行 ALTER TABLE；已存在则跳过，保证重复启动安全。
+     */
+    private void ensureUserDisabledColumn() {
+        List<Map<String, Object>> columns = jdbcTemplate.queryForList("PRAGMA table_info(t_user)");
+        boolean hasColumn = columns.stream()
+                .anyMatch(c -> "disabled".equals(String.valueOf(c.get("name"))));
+        if (!hasColumn) {
+            jdbcTemplate.execute("ALTER TABLE t_user ADD COLUMN disabled INTEGER DEFAULT 0");
+            log.info("SQLite: t_user 表已补充 disabled 列");
+        }
+    }
+
+    /**
+     * 为 t_user 表补充单用户每日限额列（幂等迁移）。
+     * 老版本数据库没有 daily_limit_type / daily_limit_value 列时自动执行 ALTER TABLE；已存在则跳过。
+     */
+    private void ensureUserDailyLimitColumns() {
+        List<Map<String, Object>> columns = jdbcTemplate.queryForList("PRAGMA table_info(t_user)");
+        boolean hasType = columns.stream()
+                .anyMatch(c -> "daily_limit_type".equals(String.valueOf(c.get("name"))));
+        if (!hasType) {
+            jdbcTemplate.execute("ALTER TABLE t_user ADD COLUMN daily_limit_type TEXT");
+            log.info("SQLite: t_user 表已补充 daily_limit_type 列");
+        }
+        boolean hasValue = columns.stream()
+                .anyMatch(c -> "daily_limit_value".equals(String.valueOf(c.get("name"))));
+        if (!hasValue) {
+            jdbcTemplate.execute("ALTER TABLE t_user ADD COLUMN daily_limit_value INTEGER DEFAULT 0");
+            log.info("SQLite: t_user 表已补充 daily_limit_value 列");
+        }
+    }
+
+    /**
+     * 为 t_chat_share 表补充 expires_at 列（幂等迁移）。
+     */
+    private void ensureChatShareExpiresColumn() {
+        List<Map<String, Object>> columns = jdbcTemplate.queryForList("PRAGMA table_info(t_chat_share)");
+        boolean hasColumn = columns.stream()
+                .anyMatch(c -> "expires_at".equals(String.valueOf(c.get("name"))));
+        if (!hasColumn) {
+            jdbcTemplate.execute("ALTER TABLE t_chat_share ADD COLUMN expires_at TEXT");
+            log.info("SQLite: t_chat_share 表已补充 expires_at 列");
         }
     }
 
@@ -204,6 +350,10 @@ public class SqliteStorageService implements StorageService {
         u.setLastLoginBrowser(rs.getString("last_login_browser"));
         u.setAllowedModelIds(parseJsonArray(rs.getString("allowed_model_ids")));
         u.setSystemPrompt(rs.getString("system_prompt"));
+        u.setPromptPresets(parsePromptPresets(rs.getString("prompt_presets")));
+        u.setDisabled(rs.getInt("disabled") == 1);
+        u.setDailyLimitType(rs.getString("daily_limit_type"));
+        u.setDailyLimitValue(rs.getInt("daily_limit_value"));
         return u;
     };
 
@@ -215,7 +365,7 @@ public class SqliteStorageService implements StorageService {
             User admin = new User();
             admin.setId(UUID.randomUUID().toString());
             admin.setUsername(ADMIN_USERNAME);
-            admin.setPassword(JsonFileStorageService.hashPassword(ADMIN_DEFAULT_PASSWORD));
+            admin.setPassword(PasswordHasher.hash(ADMIN_DEFAULT_PASSWORD));
             admin.setRole("admin");
             admin.setCreatedAt(nowString());
             insertUser(admin);
@@ -226,18 +376,28 @@ public class SqliteStorageService implements StorageService {
     /** 插入用户记录 */
     private void insertUser(User u) {
         jdbcTemplate.update(
-                "INSERT INTO t_user (id, username, password, role, created_at, last_login_at, last_login_ip, last_login_browser, allowed_model_ids, system_prompt) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO t_user (id, username, password, role, created_at, last_login_at, last_login_ip, last_login_browser, allowed_model_ids, system_prompt, disabled, daily_limit_type, daily_limit_value, prompt_presets) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 u.getId(), u.getUsername(), u.getPassword(), u.getRole(), u.getCreatedAt(),
                 u.getLastLoginAt(), u.getLastLoginIp(), u.getLastLoginBrowser(),
-                toJsonArray(u.getAllowedModelIds()), u.getSystemPrompt());
+                toJsonArray(u.getAllowedModelIds()), u.getSystemPrompt(), u.isDisabled() ? 1 : 0,
+                u.getDailyLimitType(), u.getDailyLimitValue(), toPromptPresetsJson(u.getPromptPresets()));
     }
 
     @Override
     public User authenticate(String username, String password) {
         List<User> users = jdbcTemplate.query(
-                "SELECT * FROM t_user WHERE username = ? AND password = ?",
-                userRowMapper, username, JsonFileStorageService.hashPassword(password));
-        return users.isEmpty() ? null : users.get(0);
+                "SELECT * FROM t_user WHERE username = ?", userRowMapper, username);
+        User user = users.isEmpty() ? null : users.get(0);
+        if (user == null || !PasswordHasher.matches(password, user.getPassword())) {
+            return null;
+        }
+        // 旧版 SHA-256 哈希校验通过后透明升级为 BCrypt
+        if (PasswordHasher.isLegacyHash(user.getPassword())) {
+            user.setPassword(PasswordHasher.hash(password));
+            jdbcTemplate.update("UPDATE t_user SET password = ? WHERE id = ?",
+                    user.getPassword(), user.getId());
+        }
+        return user;
     }
 
     @Override
@@ -259,7 +419,7 @@ public class SqliteStorageService implements StorageService {
         User user = new User();
         user.setId(UUID.randomUUID().toString());
         user.setUsername(username);
-        user.setPassword(JsonFileStorageService.hashPassword(password));
+        user.setPassword(PasswordHasher.hash(password));
         user.setRole("user");
         user.setCreatedAt(nowString());
         user.setLastLoginIp(ip);
@@ -305,19 +465,20 @@ public class SqliteStorageService implements StorageService {
     @Override
     public void updateUser(User user) {
         jdbcTemplate.update(
-                "UPDATE t_user SET username=?, password=?, role=?, created_at=?, last_login_at=?, last_login_ip=?, last_login_browser=?, allowed_model_ids=?, system_prompt=? WHERE id=?",
+                "UPDATE t_user SET username=?, password=?, role=?, created_at=?, last_login_at=?, last_login_ip=?, last_login_browser=?, allowed_model_ids=?, system_prompt=?, disabled=?, daily_limit_type=?, daily_limit_value=?, prompt_presets=? WHERE id=?",
                 user.getUsername(), user.getPassword(), user.getRole(), user.getCreatedAt(),
                 user.getLastLoginAt(), user.getLastLoginIp(), user.getLastLoginBrowser(),
-                toJsonArray(user.getAllowedModelIds()), user.getSystemPrompt(), user.getId());
+                toJsonArray(user.getAllowedModelIds()), user.getSystemPrompt(), user.isDisabled() ? 1 : 0,
+                user.getDailyLimitType(), user.getDailyLimitValue(), toPromptPresetsJson(user.getPromptPresets()), user.getId());
     }
 
     @Override
     public int changePassword(String userId, String oldPassword, String newPassword) {
         User user = getUserById(userId);
         if (user == null) return 1;
-        if (!user.getPassword().equals(JsonFileStorageService.hashPassword(oldPassword))) return 2;
+        if (!PasswordHasher.matches(oldPassword, user.getPassword())) return 2;
         jdbcTemplate.update("UPDATE t_user SET password = ? WHERE id = ?",
-                JsonFileStorageService.hashPassword(newPassword), userId);
+                PasswordHasher.hash(newPassword), userId);
         return 0;
     }
 
@@ -332,7 +493,7 @@ public class SqliteStorageService implements StorageService {
         m.setProviderIcon(rs.getString("provider_icon"));
         m.setModelId(rs.getString("model_id"));
         m.setDisplayName(rs.getString("display_name"));
-        m.setApiKey(rs.getString("api_key"));
+        m.setApiKey(ApiKeyCrypto.decrypt(rs.getString("api_key")));
         m.setApiUrl(rs.getString("api_url"));
         m.setProtocol(rs.getString("protocol"));
         m.setThinkingParamType(rs.getString("thinking_param_type"));
@@ -390,7 +551,7 @@ public class SqliteStorageService implements StorageService {
         jdbcTemplate.update(
                 "INSERT INTO t_model_config (id, provider_id, provider_name, provider_icon, model_id, display_name, api_key, api_url, protocol, thinking_param_type, supports_thinking, supports_multimodal, enabled, visible_to_all, built_in, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 m.getId(), m.getProviderId(), m.getProviderName(), m.getProviderIcon(),
-                m.getModelId(), m.getDisplayName(), m.getApiKey(), m.getApiUrl(),
+                m.getModelId(), m.getDisplayName(), ApiKeyCrypto.encrypt(m.getApiKey()), m.getApiUrl(),
                 m.getProtocol(), m.getThinkingParamType(),
                 m.isSupportsThinking() ? 1 : 0, m.isSupportsMultimodal() ? 1 : 0,
                 m.isEnabled() ? 1 : 0,
@@ -404,7 +565,7 @@ public class SqliteStorageService implements StorageService {
         jdbcTemplate.update(
                 "UPDATE t_model_config SET provider_id=?, provider_name=?, provider_icon=?, model_id=?, display_name=?, api_key=?, api_url=?, protocol=?, thinking_param_type=?, supports_thinking=?, supports_multimodal=?, enabled=?, visible_to_all=?, built_in=?, created_at=? WHERE id=?",
                 config.getProviderId(), config.getProviderName(), config.getProviderIcon(),
-                config.getModelId(), config.getDisplayName(), config.getApiKey(), config.getApiUrl(),
+                config.getModelId(), config.getDisplayName(), ApiKeyCrypto.encrypt(config.getApiKey()), config.getApiUrl(),
                 config.getProtocol(), config.getThinkingParamType(),
                 config.isSupportsThinking() ? 1 : 0, config.isSupportsMultimodal() ? 1 : 0,
                 config.isEnabled() ? 1 : 0,
@@ -703,6 +864,22 @@ public class SqliteStorageService implements StorageService {
     }
 
     @Override
+    public int countUsageByUserAndDay(String userId, String day) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_usage_log WHERE user_id = ? AND timestamp LIKE ?",
+                Integer.class, userId, day + "%");
+        return count == null ? 0 : count;
+    }
+
+    @Override
+    public long sumTokensByUserAndDay(String userId, String day) {
+        Long sum = jdbcTemplate.queryForObject(
+                "SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) FROM t_usage_log WHERE user_id = ? AND timestamp LIKE ?",
+                Long.class, userId, day + "%");
+        return sum == null ? 0L : sum;
+    }
+
+    @Override
     public void updateUsageLog(UsageLog updatedLog) {
         // 按 userId + timestamp + modelId 匹配更新
         jdbcTemplate.update(
@@ -757,6 +934,151 @@ public class SqliteStorageService implements StorageService {
      */
     public void deleteChatData(String userId) {
         jdbcTemplate.update("DELETE FROM t_chat_history WHERE user_id = ?", userId);
+    }
+
+    // ========== 登录 Token 持久化 ==========
+
+    /**
+     * 插入登录 Token 记录
+     * @param token token 字符串
+     * @param userId 用户ID
+     * @param ip 登录IP
+     * @param expiresAt 过期时间戳（毫秒）
+     */
+    public void insertToken(String token, String userId, String ip, long expiresAt) {
+        jdbcTemplate.update(
+                "INSERT OR REPLACE INTO t_token (token, user_id, ip, created_at, expires_at) VALUES (?,?,?,?,?)",
+                token, userId, ip, nowString(), expiresAt);
+    }
+
+    /**
+     * 删除指定 Token
+     * @param token token 字符串
+     */
+    public void deleteToken(String token) {
+        jdbcTemplate.update("DELETE FROM t_token WHERE token = ?", token);
+    }
+
+    /**
+     * 删除指定用户的所有 Token
+     * @param userId 用户ID
+     */
+    public void deleteTokensByUser(String userId) {
+        jdbcTemplate.update("DELETE FROM t_token WHERE user_id = ?", userId);
+    }
+
+    /**
+     * 更新 Token 过期时间（滑动续期）
+     * @param token token 字符串
+     * @param expiresAt 新的过期时间戳（毫秒）
+     */
+    public void updateTokenExpiry(String token, long expiresAt) {
+        jdbcTemplate.update("UPDATE t_token SET expires_at = ? WHERE token = ?", expiresAt, token);
+    }
+
+    /**
+     * 删除所有已过期的 Token
+     * @param now 当前时间戳（毫秒）
+     * @return 删除条数
+     */
+    public int deleteExpiredTokens(long now) {
+        return jdbcTemplate.update("DELETE FROM t_token WHERE expires_at < ?", now);
+    }
+
+    /**
+     * 加载所有未过期的 Token 记录（启动时恢复登录态）
+     * @param now 当前时间戳（毫秒）
+     * @return 每条记录含 token/user_id/ip/expires_at
+     */
+    public List<Map<String, Object>> loadActiveTokens(long now) {
+        return jdbcTemplate.queryForList(
+                "SELECT token, user_id, ip, expires_at FROM t_token WHERE expires_at >= ?", now);
+    }
+
+    // ========== 会话分享（恒走 SQLite，与存储模式开关无关） ==========
+
+    /** 会话分享行映射器 */
+    private final RowMapper<ChatShare> chatShareRowMapper = (ResultSet rs, int rowNum) -> {
+        ChatShare s = new ChatShare();
+        s.setId(rs.getString("id"));
+        s.setChatId(rs.getString("chat_id"));
+        s.setUserId(rs.getString("user_id"));
+        s.setUserName(rs.getString("user_name"));
+        s.setTitle(rs.getString("title"));
+        s.setCreatedAt(rs.getString("created_at"));
+        s.setExpiresAt(rs.getString("expires_at"));
+        return s;
+    };
+
+    /**
+     * 新增分享记录（自动生成分享码与创建时间）
+     * @param s 分享记录
+     * @return 保存后的记录
+     */
+    public ChatShare addChatShare(ChatShare s) {
+        if (s.getId() == null || s.getId().isEmpty()) {
+            s.setId(UUID.randomUUID().toString().replace("-", ""));
+        }
+        if (s.getCreatedAt() == null) {
+            s.setCreatedAt(nowString());
+        }
+        jdbcTemplate.update(
+                "INSERT INTO t_chat_share (id, chat_id, user_id, user_name, title, created_at, expires_at) VALUES (?,?,?,?,?,?,?)",
+                s.getId(), s.getChatId(), s.getUserId(), s.getUserName(), s.getTitle(), s.getCreatedAt(), s.getExpiresAt());
+        return s;
+    }
+
+    /**
+     * 根据分享码获取分享记录
+     * @param id 分享码
+     * @return 分享记录，不存在返回 null
+     */
+    public ChatShare getChatShareById(String id) {
+        List<ChatShare> list = jdbcTemplate.query(
+                "SELECT * FROM t_chat_share WHERE id = ?", chatShareRowMapper, id);
+        return list.isEmpty() ? null : list.get(0);
+    }
+
+    /**
+     * 获取用户创建的所有分享记录（新建在前）
+     * @param userId 用户ID
+     * @return 分享列表
+     */
+    public List<ChatShare> getChatSharesByUser(String userId) {
+        return jdbcTemplate.query(
+                "SELECT * FROM t_chat_share WHERE user_id = ? ORDER BY created_at DESC",
+                chatShareRowMapper, userId);
+    }
+
+    /**
+     * 查找某用户对某会话已有的分享记录（同一会话复用分享码，避免重复生成）
+     * @param userId 用户ID
+     * @param chatId 会话ID
+     * @return 分享记录，不存在返回 null
+     */
+    public ChatShare getChatShareByChat(String userId, String chatId) {
+        List<ChatShare> list = jdbcTemplate.query(
+                "SELECT * FROM t_chat_share WHERE user_id = ? AND chat_id = ?",
+                chatShareRowMapper, userId, chatId);
+        return list.isEmpty() ? null : list.get(0);
+    }
+
+    /**
+     * 删除分享记录（撤销只读链接）
+     * @param id 分享码
+     * @return true=删除成功
+     */
+    public boolean deleteChatShare(String id) {
+        return jdbcTemplate.update("DELETE FROM t_chat_share WHERE id = ?", id) > 0;
+    }
+
+    /**
+     * 更新分享记录的过期时间（重新分享时续期；null=永久有效）
+     * @param id 分享码
+     * @param expiresAt 新的过期时间，null=永久
+     */
+    public void updateChatShareExpiry(String id, String expiresAt) {
+        jdbcTemplate.update("UPDATE t_chat_share SET expires_at = ? WHERE id = ?", expiresAt, id);
     }
 
     // ========== 数据迁移辅助方法（供 StorageManager 调用） ==========

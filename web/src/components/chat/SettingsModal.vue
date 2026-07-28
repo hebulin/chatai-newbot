@@ -17,9 +17,9 @@
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
               <span>修改密码</span>
             </div>
-            <div class="settings-menu-item" :class="{ active: tab === 'systemPrompt' }" @click="tab = 'systemPrompt'; loadPrompt()">
+            <div class="settings-menu-item" :class="{ active: tab === 'systemPrompt' }" @click="tab = 'systemPrompt'; loadPresets()">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>
-              <span>全局提示词</span>
+              <span>提示词</span>
             </div>
             <div class="settings-menu-item" :class="{ active: tab === 'dataManagement' }" @click="tab = 'dataManagement'">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
@@ -49,18 +49,29 @@
               <div class="settings-form-note">提交成功后将自动退出登录，请使用新密码重新登录。</div>
             </div>
 
-            <!-- 全局提示词 -->
+            <!-- 提示词 -->
             <div v-if="tab === 'systemPrompt'" class="settings-panel">
-              <h3 class="settings-panel-title">全局提示词</h3>
-              <div class="settings-form-group">
-                <label>自定义全局提示词（System Prompt）</label>
-                <textarea v-model="systemPrompt" class="settings-input settings-textarea" rows="8" placeholder="例如：你是一名严谨的中文技术顾问，回答简洁、准确，并使用 Markdown 排版。留空则使用系统默认提示词。"></textarea>
-                <div v-if="promptTip" class="settings-form-tip" :class="{ error: promptTipError }">{{ promptTip }}</div>
+              <h3 class="settings-panel-title">提示词</h3>
+              <div class="preset-list">
+                <div v-for="(p, idx) in presets" :key="p.id || idx" class="preset-item" :class="{ enabled: p.enabled }">
+                  <div class="preset-item-head">
+                    <input v-model="p.title" class="settings-input preset-title-input" maxlength="50" placeholder="提示词名称（如：翻译、技术顾问）" />
+                    <span class="preset-enable" :class="{ active: p.enabled }" @click="toggleEnable(idx)" :title="p.enabled ? '点击取消启用' : '点击启用（最多启用 1 条）'">
+                      <span class="preset-enable-dot"></span>
+                      {{ p.enabled ? '已启用' : '启用' }}
+                    </span>
+                    <button class="preset-del-btn" @click="removePreset(idx)" title="删除">✕</button>
+                  </div>
+                  <textarea v-model="p.content" class="settings-input settings-textarea preset-content-input" rows="4" placeholder="提示词内容（启用后作为全局 System Prompt 注入）"></textarea>
+                </div>
+                <div v-if="presets.length === 0" class="preset-empty">暂无提示词，点击下方“添加提示词”按钮新建</div>
               </div>
-              <div class="settings-form-actions">
-                <button class="settings-btn settings-btn-primary" @click="savePrompt">保存</button>
+              <div v-if="promptTip" class="settings-form-tip" :class="{ error: promptTipError }">{{ promptTip }}</div>
+              <div class="settings-form-actions preset-actions">
+                <button class="settings-btn settings-btn-ghost" @click="addPreset">+ 添加提示词</button>
+                <button class="settings-btn settings-btn-primary" @click="savePresets">保存</button>
               </div>
-              <div class="settings-form-note">每次对话调用都会携带该提示词，对所有会话生效。</div>
+              <div class="settings-form-note">可保存多条提示词，但最多只能启用其中 1 条；启用的提示词会在每次对话时作为全局提示词生效。都不启用则使用系统默认提示词。</div>
             </div>
 
             <!-- 数据管理 -->
@@ -95,7 +106,7 @@
 import { ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { changePassword } from '@/api/auth'
-import { getSystemPrompt, saveSystemPrompt } from '@/api/user'
+import { getPromptPresets, savePromptPresets } from '@/api/user'
 import { useChatStore } from '@/stores/chat'
 import { useAuthStore } from '@/stores/auth'
 
@@ -110,8 +121,8 @@ const pwdForm = ref({ oldPwd: '', newPwd: '', confirmPwd: '' })
 const pwdTip = ref('')
 const pwdTipError = ref(false)
 
-// 全局提示词
-const systemPrompt = ref('')
+// 提示词预设
+const presets = ref([])
 const promptTip = ref('')
 const promptTipError = ref(false)
 
@@ -157,29 +168,59 @@ async function submitChangePassword() {
   }
 }
 
-async function loadPrompt() {
+async function loadPresets() {
   try {
-    const data = await getSystemPrompt()
+    const data = await getPromptPresets()
     if (data && data.success) {
-      systemPrompt.value = data.systemPrompt || ''
+      presets.value = (data.presets || []).map(p => ({
+        id: p.id || '',
+        title: p.title || '',
+        content: p.content || '',
+        enabled: !!p.enabled
+      }))
     }
   } catch (e) { /* ignore */ }
 }
 
-async function savePrompt() {
+function addPreset() {
+  presets.value.push({ id: '', title: '', content: '', enabled: false })
+}
+
+function removePreset(idx) {
+  presets.value.splice(idx, 1)
+}
+
+// 启用互斥：点击某条则仅其启用、其余取消；再次点击已启用条则取消启用
+function toggleEnable(idx) {
+  const next = !presets.value[idx].enabled
+  presets.value.forEach((p, i) => { p.enabled = next && i === idx })
+}
+
+async function savePresets() {
   promptTip.value = ''
   promptTipError.value = false
-  if (systemPrompt.value.length > 20000) {
-    promptTip.value = '全局提示词过长（最多 20000 字符）'
+  if (presets.value.length > 20) {
+    promptTip.value = '提示词数量过多（最多 20 条）'
+    promptTipError.value = true
+    return
+  }
+  if (presets.value.some(p => (p.content || '').length > 20000)) {
+    promptTip.value = '单条提示词内容过长（最多 20000 字符）'
     promptTipError.value = true
     return
   }
   try {
-    const data = await saveSystemPrompt(systemPrompt.value)
+    const data = await savePromptPresets(presets.value)
     if (data.success) {
+      presets.value = (data.presets || []).map(p => ({
+        id: p.id || '',
+        title: p.title || '',
+        content: p.content || '',
+        enabled: !!p.enabled
+      }))
       promptTip.value = '已保存，立即对所有新对话生效。'
       promptTipError.value = false
-      ElMessage.success('全局提示词已保存')
+      ElMessage.success('提示词已保存')
     } else {
       promptTip.value = data.message || '保存失败'
       promptTipError.value = true
@@ -384,6 +425,92 @@ function confirmDeleteAll() {
   font-size: 11px;
   color: var(--ink-3, #999);
   margin-top: 4px;
+}
+
+/* === 提示词预设管理 === */
+.preset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.preset-item {
+  border: 1px solid var(--border, #333);
+  border-radius: 8px;
+  padding: 12px;
+}
+.preset-item.enabled {
+  border-color: var(--primary, #6366f1);
+}
+.preset-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.preset-title-input {
+  flex: 1;
+}
+.preset-enable {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--ink-3, #999);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.preset-enable.active {
+  border-color: var(--primary, #6366f1);
+  color: var(--primary, #6366f1);
+}
+.preset-enable-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+}
+.preset-enable.active .preset-enable-dot {
+  background: var(--primary, #6366f1);
+}
+.preset-del-btn {
+  background: none;
+  border: none;
+  color: var(--ink-3, #999);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px 6px;
+  flex-shrink: 0;
+}
+.preset-del-btn:hover {
+  color: #ef4444;
+}
+.preset-content-input {
+  min-height: 80px;
+}
+.preset-empty {
+  padding: 24px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--ink-3, #999);
+  border: 1px dashed var(--border, #333);
+  border-radius: 8px;
+}
+.preset-actions {
+  display: flex;
+  gap: 10px;
+}
+.settings-btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border, #333);
+  color: var(--ink-2, #ccc);
+}
+.settings-btn-ghost:hover {
+  border-color: var(--primary, #6366f1);
+  color: var(--primary, #6366f1);
 }
 
 /* === 移动端：侧栏改为顶部水平标签栏 === */

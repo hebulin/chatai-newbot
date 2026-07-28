@@ -32,6 +32,22 @@
         <div v-if="!chatStore.isChatHistoryLoaded" class="chat-list-skeleton">
           <div v-for="n in 5" :key="n" class="chat-skeleton-item"></div>
         </div>
+        <!-- 全文搜索结果（服务端检索消息内容） -->
+        <template v-if="chatStore.searchKeyword && searchResults.length">
+          <div class="chat-date-header">消息匹配 · {{ searchResults.length }}</div>
+          <div
+            v-for="(r, i) in searchResults"
+            :key="'hit-' + i"
+            class="chat-item search-hit"
+            :class="{ active: r.chatId === chatStore.currentChatId }"
+            @click="$emit('switch-chat', r.chatId)"
+          >
+            <div class="search-hit-body">
+              <span class="title">{{ r.chatTitle }}</span>
+              <span class="search-hit-snippet">{{ (r.role === 'user' ? '我：' : 'AI：') + r.snippet }}</span>
+            </div>
+          </div>
+        </template>
         <template v-for="group in chatStore.sortedChatList.groupOrder" :key="group">
           <div class="chat-date-header">{{ group }}</div>
           <div
@@ -41,13 +57,21 @@
             :class="{ active: chat.id === chatStore.currentChatId }"
             @click="$emit('switch-chat', chat.id)"
           >
+            <svg v-if="chat.pinned" class="pin-marker" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M16 3l5 5-3 1-4 4-1 6-2-2-4 4-1-1 4-4-2-2 6-1 4-4z"/></svg>
             <span class="title">{{ chat.title }}</span>
-            <button class="delete-btn" @click.stop="$emit('delete-chat', chat.id)" title="删除">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            <button class="chat-more-btn" @click.stop="toggleChatMenu(chat.id, $event)" title="更多">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
             </button>
+            <div class="chat-item-menu" v-if="openMenuId === chat.id" @click.stop>
+              <div class="chat-item-menu-item" @click="onTogglePin(chat.id)">{{ chat.pinned ? '取消置顶' : '置顶' }}</div>
+              <div class="chat-item-menu-item" @click="onRename(chat)">重命名</div>
+              <div class="chat-item-menu-item" @click="onShare(chat.id)">分享</div>
+              <div class="chat-item-menu-item" @click="onExport(chat.id)">导出 Markdown</div>
+              <div class="chat-item-menu-item chat-item-menu-item-danger" @click="onDelete(chat.id)">删除</div>
+            </div>
           </div>
         </template>
-        <div v-if="chatStore.isChatHistoryLoaded && chatStore.searchKeyword && chatStore.sortedChatList.total === 0" class="chat-search-empty">
+        <div v-if="chatStore.isChatHistoryLoaded && chatStore.searchKeyword && !searching && chatStore.sortedChatList.total === 0 && searchResults.length === 0" class="chat-search-empty">
           未找到匹配的会话
         </div>
       </div>
@@ -97,11 +121,13 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessageBox } from 'element-plus'
 import { useChatStore } from '@/stores/chat'
 import { useAuthStore } from '@/stores/auth'
 import { useTheme } from '@/composables/useTheme'
+import { searchChatHistory } from '@/api/chat'
 import { APP_VERSION } from '@/config/version'
 
 const router = useRouter()
@@ -110,6 +136,74 @@ const authStore = useAuthStore()
 const { getTheme } = useTheme()
 
 const userMenuOpen = ref(false)
+
+// 会话项操作菜单（置顶/重命名/分享/导出/删除）
+const openMenuId = ref(null)
+
+function toggleChatMenu(id) {
+  openMenuId.value = openMenuId.value === id ? null : id
+}
+
+function onTogglePin(id) {
+  chatStore.togglePin(id)
+  openMenuId.value = null
+}
+
+async function onRename(chat) {
+  openMenuId.value = null
+  try {
+    const { value } = await ElMessageBox.prompt('输入新的会话名称（留空恢复默认）', '重命名会话', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      inputValue: chat.title || '',
+      inputValidator: (v) => (v || '').length <= 40 || '名称最多 40 字'
+    })
+    chatStore.renameChat(chat.id, value)
+  } catch { /* 取消 */ }
+}
+
+function onShare(id) {
+  openMenuId.value = null
+  emit('share-chat', id)
+}
+
+function onExport(id) {
+  chatStore.exportChatMarkdown(id)
+  openMenuId.value = null
+}
+
+function onDelete(id) {
+  openMenuId.value = null
+  emit('delete-chat', id)
+}
+
+// 跨会话全文搜索：关键字变化后 300ms 防抖调用服务端检索
+const searchResults = ref([])
+const searching = ref(false)
+let searchTimer = null
+watch(() => chatStore.searchKeyword, (kw) => {
+  if (searchTimer) clearTimeout(searchTimer)
+  const q = (kw || '').trim()
+  if (!q) {
+    searchResults.value = []
+    searching.value = false
+    return
+  }
+  searching.value = true
+  searchTimer = setTimeout(async () => {
+    try {
+      const res = await searchChatHistory(q)
+      // 只保留当前关键字的结果（避免慢请求覆盖新输入）
+      if (q === chatStore.searchKeyword.trim()) {
+        searchResults.value = res?.success ? (res.data || []) : []
+      }
+    } catch {
+      searchResults.value = []
+    } finally {
+      searching.value = false
+    }
+  }, 300)
+})
 
 const userAvatarSrc = computed(() => {
   return getTheme() === 'dark' ? '/icons/user_ss.svg' : '/icons/user.svg'
@@ -128,6 +222,9 @@ function closeMenuOnOutside(e) {
   if (userMenuOpen.value) {
     userMenuOpen.value = false
   }
+  if (openMenuId.value !== null) {
+    openMenuId.value = null
+  }
 }
 
 onMounted(() => {
@@ -138,5 +235,83 @@ onUnmounted(() => {
   document.removeEventListener('click', closeMenuOnOutside)
 })
 
-defineEmits(['toggle', 'new-chat', 'switch-chat', 'delete-chat', 'open-settings', 'open-about', 'open-stats', 'logout'])
+const emit = defineEmits(['toggle', 'new-chat', 'switch-chat', 'delete-chat', 'open-settings', 'open-about', 'open-stats', 'logout', 'share-chat'])
 </script>
+
+<style scoped>
+/* 会话项：置顶标记与操作菜单 */
+.pin-marker {
+  flex-shrink: 0;
+  color: var(--accent, #4a7dff);
+  margin-right: 2px;
+}
+.chat-item {
+  position: relative;
+}
+.chat-more-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  color: var(--ink-3, #999);
+  opacity: 0;
+  transition: opacity .15s;
+  display: inline-flex;
+  align-items: center;
+}
+.chat-item:hover .chat-more-btn,
+.chat-item.active .chat-more-btn {
+  opacity: 1;
+}
+.chat-more-btn:hover {
+  color: var(--ink-1, #333);
+}
+.chat-item-menu {
+  position: absolute;
+  right: 8px;
+  top: 100%;
+  z-index: 30;
+  min-width: 120px;
+  background: var(--surface-1, #fff);
+  border: 1px solid var(--line-1, #e5e5e5);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.12);
+  padding: 4px;
+  margin-top: 2px;
+}
+.chat-item-menu-item {
+  padding: 7px 10px;
+  font-size: 13px;
+  color: var(--ink-1, #333);
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.chat-item-menu-item:hover {
+  background: var(--surface-2, #f5f5f5);
+}
+.chat-item-menu-item-danger {
+  color: #e5484d;
+}
+
+/* 全文搜索命中项：标题 + 匹配片段两行展示 */
+.search-hit {
+  height: auto;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.search-hit-body {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.search-hit-snippet {
+  font-size: 11px;
+  color: var(--ink-3, #999);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+</style>

@@ -390,14 +390,21 @@ html.dark {
   padding: 14px 16px 4px;
 }
 .admin-pager-size {
-  padding: 5px 8px;
+  padding: 5px 28px 5px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--paper);
+  background-color: var(--paper);
+  /* 与 Element Plus 下拉一致的单个 chevron 箭头（替代浏览器原生双三角） */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%237f8d9f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-position: calc(100% - 8px) center;
+  background-size: 14px 14px;
+  background-repeat: no-repeat;
   color: var(--ink-2);
   font-size: 12px;
   outline: none;
   cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
   transition: border-color 0.15s;
 }
 .admin-pager-size:hover { border-color: var(--primary); }

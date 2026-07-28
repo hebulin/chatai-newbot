@@ -175,27 +175,29 @@ function enqueueRender(el, text) {
 // parse 验证后入队渲染：先验证 normalize 后的代码，parse 失败则回退 raw 原文。
 // 避免 normalize（如 quoteMermaidLabels）误伤已引号化的复杂标签导致渲染失败；
 // 初次渲染与主题切换重渲染共用此逻辑，保证两者行为一致。
+// 两者均 parse 失败时标记 mermaid-parse-failed（退出视图模式 loading 占位，回退显示原始代码）
 function parseAndEnqueueRender(el, normalized, raw) {
   const renderWith = (code) => { if (el.isConnected) enqueueRender(el, code) }
+  const markFailed = () => { if (el.isConnected) el.classList.add('mermaid-parse-failed') }
   if (!mermaidModule) { renderWith(normalized); return }
   try {
     const r = mermaidModule.parse(normalized)
     if (r && typeof r.then === 'function') {
-      r.then(() => renderWith(normalized)).catch(() => tryRenderRaw(raw, renderWith))
+      r.then(() => renderWith(normalized)).catch(() => tryRenderRaw(raw, renderWith, markFailed))
     } else {
       renderWith(normalized)
     }
   } catch (e) {
-    tryRenderRaw(raw, renderWith)
+    tryRenderRaw(raw, renderWith, markFailed)
   }
 }
-// 回退用 raw 原文 parse 验证后渲染
-function tryRenderRaw(raw, renderWith) {
+// 回退用 raw 原文 parse 验证后渲染，仍失败则通知 onFail
+function tryRenderRaw(raw, renderWith, onFail) {
   try {
     const r2 = mermaidModule.parse(raw)
-    if (r2 && typeof r2.then === 'function') r2.then(() => renderWith(raw)).catch(() => {})
+    if (r2 && typeof r2.then === 'function') r2.then(() => renderWith(raw)).catch(() => { if (onFail) onFail() })
     else renderWith(raw)
-  } catch (e2) { /* ignore */ }
+  } catch (e2) { if (onFail) onFail() }
 }
 
 function drainQueue() {
@@ -405,7 +407,14 @@ export async function renderMermaidBlocks(container, theme = 'dark') {
   const els = container.querySelectorAll('.mermaid-view pre.mermaid:not([data-processed])')
   if (!els.length) return
 
-  await loadMermaid()
+  try {
+    await loadMermaid()
+  } catch (e) {
+    // mermaid 懒加载失败（如网络异常）：标记失败退出 loading 占位，回退显示原始代码
+    console.warn('[useMarkdown] mermaid load failed:', e?.message || e)
+    els.forEach(el => el.classList.add('mermaid-parse-failed'))
+    return
+  }
   ensureMermaidInit(getCurrentMermaidTheme(theme))
 
   els.forEach(el => {
@@ -627,7 +636,7 @@ function applyMermaidTheme(container, theme) {
   const raw = container.getAttribute('data-mermaid-raw')
   if (!raw) return
   pre.classList.add('mermaid')
-  pre.classList.remove('mermaid-rendered', 'mermaid-error')
+  pre.classList.remove('mermaid-rendered', 'mermaid-error', 'mermaid-parse-failed')
   pre.removeAttribute('data-processed')
   pre.innerHTML = escapeHtml(raw)
   ensureMermaidInit(theme)

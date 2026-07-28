@@ -1,7 +1,11 @@
 <template>
   <div class="chat-messages" ref="containerRef">
     <template v-for="(msg, idx) in messages" :key="idx">
-      <div class="msg-wrapper" :class="msg.role">
+      <!-- 上下文清除分隔线：后续对话不再携带此线之前的历史 -->
+      <div v-if="msg.role === 'divider'" class="context-divider">
+        <span class="context-divider-label">以上上下文已清除</span>
+      </div>
+      <div v-else class="msg-wrapper" :class="msg.role">
         <div v-if="msg.time" class="msg-time-top">{{ msg.time }}</div>
         <div class="msg-row">
           <div class="msg-avatar" :class="msg.role === 'user' ? 'user-av' : 'ai-av'">
@@ -15,10 +19,12 @@
               <span v-html="formatUserContent(msg.content)"></span>
             </template>
             <template v-else>
-              <div v-if="msg.reasoning_content" class="thinking-block" :class="{ collapsed: msg.thinkingTime }">
+              <!-- 历史消息必然已完成：固定显示“已思考”，不依赖 thinkingTime 判断状态，
+                   兼容旧数据中 thinkingTime 缺失/为 0 时误显“正在思考”的问题 -->
+              <div v-if="msg.reasoning_content" class="thinking-block collapsed">
                 <div class="thinking-header" @click="toggleThinking($event)">
                   <span class="arrow">▼</span>
-                  {{ msg.interrupted ? '思考被中断' : (msg.thinkingTime ? '深度思考 · ' + msg.thinkingTime + 's' : '正在思考...') }}
+                  {{ msg.interrupted ? '思考被中断' : (msg.thinkingTime ? '已思考（用时 ' + msg.thinkingTime + ' 秒）' : '已思考') }}
                 </div>
                 <div class="thinking-body" v-html="renderMd(msg.reasoning_content)"></div>
               </div>
@@ -38,6 +44,14 @@
           <button class="footer-copy-btn" @click="$emit('copy', msg.content)" title="复制">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
           </button>
+          <!-- 用户消息：编辑重发 -->
+          <button v-if="msg.role === 'user' && !isStreaming" class="footer-copy-btn" @click="$emit('edit-resend', idx)" title="编辑重发">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <!-- AI 消息：重新生成（仅最后一条） -->
+          <button v-if="msg.role === 'assistant' && idx === messages.length - 1 && !isStreaming" class="footer-copy-btn" @click="$emit('regenerate', idx)" title="重新生成">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          </button>
         </div>
       </div>
     </template>
@@ -52,9 +66,9 @@
           <div v-if="streamingMsg.reasoning_content" class="thinking-block" :class="{ collapsed: streamingMsg.thinkingTime }">
             <div class="thinking-header" @click="toggleThinking($event)">
               <span class="arrow">▼</span>
-              {{ streamingMsg.thinkingTime ? '深度思考 · ' + streamingMsg.thinkingTime + 's' : '正在思考...' }}
+              {{ streamingMsg.thinkingTime ? '已思考（用时 ' + streamingMsg.thinkingTime + ' 秒）' : '正在思考...' }}
             </div>
-            <div class="thinking-body" v-html="renderMd(streamingMsg.reasoning_content)"></div>
+            <div class="thinking-body" ref="streamThinkingRef" @scroll="onThinkingScroll" v-html="renderMd(streamingMsg.reasoning_content)"></div>
           </div>
           <div v-if="streamingMsg.content" class="answer-content" v-html="renderMd(streamingMsg.content)"></div>
           <div v-if="!streamingMsg.content && !streamingMsg.reasoning_content" class="loading-dots"><span></span><span></span><span></span></div>
@@ -69,7 +83,7 @@
 </template>
 
 <script setup>
-import { computed, onUpdated, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onUpdated, onMounted, onUnmounted, ref, watch, nextTick } from 'vue'
 import { renderMarkdown, escapeHtml, renderMermaidBlocks, processSpecialContent, handleMermaidToolbarClick } from '@/composables/useMarkdown'
 import { useTheme } from '@/composables/useTheme'
 
@@ -79,7 +93,7 @@ const props = defineProps({
   streamingMsg: { type: Object, default: null }
 })
 
-const emit = defineEmits(['copy', 'lightbox'])
+const emit = defineEmits(['copy', 'lightbox', 'regenerate', 'edit-resend'])
 
 const { getTheme } = useTheme()
 const containerRef = ref(null)
@@ -104,6 +118,33 @@ function toggleThinking(e) {
   const block = e.currentTarget.parentElement
   block.classList.toggle('collapsed')
 }
+
+// ===== 思考内容区域自动滚动跟随（逻辑与聊天窗口一致：可随时手动打断，滚回底部时恢复跟随） =====
+const streamThinkingRef = ref(null)
+const THINKING_NEAR_BOTTOM = 30
+let thinkingAutoFollow = true
+let thinkingProgrammatic = false
+
+function onThinkingScroll(e) {
+  if (thinkingProgrammatic) return
+  const el = e.target
+  // 手动滚动：离底即暂停跟随，回到底部附近则恢复
+  thinkingAutoFollow = el.scrollHeight - el.scrollTop - el.clientHeight < THINKING_NEAR_BOTTOM
+}
+
+// 思考内容增长时跟随到底部
+watch(() => props.streamingMsg && props.streamingMsg.reasoning_content, () => {
+  nextTick(() => {
+    const el = streamThinkingRef.value
+    if (!el || !thinkingAutoFollow) return
+    thinkingProgrammatic = true
+    el.scrollTop = el.scrollHeight
+    requestAnimationFrame(() => { thinkingProgrammatic = false })
+  })
+})
+
+// 新一轮流式开始时重置为自动跟随
+watch(() => props.isStreaming, (v) => { if (v) thinkingAutoFollow = true })
 
 // DOM 更新后：代码高亮 + mermaid 渲染（流式高频更新时 mermaid 渲染防抖 300ms，避免频繁 parse/排队）
 let renderTimer = null
@@ -135,3 +176,30 @@ onUnmounted(() => {
   if (renderTimer) clearTimeout(renderTimer)
 })
 </script>
+
+<style scoped>
+/* 上下文清除分隔线 */
+.context-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 16px auto;
+  max-width: 760px;
+  color: var(--ink-3, #999);
+  font-size: 12px;
+}
+.context-divider::before,
+.context-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--line-1, rgba(0,0,0,.1));
+}
+.context-divider-label {
+  flex-shrink: 0;
+  padding: 2px 10px;
+  border-radius: 10px;
+  background: var(--surface-2, rgba(0,0,0,.04));
+  white-space: nowrap;
+}
+</style>

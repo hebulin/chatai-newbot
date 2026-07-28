@@ -16,8 +16,16 @@ public class User {
     private String lastLoginIp;
     private String lastLoginBrowser;
     private List<String> allowedModelIds = new ArrayList<>(); // 特别授权的模型ID列表
-    /** 用户自定义全局提示词（System Prompt）。每次调用 LLM API 时作为 system 消息置于消息列表首位，优先级最高；为空时使用系统默认提示词 */
+    /** 用户自定义全局提示词（System Prompt）。旧版单条提示词字段，已被 promptPresets 取代，仅用于历史数据兼容/迁移 */
     private String systemPrompt;
+    /** 用户自定义提示词预设列表。可保存多条，最多启用 1 条；被启用的那条作为 system 消息注入，等价于全局提示词 */
+    private List<PromptPreset> promptPresets = new ArrayList<>();
+    /** 账号是否被禁用：禁用后无法登录、已有登录态立即失效；比删除温和，保留使用记录 */
+    private boolean disabled;
+    /** 单用户每日限额类型："count"=每日调用次数、"token"=每日Token量，null/空=不单独限制（回退全局配额）。二选一互斥 */
+    private String dailyLimitType;
+    /** 单用户每日限额数值（与 dailyLimitType 配套使用，<=0 视为不限制） */
+    private int dailyLimitValue;
 
     @JsonIgnore
     public boolean isAdmin() {

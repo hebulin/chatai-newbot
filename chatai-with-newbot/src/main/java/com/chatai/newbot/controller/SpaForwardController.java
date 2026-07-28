@@ -18,6 +18,12 @@ public class SpaForwardController {
         return "forward:/index.html";
     }
 
+    // /share/{分享码} 会话分享页回退
+    @GetMapping("/share/{path:[^\\.]*}")
+    public String forwardShare() {
+        return "forward:/index.html";
+    }
+
     // 全站单级路径回退（如 /login）—— 不含点号的路径均转发到 Vue 入口
     @GetMapping("/{path:[^\\.]*}")
     public String forwardApp() {

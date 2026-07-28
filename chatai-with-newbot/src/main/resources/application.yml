@@ -4,6 +4,11 @@ spring:
     driver-class-name: org.sqlite.JDBC
     hikari:
       maximum-pool-size: 1
+  servlet:
+    multipart:
+      # 聊天图片上传限制（业务层另有 5MB 校验）
+      max-file-size: 6MB
+      max-request-size: 12MB
   thymeleaf:
     cache: false
     check-template: true

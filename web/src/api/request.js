@@ -26,7 +26,9 @@ request.interceptors.response.use(
       if (!authRedirecting) {
         authRedirecting = true
         const reason = error.response?.headers?.['x-auth-reason']
-        const msg = reason === 'ip_changed' ? '登录IP已变更，请重新登录' : '登录已过期，请重新登录'
+        const msg = reason === 'ip_changed' ? '登录IP已变更，请重新登录'
+          : reason === 'account_disabled' ? '账号已被禁用，请联系管理员'
+          : '登录已过期，请重新登录'
         localStorage.removeItem('token')
         localStorage.removeItem('username')
         localStorage.removeItem('role')

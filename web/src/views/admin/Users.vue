@@ -27,6 +27,20 @@
             </span>
           </template>
         </el-table-column>
+        <el-table-column label="状态" width="90" align="center">
+          <template #default="{ row }">
+            <span class="status-badge" :class="row.disabled ? 'status-disabled' : 'status-enabled'">
+              {{ row.disabled ? '已禁用' : '正常' }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="每日限额" width="130" align="center">
+          <template #default="{ row }">
+            <span v-if="row.dailyLimitType === 'count'" style="font-size:12px;">{{ row.dailyLimitValue }} 次/日</span>
+            <span v-else-if="row.dailyLimitType === 'token'" style="font-size:12px;">{{ row.dailyLimitValue }} Token/日</span>
+            <span v-else style="font-size:12px;color:var(--ink-3);">全局配额</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="createdAt" label="注册时间" width="170" />
         <el-table-column prop="lastLoginAt" label="最近登录" width="170">
           <template #default="{ row }">{{ row.lastLoginAt || '-' }}</template>
@@ -37,7 +51,7 @@
         <el-table-column prop="lastLoginBrowser" label="浏览器" width="90">
           <template #default="{ row }">{{ row.lastLoginBrowser || '-' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="140" align="center" fixed="right">
+        <el-table-column label="操作" width="180" align="center" fixed="right">
           <template #default="{ row }">
             <el-button-group>
               <el-button size="small" text @click="editUser(row)">
@@ -48,6 +62,15 @@
               </el-button>
               <el-button v-if="row.role !== 'admin'" size="small" text @click="showPerms(row)">
                 <el-icon><Key /></el-icon>
+              </el-button>
+              <el-button
+                v-if="row.username !== 'admin'"
+                size="small" text
+                :type="row.disabled ? 'success' : 'warning'"
+                :title="row.disabled ? '启用账号' : '禁用账号'"
+                @click="handleToggleDisabled(row)"
+              >
+                <el-icon><component :is="row.disabled ? 'Unlock' : 'Lock'" /></el-icon>
               </el-button>
             </el-button-group>
           </template>
@@ -107,6 +130,26 @@
             </el-select>
           </template>
         </el-form-item>
+        <el-form-item label="每日限额">
+          <div style="display:flex;gap:8px;width:100%;">
+            <el-select v-model="editForm.dailyLimitType" style="width:130px;" @change="onLimitTypeChange">
+              <el-option label="不单独限制" value="" />
+              <el-option label="每日次数" value="count" />
+              <el-option label="每日Token量" value="token" />
+            </el-select>
+            <el-input-number
+              v-if="editForm.dailyLimitType"
+              v-model="editForm.dailyLimitValue"
+              :min="1"
+              :max="editForm.dailyLimitType === 'token' ? 100000000 : 100000"
+              :step="editForm.dailyLimitType === 'token' ? 1000 : 10"
+              style="flex:1;"
+            />
+          </div>
+        </el-form-item>
+        <el-form-item v-if="editForm.username !== 'admin'" label=" ">
+          <span style="font-size:12px;color:var(--ink-3);line-height:1.6;">二选其一：按每日调用次数或每日 Token 总量限制。选“不单独限制”则回退全局配额。仅对普通用户生效。</span>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="editVisible = false">取消</el-button>
@@ -141,7 +184,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Edit, Delete, Key } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Key, Lock, Unlock } from '@element-plus/icons-vue'
 import { getUsers, addUser, updateUser, deleteUser, updateUserPermissions } from '@/api/users'
 import { getModels } from '@/api/models'
 
@@ -214,8 +257,24 @@ const editVisible = ref(false)
 const editForm = ref({ id: '', username: '', password: '', role: 'user' })
 
 function editUser(row) {
-  editForm.value = { id: row.id, username: row.username, password: '', role: row.role }
+  editForm.value = {
+    id: row.id,
+    username: row.username,
+    password: '',
+    role: row.role,
+    dailyLimitType: row.dailyLimitType || '',
+    dailyLimitValue: row.dailyLimitValue || 0
+  }
   editVisible.value = true
+}
+
+// 切换限额类型：切换时给个合理默认值，清除时置 0
+function onLimitTypeChange(type) {
+  if (!type) {
+    editForm.value.dailyLimitValue = 0
+  } else if (!editForm.value.dailyLimitValue || editForm.value.dailyLimitValue <= 0) {
+    editForm.value.dailyLimitValue = type === 'token' ? 100000 : 100
+  }
 }
 
 async function saveUser() {
@@ -223,6 +282,14 @@ async function saveUser() {
   try {
     const payload = { role: editForm.value.role }
     if (editForm.value.password.trim()) payload.password = editForm.value.password.trim()
+    // 每日限额（二选其一）：未选类型则传空以清除个人限额
+    if (editForm.value.dailyLimitType) {
+      payload.dailyLimitType = editForm.value.dailyLimitType
+      payload.dailyLimitValue = editForm.value.dailyLimitValue || 0
+    } else {
+      payload.dailyLimitType = ''
+      payload.dailyLimitValue = 0
+    }
     const res = await updateUser(editForm.value.id, payload)
     if (res?.success) {
       ElMessage.success('保存成功')
@@ -234,6 +301,27 @@ async function saveUser() {
   } finally {
     submitting.value = false
   }
+}
+
+// 禁用/启用账号：禁用后用户无法登录且已有登录态立即失效
+async function handleToggleDisabled(row) {
+  const action = row.disabled ? '启用' : '禁用'
+  try {
+    await ElMessageBox.confirm(
+      row.disabled
+        ? `确定启用用户 "${row.username}" 吗？启用后可正常登录。`
+        : `确定禁用用户 "${row.username}" 吗？禁用后无法登录，已登录会话立即失效。`,
+      `确认${action}`,
+      { type: 'warning' }
+    )
+    const res = await updateUser(row.id, { disabled: !row.disabled })
+    if (res?.success) {
+      ElMessage.success(`已${action}`)
+      await loadUsers()
+    } else {
+      ElMessage.error(res?.message || `${action}失败`)
+    }
+  } catch { /* cancelled */ }
 }
 
 // 删除用户

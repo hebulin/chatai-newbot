@@ -97,7 +97,7 @@ public class JsonFileStorageService implements StorageService {
             User admin = new User();
             admin.setId(UUID.randomUUID().toString());
             admin.setUsername(ADMIN_USERNAME);
-            admin.setPassword(hashPassword(ADMIN_DEFAULT_PASSWORD));
+            admin.setPassword(PasswordHasher.hash(ADMIN_DEFAULT_PASSWORD));
             admin.setRole("admin");
             admin.setCreatedAt(nowString());
             users.add(admin);
@@ -108,11 +108,19 @@ public class JsonFileStorageService implements StorageService {
 
     @Override
     public User authenticate(String username, String password) {
-        return users.stream()
-                .filter(u -> u.getUsername().equals(username)
-                        && u.getPassword().equals(hashPassword(password)))
+        User user = users.stream()
+                .filter(u -> u.getUsername().equals(username))
                 .findFirst()
                 .orElse(null);
+        if (user == null || !PasswordHasher.matches(password, user.getPassword())) {
+            return null;
+        }
+        // 旧版 SHA-256 哈希校验通过后透明升级为 BCrypt
+        if (PasswordHasher.isLegacyHash(user.getPassword())) {
+            user.setPassword(PasswordHasher.hash(password));
+            saveUsers();
+        }
+        return user;
     }
 
     @Override
@@ -135,7 +143,7 @@ public class JsonFileStorageService implements StorageService {
         User user = new User();
         user.setId(UUID.randomUUID().toString());
         user.setUsername(username);
-        user.setPassword(hashPassword(password));
+        user.setPassword(PasswordHasher.hash(password));
         user.setRole("user");
         user.setCreatedAt(nowString());
         user.setLastLoginIp(ip);
@@ -195,8 +203,8 @@ public class JsonFileStorageService implements StorageService {
     public int changePassword(String userId, String oldPassword, String newPassword) {
         User user = getUserById(userId);
         if (user == null) return 1;
-        if (!user.getPassword().equals(hashPassword(oldPassword))) return 2;
-        user.setPassword(hashPassword(newPassword));
+        if (!PasswordHasher.matches(oldPassword, user.getPassword())) return 2;
+        user.setPassword(PasswordHasher.hash(newPassword));
         saveUsers();
         return 0;
     }
@@ -496,6 +504,27 @@ public class JsonFileStorageService implements StorageService {
     }
 
     @Override
+    public int countUsageByUserAndDay(String userId, String day) {
+        List<UsageLog> dayList = usageLogsByDay.get(day);
+        if (dayList == null) return 0;
+        synchronized (dayList) {
+            return (int) dayList.stream().filter(l -> userId.equals(l.getUserId())).count();
+        }
+    }
+
+    @Override
+    public long sumTokensByUserAndDay(String userId, String day) {
+        List<UsageLog> dayList = usageLogsByDay.get(day);
+        if (dayList == null) return 0L;
+        synchronized (dayList) {
+            return dayList.stream()
+                    .filter(l -> userId.equals(l.getUserId()))
+                    .mapToLong(l -> (long) l.getPromptTokens() + l.getCompletionTokens())
+                    .sum();
+        }
+    }
+
+    @Override
     public void updateUsageLog(UsageLog updatedLog) {
         String dayKey = updatedLog.getTimestamp() != null ? updatedLog.getTimestamp().substring(0, 10) : null;
         if (dayKey == null) return;
@@ -541,6 +570,15 @@ public class JsonFileStorageService implements StorageService {
         modelConfigs = loadList("models.json", new TypeReference<List<ModelConfig>>() {});
         boolean needSave = false;
         for (ModelConfig config : modelConfigs) {
+            // API Key 解密到内存；检测到存量明文则触发重存（加密落盘）
+            String storedKey = config.getApiKey();
+            if (storedKey != null && !storedKey.isEmpty()) {
+                if (ApiKeyCrypto.isEncrypted(storedKey)) {
+                    config.setApiKey(ApiKeyCrypto.decrypt(storedKey));
+                } else {
+                    needSave = true;
+                }
+            }
             if (config.getProviderId() != null && !"custom".equals(config.getProviderId())) {
                 Provider provider = providers.stream()
                         .filter(p -> p.getId().equals(config.getProviderId()))
@@ -563,13 +601,41 @@ public class JsonFileStorageService implements StorageService {
         }
         if (needSave) {
             saveModelConfigs();
-            log.info("已自动补全旧模型配置的厂商信息字段");
+            log.info("已自动补全/升级旧模型配置（厂商信息补全、API Key 加密存储）");
         }
     }
 
-    /** 保存模型配置列表 */
+    /** 保存模型配置列表（序列化加密副本，内存中保持明文供请求使用） */
     private void saveModelConfigs() {
-        saveToFile("models.json", modelConfigs);
+        List<ModelConfig> encrypted = new ArrayList<>();
+        synchronized (modelConfigs) {
+            for (ModelConfig config : modelConfigs) {
+                encrypted.add(copyWithEncryptedKey(config));
+            }
+        }
+        saveToFile("models.json", encrypted);
+    }
+
+    /** 复制模型配置并加密 API Key（不污染内存中的明文对象） */
+    private ModelConfig copyWithEncryptedKey(ModelConfig src) {
+        ModelConfig copy = new ModelConfig();
+        copy.setId(src.getId());
+        copy.setProviderId(src.getProviderId());
+        copy.setProviderName(src.getProviderName());
+        copy.setProviderIcon(src.getProviderIcon());
+        copy.setModelId(src.getModelId());
+        copy.setDisplayName(src.getDisplayName());
+        copy.setApiKey(ApiKeyCrypto.encrypt(src.getApiKey()));
+        copy.setApiUrl(src.getApiUrl());
+        copy.setProtocol(src.getProtocol());
+        copy.setThinkingParamType(src.getThinkingParamType());
+        copy.setSupportsThinking(src.isSupportsThinking());
+        copy.setSupportsMultimodal(src.isSupportsMultimodal());
+        copy.setEnabled(src.isEnabled());
+        copy.setVisibleToAll(src.getVisibleToAll());
+        copy.setBuiltIn(src.isBuiltIn());
+        copy.setCreatedAt(src.getCreatedAt());
+        return copy;
     }
 
     /** 从 classpath 加载内置厂商 providers.json */
@@ -673,7 +739,7 @@ public class JsonFileStorageService implements StorageService {
     // ========== 工具方法 ==========
 
     /**
-     * SHA-256 密码哈希（加盐）
+     * SHA-256 密码哈希（加盐）——旧版存量数据校验专用，新密码一律使用 {@link PasswordHasher#hash}
      * @param password 明文密码
      * @return 哈希后的十六进制字符串
      */

@@ -20,6 +20,11 @@ export function deleteModel(id) {
   return request.delete(`/admin/models/${id}`)
 }
 
+// 模型连通性测试（发一条最小请求验证 API Key/URL 是否可用）
+export function testModel(id) {
+  return request.post(`/admin/models/${id}/test`, null, { timeout: 30000 })
+}
+
 // 批量快速接入
 export function batchAddModels(data) {
   return request.post('/admin/models/batch', data)

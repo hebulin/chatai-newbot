@@ -86,6 +86,7 @@ public class ChatHistoryService {
                         new TypeReference<Map<String, Object>>() {});
                 result.put("lastChatId", data.get("lastChatId"));
                 result.put("chats", data.get("chats"));
+                result.put("chatMeta", data.get("chatMeta"));
                 return result;
             }
         } catch (Exception e) {
@@ -103,6 +104,7 @@ public class ChatHistoryService {
      */
     private Map<String, Object> loadChatHistoryFromFiles(String userId) {
         Map<String, Object> mergedChats = new LinkedHashMap<>();
+        Map<String, Object> mergedChatMeta = new LinkedHashMap<>();
         String lastChatId = null;
         long latestUpdateTime = 0;
 
@@ -127,7 +129,13 @@ public class ChatHistoryService {
                     if (deletedIds != null) {
                         for (String deletedId : deletedIds) {
                             mergedChats.remove(deletedId);
+                            mergedChatMeta.remove(deletedId);
                         }
+                    }
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> fileChatMeta = (Map<String, Object>) data.get("chatMeta");
+                    if (fileChatMeta != null) {
+                        mergedChatMeta.putAll(fileChatMeta);
                     }
                     String fileLastChatId = (String) data.get("lastChatId");
                     Object updatedAtObj = data.get("updatedAtTs");
@@ -149,6 +157,30 @@ public class ChatHistoryService {
         result.put("userId", userId);
         result.put("lastChatId", lastChatId);
         result.put("chats", mergedChats);
+        result.put("chatMeta", mergedChatMeta);
+        return result;
+    }
+
+    /**
+     * 加载单个会话的消息与元信息（发送消息前的当前会话快速同步）
+     * 仅返回目标会话，避免多端场景下拉取全部历史造成的网络开销
+     * @param userId 用户ID
+     * @param chatId 会话ID
+     * @return 包含 messages（消息列表）与 meta（会话元信息，可能为 null）
+     */
+    public Map<String, Object> loadSingleChat(String userId, String chatId) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        Map<String, Object> history = loadChatHistory(userId);
+        Object messages = null;
+        if (history.get("chats") instanceof Map<?, ?> chats) {
+            messages = chats.get(chatId);
+        }
+        Object meta = null;
+        if (history.get("chatMeta") instanceof Map<?, ?> chatMeta) {
+            meta = chatMeta.get(chatId);
+        }
+        result.put("messages", messages != null ? messages : new ArrayList<>());
+        result.put("meta", meta);
         return result;
     }
 
@@ -219,6 +251,71 @@ public class ChatHistoryService {
         } catch (IOException e) {
             log.error("保存会话历史失败: userId={}", userId, e);
         }
+    }
+
+    /**
+     * 跨会话全文搜索：在用户所有会话的消息内容中检索关键字（忽略大小写）
+     * @param userId 用户ID
+     * @param keyword 搜索关键字
+     * @param limit 最大返回条数
+     * @return 匹配列表，每项含 chatId/chatTitle/role/time/snippet
+     */
+    public List<Map<String, Object>> searchChatHistory(String userId, String keyword, int limit) {
+        List<Map<String, Object>> results = new ArrayList<>();
+        if (keyword == null || keyword.trim().isEmpty()) {
+            return results;
+        }
+        String kw = keyword.trim().toLowerCase();
+        Map<String, Object> history = loadChatHistory(userId);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> chats = (Map<String, Object>) history.get("chats");
+        if (chats == null) {
+            return results;
+        }
+        for (Map.Entry<String, Object> entry : chats.entrySet()) {
+            if (!(entry.getValue() instanceof List)) continue;
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> msgs = (List<Map<String, Object>>) entry.getValue();
+            String chatTitle = buildChatTitle(msgs);
+            for (Map<String, Object> msg : msgs) {
+                if (!(msg.get("content") instanceof String content)) continue;
+                int pos = content.toLowerCase().indexOf(kw);
+                if (pos < 0) continue;
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("chatId", entry.getKey());
+                item.put("chatTitle", chatTitle);
+                item.put("role", msg.get("role"));
+                item.put("time", msg.get("time"));
+                item.put("snippet", buildSnippet(content, pos, kw.length()));
+                results.add(item);
+                if (results.size() >= limit) {
+                    return results;
+                }
+            }
+        }
+        return results;
+    }
+
+    /**
+     * 生成会话标题：取第一条用户消息前 20 字（与前端侧边栏标题规则一致）
+     */
+    private String buildChatTitle(List<Map<String, Object>> msgs) {
+        for (Map<String, Object> m : msgs) {
+            if ("user".equals(m.get("role")) && m.get("content") instanceof String s && !s.isEmpty()) {
+                return s.length() > 20 ? s.substring(0, 20) : s;
+            }
+        }
+        return "新会话";
+    }
+
+    /**
+     * 生成匹配片段：关键字前后各保留约 40 字，压缩空白字符
+     */
+    private String buildSnippet(String content, int pos, int kwLen) {
+        int start = Math.max(0, pos - 40);
+        int end = Math.min(content.length(), pos + kwLen + 40);
+        String snippet = content.substring(start, end).replaceAll("\\s+", " ").trim();
+        return (start > 0 ? "…" : "") + snippet + (end < content.length() ? "…" : "");
     }
 
     /**
