@@ -29,6 +29,7 @@
         <el-tab-pane label="模型管理" name="models" />
         <el-tab-pane label="厂商管理" name="providers" />
         <el-tab-pane label="用户管理" name="users" />
+        <el-tab-pane label="分享管理" name="shares" />
         <el-tab-pane label="系统设置" name="settings" />
       </el-tabs>
     </div>

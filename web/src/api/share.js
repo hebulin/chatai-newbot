@@ -20,3 +20,15 @@ export function deleteShare(id) {
 export function getSharedChat(id) {
   return request.get(`/share/view/${id}`)
 }
+
+// ===== 后台管理（仅管理员） =====
+
+// 获取全部用户的分享记录（含失效状态 status: valid/expired/orphaned）
+export function getAdminShares() {
+  return request.get('/admin/shares')
+}
+
+// 批量删除分享（批量清除失效/批量撤销）
+export function batchDeleteShares(ids) {
+  return request.post('/admin/shares/batch-delete', { ids })
+}

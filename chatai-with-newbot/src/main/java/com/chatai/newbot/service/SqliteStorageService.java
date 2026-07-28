@@ -1130,6 +1130,15 @@ public class SqliteStorageService implements StorageService {
     }
 
     /**
+     * 获取全部用户的分享记录（新建在前，后台分享管理用）
+     * @return 分享列表
+     */
+    public List<ChatShare> getAllChatShares() {
+        return jdbcTemplate.query(
+                "SELECT * FROM t_chat_share ORDER BY created_at DESC", chatShareRowMapper);
+    }
+
+    /**
      * 查找某用户对某会话已有的分享记录（同一会话复用分享码，避免重复生成）
      * @param userId 用户ID
      * @param chatId 会话ID

@@ -51,6 +51,12 @@ const routes = [
         meta: { title: '用户管理' }
       },
       {
+        path: 'shares',
+        name: 'Shares',
+        component: () => import('@/views/admin/Shares.vue'),
+        meta: { title: '分享管理' }
+      },
+      {
         path: 'settings',
         name: 'Settings',
         component: () => import('@/views/admin/Settings.vue'),

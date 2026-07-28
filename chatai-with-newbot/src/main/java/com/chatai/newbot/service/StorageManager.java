@@ -600,6 +600,14 @@ public class StorageManager implements StorageService {
     }
 
     /**
+     * 获取全部用户的分享记录（后台分享管理用）
+     * @return 分享列表
+     */
+    public List<ChatShare> getAllChatShares() {
+        return sqliteStorage.getAllChatShares();
+    }
+
+    /**
      * 查找某用户对某会话已有的分享记录
      * @param userId 用户ID
      * @param chatId 会话ID
