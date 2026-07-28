@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -27,6 +28,8 @@ public class FileStorageService {
     private static final Logger log = LoggerFactory.getLogger(FileStorageService.class);
     /** 图片访问 URL 前缀（与 FileController 的映射保持一致） */
     public static final String IMG_URL_PREFIX = "/api/files/img/";
+    /** 附件文档解析文本的引用 URL 前缀（仅作消息内部引用，未对外提供 HTTP 读取） */
+    public static final String DOC_URL_PREFIX = "/api/files/doc/";
     private static final long MAX_IMAGE_SIZE = 5L * 1024 * 1024; // 5MB，与前端限制一致
     /** 合法文件名/月份目录：仅字母数字点横线，防目录穿越 */
     private static final Pattern SAFE_NAME = Pattern.compile("^[a-zA-Z0-9._-]+$");
@@ -116,6 +119,52 @@ public class FileStorageService {
             return null;
         }
         return "data:" + mimeOf(filename) + ";base64," + Base64.getEncoder().encodeToString(bytes);
+    }
+
+    /**
+     * 保存附件文档解析后的纯文本（落盘到 data/uploads/doc/{yyyyMM}/{uuid}.txt）
+     * 消息中仅保存引用 URL，模型调用时通过 {@link #readDocumentText(String)} 读回，
+     * 避免解析内容内嵌会话历史导致体积膨胀
+     * @param text 解析出的纯文本
+     * @return 引用 URL（/api/files/doc/{yyyyMM}/{filename}）
+     */
+    public String saveDocumentText(String text) throws IOException {
+        String month = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMM"));
+        Path monthDir = uploadDir.resolve("doc").resolve(month);
+        Files.createDirectories(monthDir);
+        String filename = UUID.randomUUID().toString().replace("-", "") + ".txt";
+        Files.writeString(monthDir.resolve(filename), text, StandardCharsets.UTF_8);
+        return DOC_URL_PREFIX + month + "/" + filename;
+    }
+
+    /**
+     * 根据引用 URL 读取附件文档的解析文本（供模型 API 调用时合并进消息内容）
+     * @param url 引用 URL（/api/files/doc/{yyyyMM}/{filename}）
+     * @return 解析文本；引用非法或文件不存在返回 null
+     */
+    public String readDocumentText(String url) {
+        if (url == null || !url.startsWith(DOC_URL_PREFIX)) {
+            return null;
+        }
+        String rest = url.substring(DOC_URL_PREFIX.length());
+        int slash = rest.indexOf('/');
+        if (slash <= 0) return null;
+        String month = rest.substring(0, slash);
+        String filename = rest.substring(slash + 1);
+        if (!isSafeSegment(month) || !isSafeSegment(filename)) {
+            return null;
+        }
+        try {
+            Path path = uploadDir.resolve("doc").resolve(month).resolve(filename);
+            if (!Files.exists(path)) {
+                log.warn("消息引用的附件解析文本不存在: {}", url);
+                return null;
+            }
+            return Files.readString(path, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            log.error("读取附件解析文本失败: {}/{}", month, filename, e);
+            return null;
+        }
     }
 
     /**

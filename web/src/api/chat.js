@@ -38,3 +38,12 @@ export function uploadChatImage(file) {
     headers: { 'Content-Type': 'multipart/form-data' }
   })
 }
+
+// 上传聊天附件文档（服务端解析为纯文本后落盘，返回引用 URL 与字数，不依赖模型多模态）
+export function uploadChatDocument(file) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return request.post('/upload/document', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  })
+}

@@ -9,6 +9,17 @@
         </button>
       </div>
     </div>
+    <!-- 附件文档预览区 -->
+    <div v-if="pendingFiles.length" class="file-preview-area">
+      <div v-for="(f, idx) in pendingFiles" :key="idx" class="file-preview-item" :class="{ uploading: f.uploading }">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        <span class="file-preview-name" :title="f.name">{{ f.name }}</span>
+        <span class="file-preview-meta">{{ f.uploading ? '解析中...' : f.chars + ' 字' }}</span>
+        <button class="file-preview-remove" @click="removeFile(idx)" title="删除">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+    </div>
     <div v-if="pasteWarning" class="paste-warning">{{ pasteWarning }}</div>
 
     <div class="input-row">
@@ -35,10 +46,14 @@
           <div class="upload-image-btn" title="上传图片" @click="triggerUpload">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
           </div>
+          <div class="upload-image-btn" title="上传附件（txt/doc/docx/xls/xlsx/csv/md/log 等文本文档，解析后发送给模型，不依赖多模态）" @click="triggerDocUpload">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+          </div>
           <div class="upload-image-btn" title="清除上下文（后续对话不再携带以上历史）" @click="emit('clear-context')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m13 11 9-9"/><path d="M14.6 12.6c.8.8.9 2.1.2 3L10 22l-8-8 6.4-4.8c.9-.7 2.2-.6 3 .2Z"/><path d="m6.8 10.4 6.8 6.8"/><path d="m5 17 1.4-1.4"/></svg>
           </div>
           <input type="file" ref="fileInputRef" accept="image/*" multiple style="display:none" @change="handleFileUpload">
+          <input type="file" ref="docInputRef" :accept="DOC_ACCEPT" multiple style="display:none" @change="handleDocUpload">
           <div class="model-select-area">
             <img v-if="currentIconIsImg" :src="currentIcon" class="model-area-icon" />
             <span v-else-if="currentIcon" class="model-area-icon model-area-emoji">{{ currentIcon }}</span>
@@ -100,7 +115,7 @@ import { useModelsStore } from '@/stores/models'
 import { useTheme } from '@/composables/useTheme'
 import { ElMessage, ElNotification } from 'element-plus'
 import { APP_VERSION } from '@/config/version'
-import { uploadChatImage } from '@/api/chat'
+import { uploadChatImage, uploadChatDocument } from '@/api/chat'
 
 const props = defineProps({
   isStreaming: { type: Boolean, default: false },
@@ -116,11 +131,22 @@ const { getTheme } = useTheme()
 const inputText = ref('')
 const deepThinking = ref(false)
 const pendingImages = ref([])
+const pendingFiles = ref([]) // 待发送附件文档：{ name, url, chars, uploading }
 const pasteWarning = ref('')
 const textareaRef = ref(null)
 const fileInputRef = ref(null)
+const docInputRef = ref(null)
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024
+const MAX_DOC_SIZE = 3 * 1024 * 1024
+// 支持的文本类文档类型（与后端 DocumentParseService 白名单一致），暂不支持 pdf
+const DOC_EXTS = ['txt', 'log', 'md', 'markdown', 'csv', 'json', 'xml', 'yml', 'yaml', 'properties', 'doc', 'docx', 'xls', 'xlsx']
+const DOC_ACCEPT = DOC_EXTS.map(ext => '.' + ext).join(',')
+
+function extOf(filename) {
+  const idx = (filename || '').lastIndexOf('.')
+  return idx >= 0 ? filename.slice(idx + 1).toLowerCase() : ''
+}
 
 // 移动端判定：窄屏(≤768px)改用单列分组下拉(el-select)选模型，
 // 同时避免级联选择器搜索 input 获焦唤起手机软键盘
@@ -322,14 +348,25 @@ function handleSendClick() {
 function doSend() {
   const text = inputText.value.trim()
   const hasImages = pendingImages.value.length > 0
+  const hasFiles = pendingFiles.value.length > 0
   if (hasImages && !props.supportsMultimodal) {
     ElMessage.warning('当前模型不支持图像理解，请删除图片后再发送')
     return
   }
-  if (!text && !hasImages) return
-  emit('send', { text, images: pendingImages.value.slice(), deepThinking: deepThinking.value })
+  if (pendingFiles.value.some(f => f.uploading)) {
+    ElMessage.warning('附件还在解析中，请稍候再发送')
+    return
+  }
+  if (!text && !hasImages && !hasFiles) return
+  emit('send', {
+    text,
+    images: pendingImages.value.slice(),
+    attachments: pendingFiles.value.map(f => ({ name: f.name, url: f.url })),
+    deepThinking: deepThinking.value
+  })
   inputText.value = ''
   pendingImages.value = []
+  pendingFiles.value = []
   pasteWarning.value = ''
   if (textareaRef.value) {
     textareaRef.value.style.height = 'auto'
@@ -339,16 +376,31 @@ function doSend() {
 function handlePaste(e) {
   const items = e.clipboardData?.items
   if (!items) return
-  const imageItems = []
+  // 粘贴内容分流：图片走图片上传，白名单文档走附件解析，其余文件类型直接拦截不上传
+  const imageFiles = []
+  const docFiles = []
+  const unsupported = []
   for (let i = 0; i < items.length; i++) {
-    if (items[i].type.includes('image')) imageItems.push(items[i])
-  }
-  if (imageItems.length === 0) return
-  e.preventDefault()
-  imageItems.forEach(item => {
+    const item = items[i]
+    if (item.kind !== 'file') continue
     const file = item.getAsFile()
-    if (file) addImageFile(file)
-  })
+    if (!file) continue
+    if (item.type.includes('image')) {
+      imageFiles.push(file)
+    } else if (DOC_EXTS.includes(extOf(file.name))) {
+      docFiles.push(file)
+    } else {
+      unsupported.push(file.name || '未知文件')
+    }
+  }
+  // 未粘贴任何文件（纯文本粘贴）时不拦截默认行为
+  if (imageFiles.length === 0 && docFiles.length === 0 && unsupported.length === 0) return
+  e.preventDefault()
+  if (unsupported.length > 0) {
+    ElMessage.warning(`暂不支持该类型附件：${unsupported.join('、')}`)
+  }
+  imageFiles.forEach(file => addImageFile(file))
+  docFiles.forEach(file => addDocFile(file))
 }
 
 function triggerUpload() {
@@ -391,5 +443,47 @@ async function addImageFile(file) {
 function removeImage(idx) {
   pendingImages.value.splice(idx, 1)
   if (pendingImages.value.length === 0) pasteWarning.value = ''
+}
+
+// ===== 附件文档上传（服务端解析为纯文本，不依赖模型多模态） =====
+function triggerDocUpload() {
+  if (docInputRef.value) {
+    docInputRef.value.value = ''
+    docInputRef.value.click()
+  }
+}
+
+function handleDocUpload(e) {
+  const files = e.target.files
+  if (!files || files.length === 0) return
+  Array.from(files).forEach(file => addDocFile(file))
+}
+
+// 上传并解析附件：先占位展示“解析中”，成功后回填引用 URL 与字数，失败则移除占位
+async function addDocFile(file) {
+  if (file.size > MAX_DOC_SIZE) {
+    ElMessage.warning(`附件「${file.name}」超过3MB限制`)
+    return
+  }
+  const item = { name: file.name, url: '', chars: 0, uploading: true }
+  pendingFiles.value.push(item)
+  try {
+    const res = await uploadChatDocument(file)
+    if (res && res.success) {
+      item.url = res.url
+      item.chars = res.chars || 0
+      item.uploading = false
+    } else {
+      pendingFiles.value.splice(pendingFiles.value.indexOf(item), 1)
+      ElMessage.error((res && res.message) || '附件上传失败')
+    }
+  } catch (e) {
+    pendingFiles.value.splice(pendingFiles.value.indexOf(item), 1)
+    // 错误提示已由 request 拦截器统一处理
+  }
+}
+
+function removeFile(idx) {
+  pendingFiles.value.splice(idx, 1)
 }
 </script>

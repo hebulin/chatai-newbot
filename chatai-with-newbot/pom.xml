@@ -57,6 +57,19 @@
             <artifactId>spring-boot-starter-jdbc</artifactId>
         </dependency>
 
+        <!-- Apache POI：解析聊天附件文档（docx/xlsx 等 OOXML 格式） -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>5.2.5</version>
+        </dependency>
+        <!-- Apache POI Scratchpad：解析旧版二进制格式（doc/xls） -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-scratchpad</artifactId>
+            <version>5.2.5</version>
+        </dependency>
+
     </dependencies>
     <dependencyManagement>
         <dependencies>
