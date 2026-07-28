@@ -1,6 +1,7 @@
 package com.chatai.newbot.controller;
 
 import com.chatai.newbot.model.*;
+import com.chatai.newbot.service.ChatHistoryService;
 import com.chatai.newbot.service.PasswordHasher;
 import com.chatai.newbot.service.StorageManager;
 import com.chatai.newbot.service.UnifiedChatService;
@@ -11,6 +12,8 @@ import org.springframework.web.bind.annotation.*;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -21,10 +24,13 @@ public class AdminController {
     private static final Logger log = LoggerFactory.getLogger(AdminController.class);
     private final StorageManager storageService;
     private final UnifiedChatService unifiedChatService;
+    private final ChatHistoryService chatHistoryService;
 
-    public AdminController(StorageManager storageService, UnifiedChatService unifiedChatService) {
+    public AdminController(StorageManager storageService, UnifiedChatService unifiedChatService,
+                           ChatHistoryService chatHistoryService) {
         this.storageService = storageService;
         this.unifiedChatService = unifiedChatService;
+        this.chatHistoryService = chatHistoryService;
     }
 
     private boolean checkAdmin(HttpServletRequest request, HttpServletResponse response) {
@@ -919,6 +925,92 @@ public class AdminController {
             result.put("message", "迁移失败: " + e.getMessage());
         }
         return result;
+    }
+
+    // ========== 分享管理 ==========
+
+    /**
+     * 获取全部用户的分享记录，附带失效状态判定
+     * status: valid=有效 expired=已过期 orphaned=源会话已被删除
+     */
+    @GetMapping("/shares")
+    public Map<String, Object> listShares(HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        List<ChatShare> shares = storageService.getAllChatShares();
+        // 按用户缓存会话历史，避免同一用户多条分享重复加载
+        Map<String, Map<String, Object>> historyCache = new HashMap<>();
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (ChatShare s : shares) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", s.getId());
+            item.put("chatId", s.getChatId());
+            item.put("userId", s.getUserId());
+            item.put("userName", s.getUserName());
+            item.put("title", s.getTitle());
+            item.put("createdAt", s.getCreatedAt());
+            item.put("expiresAt", s.getExpiresAt());
+            item.put("status", resolveShareStatus(s, historyCache));
+            list.add(item);
+        }
+        result.put("success", true);
+        result.put("data", list);
+        return result;
+    }
+
+    /**
+     * 批量删除分享记录（批量清除失效分享/批量撤销）。请求体: {"ids": ["..."]}
+     */
+    @PostMapping("/shares/batch-delete")
+    public Map<String, Object> batchDeleteShares(@RequestBody Map<String, Object> body,
+                                                 HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        Object idsObj = body == null ? null : body.get("ids");
+        if (!(idsObj instanceof List<?> ids) || ids.isEmpty()) {
+            result.put("success", false);
+            result.put("message", "请指定要删除的分享");
+            return result;
+        }
+        int deleted = 0;
+        for (Object idObj : ids) {
+            if (idObj instanceof String id && !id.isEmpty() && storageService.deleteChatShare(id)) {
+                deleted++;
+            }
+        }
+        log.info("后台批量删除分享：请求 {} 条，实际删除 {} 条", ids.size(), deleted);
+        result.put("success", true);
+        result.put("deleted", deleted);
+        return result;
+    }
+
+    /**
+     * 判定分享状态：已过期 > 源会话已删 > 有效（过期口径与 ShareController.view 一致）
+     */
+    private String resolveShareStatus(ChatShare s, Map<String, Map<String, Object>> historyCache) {
+        if (s.getExpiresAt() != null && !s.getExpiresAt().isEmpty()) {
+            try {
+                LocalDateTime expiry = LocalDateTime.parse(s.getExpiresAt(),
+                        DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+                if (LocalDateTime.now().isAfter(expiry)) return "expired";
+            } catch (Exception ignore) {
+                // 时间解析失败视为未设置过期
+            }
+        }
+        Map<String, Object> history = historyCache.computeIfAbsent(s.getUserId(), chatHistoryService::loadChatHistory);
+        Object chats = history.get("chats");
+        if (!(chats instanceof Map) || !(((Map<?, ?>) chats).get(s.getChatId()) instanceof List)) {
+            return "orphaned";
+        }
+        return "valid";
     }
 
     // ========== 工具方法 ==========

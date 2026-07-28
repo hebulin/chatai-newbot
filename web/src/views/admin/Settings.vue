@@ -2,7 +2,7 @@
   <div>
     <div class="section-header">
       <div class="section-title">
-        <span class="section-eyebrow">05 / SETTINGS · 设置</span>
+        <span class="section-eyebrow">06 / SETTINGS · 设置</span>
         <h2>系统设置</h2>
       </div>
     </div>
