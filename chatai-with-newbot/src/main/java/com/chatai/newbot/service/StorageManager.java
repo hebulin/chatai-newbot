@@ -173,15 +173,16 @@ public class StorageManager implements StorageService {
      * 创建登录 Token（内存 + SQLite 持久化，有效期 7 天）
      * @param userId 用户ID
      * @param ip 登录IP
+     * @param browser 登录浏览器/终端
      * @return 生成的 token 字符串
      */
-    public String createToken(String userId, String ip) {
+    public String createToken(String userId, String ip, String browser) {
         String token = UUID.randomUUID().toString().replace("-", "");
         long expiresAt = System.currentTimeMillis() + TOKEN_TTL_MS;
         String boundIp = (ip == null || ip.isEmpty()) ? null : ip;
         activeTokens.put(token, new TokenInfo(userId, boundIp, expiresAt));
         try {
-            sqliteStorage.insertToken(token, userId, boundIp, expiresAt);
+            sqliteStorage.insertToken(token, userId, boundIp, browser, expiresAt);
         } catch (Exception e) {
             log.warn("持久化Token失败（不影响本次登录）", e);
         }
@@ -251,6 +252,90 @@ public class StorageManager implements StorageService {
         } catch (Exception e) {
             log.debug("删除用户持久化Token失败", e);
         }
+    }
+
+    /**
+     * 计算 token 的会话ID（SHA-256 摘要前 16 位十六进制）。
+     * 登录设备管理对外只暴露会话ID，避免泄露其他设备的完整登录凭证。
+     * @param token token 字符串
+     * @return 会话ID，计算失败返回 null
+     */
+    public static String sessionIdOf(String token) {
+        if (token == null) return null;
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(token.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : digest) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.substring(0, 16);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * 查询用户当前所有登录会话（登录设备管理，新登录在前）
+     * @param userId 用户ID
+     * @param currentToken 当前请求的 token，用于标记“当前设备”
+     * @param currentBrowser 当前请求的浏览器，用于回填 browser 列上线前登录的旧 token
+     * @return 会话列表，每条含 sessionId/ip/browser/createdAt/expiresAt/current
+     */
+    public List<Map<String, Object>> listUserSessions(String userId, String currentToken, String currentBrowser) {
+        List<Map<String, Object>> sessions = new ArrayList<>();
+        try {
+            long now = System.currentTimeMillis();
+            for (Map<String, Object> row : sqliteStorage.listTokensByUser(userId)) {
+                String token = (String) row.get("token");
+                Object expiresObj = row.get("expires_at");
+                long expiresAt = expiresObj instanceof Number ? ((Number) expiresObj).longValue() : 0;
+                // 跳过已过期或已不在内存中的无效会话
+                if (token == null || expiresAt <= now || !activeTokens.containsKey(token)) continue;
+                boolean current = token.equals(currentToken);
+                String browser = (String) row.get("browser");
+                // 旧版本登录的 token 没有浏览器信息：当前设备用本次请求的 UA 回填并持久化，
+                // 避免“当前设备”显示为未知浏览器（其他设备无法追溯 UA，保持原样）
+                if (current && (browser == null || browser.isEmpty()) && currentBrowser != null && !currentBrowser.isEmpty()) {
+                    browser = currentBrowser;
+                    try {
+                        sqliteStorage.updateTokenBrowser(token, browser);
+                    } catch (Exception ex) {
+                        log.debug("回填Token浏览器信息失败", ex);
+                    }
+                }
+                Map<String, Object> session = new HashMap<>();
+                session.put("sessionId", sessionIdOf(token));
+                session.put("ip", row.get("ip"));
+                session.put("browser", browser);
+                session.put("createdAt", row.get("created_at"));
+                session.put("expiresAt", expiresAt);
+                session.put("current", current);
+                sessions.add(session);
+            }
+        } catch (Exception e) {
+            log.warn("查询用户登录会话失败", e);
+        }
+        return sessions;
+    }
+
+    /**
+     * 踢掉用户的指定登录会话（仅限本人的其他设备）
+     * @param userId 用户ID
+     * @param sessionId 会话ID（token 摘要）
+     * @param currentToken 当前请求的 token，禁止踢掉自己
+     * @return 0=成功，1=会话不存在，2=不能踢掉当前设备
+     */
+    public int kickSession(String userId, String sessionId, String currentToken) {
+        if (sessionId == null || sessionId.isEmpty()) return 1;
+        for (Map.Entry<String, TokenInfo> entry : activeTokens.entrySet()) {
+            if (!userId.equals(entry.getValue().userId)) continue;
+            if (!sessionId.equals(sessionIdOf(entry.getKey()))) continue;
+            if (entry.getKey().equals(currentToken)) return 2;
+            removeToken(entry.getKey());
+            return 0;
+        }
+        return 1;
     }
 
     // ========== 每日调用配额（存于 t_setting，两种存储模式通用） ==========

@@ -62,7 +62,7 @@ public class AuthController {
 
         String browser = getClientBrowser(request);
         storageService.updateLoginInfo(user.getId(), ip, browser);
-        String token = storageService.createToken(user.getId(), ip);
+        String token = storageService.createToken(user.getId(), ip, browser);
 
         result.put("success", true);
         result.put("token", token);
@@ -115,7 +115,7 @@ public class AuthController {
             return result;
         }
 
-        String token = storageService.createToken(user.getId(), ip);
+        String token = storageService.createToken(user.getId(), ip, getClientBrowser(request));
         result.put("success", true);
         result.put("token", token);
         result.put("username", user.getUsername());
@@ -146,6 +146,49 @@ public class AuthController {
             result.put("id", user.getId());
         } else {
             result.put("success", false);
+        }
+        return result;
+    }
+
+    /**
+     * 登录设备管理：查询当前账号的所有登录会话（登录时间/浏览器/IP，并标记当前设备）
+     */
+    @GetMapping("/sessions")
+    public Map<String, Object> sessions(HttpServletRequest request) {
+        Map<String, Object> result = new HashMap<>();
+        User user = (User) request.getAttribute("currentUser");
+        if (user == null) {
+            result.put("success", false);
+            result.put("message", "未登录");
+            return result;
+        }
+        result.put("success", true);
+        result.put("sessions", storageService.listUserSessions(user.getId(), extractToken(request), getClientBrowser(request)));
+        return result;
+    }
+
+    /**
+     * 登录设备管理：踢掉指定会话（仅限本人的其他设备，不能踢掉当前设备）
+     */
+    @DeleteMapping("/sessions/{sessionId}")
+    public Map<String, Object> kickSession(@PathVariable String sessionId, HttpServletRequest request) {
+        Map<String, Object> result = new HashMap<>();
+        User user = (User) request.getAttribute("currentUser");
+        if (user == null) {
+            result.put("success", false);
+            result.put("message", "未登录");
+            return result;
+        }
+        int code = storageService.kickSession(user.getId(), sessionId, extractToken(request));
+        if (code == 0) {
+            result.put("success", true);
+            result.put("message", "已踢下线");
+        } else if (code == 2) {
+            result.put("success", false);
+            result.put("message", "不能踢掉当前设备，如需退出请使用退出登录");
+        } else {
+            result.put("success", false);
+            result.put("message", "会话不存在或已下线");
         }
         return result;
     }
@@ -205,6 +248,24 @@ public class AuthController {
 
     private String getClientIp(HttpServletRequest request) {
         return com.chatai.newbot.config.IpUtils.getClientIp(request);
+    }
+
+    /**
+     * 从请求中提取 Bearer token（与 AuthInterceptor 一致，兼容 Cookie）
+     */
+    private String extractToken(HttpServletRequest request) {
+        String token = request.getHeader("Authorization");
+        if (token != null && token.startsWith("Bearer ")) {
+            return token.substring(7);
+        }
+        if (request.getCookies() != null) {
+            for (jakarta.servlet.http.Cookie cookie : request.getCookies()) {
+                if ("token".equals(cookie.getName())) {
+                    return cookie.getValue();
+                }
+            }
+        }
+        return null;
     }
 
     private String getClientBrowser(HttpServletRequest request) {

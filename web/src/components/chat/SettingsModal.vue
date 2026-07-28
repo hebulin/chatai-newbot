@@ -21,6 +21,10 @@
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>
               <span>提示词</span>
             </div>
+            <div class="settings-menu-item" :class="{ active: tab === 'loginDevices' }" @click="tab = 'loginDevices'; loadSessions()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+              <span>登录管理</span>
+            </div>
             <div class="settings-menu-item" :class="{ active: tab === 'dataManagement' }" @click="tab = 'dataManagement'">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
               <span>数据管理</span>
@@ -74,6 +78,32 @@
               <div class="settings-form-note">可保存多条提示词，但最多只能启用其中 1 条；启用的提示词会在每次对话时作为全局提示词生效。都不启用则使用系统默认提示词。</div>
             </div>
 
+            <!-- 登录管理 -->
+            <div v-if="tab === 'loginDevices'" class="settings-panel">
+              <h3 class="settings-panel-title">登录管理</h3>
+              <div v-if="sessionsLoading" class="session-empty">加载中...</div>
+              <div v-else class="session-list">
+                <div v-for="s in sessions" :key="s.sessionId" class="session-item" :class="{ current: s.current }">
+                  <div class="session-icon">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                  </div>
+                  <div class="session-info">
+                    <div class="session-title">
+                      {{ s.browser || '未知浏览器' }}
+                      <span v-if="s.current" class="session-current-badge">当前设备</span>
+                    </div>
+                    <div class="session-meta">
+                      <span>IP：{{ s.ip || '未知' }}</span>
+                      <span>登录时间：{{ s.createdAt || '未知' }}</span>
+                    </div>
+                  </div>
+                  <button v-if="!s.current" class="settings-btn settings-btn-danger session-kick-btn" @click="confirmKick(s)">踢下线</button>
+                </div>
+                <div v-if="sessions.length === 0" class="session-empty">暂无登录设备记录</div>
+              </div>
+              <div class="settings-form-note">展示当前账号在各设备终端的登录会话；踢下线后对应设备需重新登录。同一浏览器重复登录会产生多条会话记录。</div>
+            </div>
+
             <!-- 数据管理 -->
             <div v-if="tab === 'dataManagement'" class="settings-panel">
               <h3 class="settings-panel-title">数据管理</h3>
@@ -105,7 +135,7 @@
 <script setup>
 import { ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { changePassword } from '@/api/auth'
+import { changePassword, getSessions, kickSession } from '@/api/auth'
 import { getPromptPresets, savePromptPresets } from '@/api/user'
 import { useChatStore } from '@/stores/chat'
 import { useAuthStore } from '@/stores/auth'
@@ -125,6 +155,10 @@ const pwdTipError = ref(false)
 const presets = ref([])
 const promptTip = ref('')
 const promptTipError = ref(false)
+
+// 登录设备管理
+const sessions = ref([])
+const sessionsLoading = ref(false)
 
 async function submitChangePassword() {
   pwdTip.value = ''
@@ -259,6 +293,37 @@ function confirmDeleteAll() {
   }).then(() => {
     chatStore.deleteAllChats()
     ElMessage.success('已删除全部对话')
+  }).catch(() => {})
+}
+
+async function loadSessions() {
+  sessionsLoading.value = true
+  try {
+    const data = await getSessions()
+    if (data && data.success) {
+      // 当前设备置顶，其余按登录时间倒序（接口已排序）
+      sessions.value = (data.sessions || []).sort((a, b) => (b.current ? 1 : 0) - (a.current ? 1 : 0))
+    }
+  } catch (e) { /* ignore */ } finally {
+    sessionsLoading.value = false
+  }
+}
+
+function confirmKick(s) {
+  ElMessageBox.confirm(`确定踢掉该设备（${s.browser || '未知浏览器'} / ${s.ip || '未知IP'}）吗？踢下线后该设备需重新登录。`, '踢下线确认', {
+    confirmButtonText: '踢下线',
+    cancelButtonText: '取消',
+    type: 'warning'
+  }).then(async () => {
+    try {
+      const data = await kickSession(s.sessionId)
+      if (data.success) {
+        ElMessage.success('已踢下线')
+      } else {
+        ElMessage.error(data.message || '操作失败')
+      }
+    } catch (e) { /* 拦截器已提示 */ }
+    loadSessions()
   }).catch(() => {})
 }
 </script>
@@ -513,6 +578,74 @@ function confirmDeleteAll() {
   color: var(--primary, #6366f1);
 }
 
+/* === 登录设备管理 === */
+.session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border, #333);
+  border-radius: 8px;
+}
+.session-item.current {
+  border-color: var(--primary, #6366f1);
+}
+.session-icon {
+  color: var(--ink-3, #999);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+.session-item.current .session-icon {
+  color: var(--primary, #6366f1);
+}
+.session-info {
+  flex: 1;
+  min-width: 0;
+}
+.session-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink, #eee);
+}
+.session-current-badge {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--primary, #6366f1);
+  border: 1px solid var(--primary, #6366f1);
+  border-radius: 4px;
+  padding: 1px 6px;
+  flex-shrink: 0;
+}
+.session-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 11px;
+  color: var(--ink-3, #999);
+  margin-top: 4px;
+}
+.session-kick-btn {
+  flex-shrink: 0;
+  padding: 6px 14px;
+}
+.session-empty {
+  padding: 24px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--ink-3, #999);
+  border: 1px dashed var(--border, #333);
+  border-radius: 8px;
+}
+
 /* === 移动端：侧栏改为顶部水平标签栏 === */
 @media (max-width: 480px) {
   .modal-container {
@@ -545,6 +678,9 @@ function confirmDeleteAll() {
     padding: 16px 14px;
   }
   .data-mgmt-row {
+    flex-wrap: wrap;
+  }
+  .session-item {
     flex-wrap: wrap;
   }
 }

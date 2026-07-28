@@ -1095,6 +1095,10 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
 .mermaid-container:not(.streaming) .mermaid-view pre.mermaid:not(.mermaid-rendered):not(.mermaid-parse-failed) {
     position: relative;
     width: 100%;
+    /* 气泡宽度按内容收缩，而 loading 态 font-size:0 使内容宽度趋近 0，
+       不设最小宽度时整个 mermaid 卡片会塌缩成小块、工具栏被挤乱（分享页尤其明显）；
+       窄屏下超出部分由 .mermaid-scroll-wrapper 横向滚动兜底，仅 loading 瞬态 */
+    min-width: 420px;
     min-height: 140px;
     font-size: 0;
     line-height: 0;

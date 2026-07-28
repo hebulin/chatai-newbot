@@ -24,3 +24,13 @@ export function logout() {
 export function changePassword(data) {
   return request.post('/auth/change-password', data)
 }
+
+// 获取当前账号的登录设备列表
+export function getSessions() {
+  return request.get('/auth/sessions')
+}
+
+// 踢掉指定登录设备
+export function kickSession(sessionId) {
+  return request.delete(`/auth/sessions/${sessionId}`)
+}
