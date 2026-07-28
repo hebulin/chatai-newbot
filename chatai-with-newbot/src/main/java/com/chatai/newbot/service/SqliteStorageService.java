@@ -165,10 +165,13 @@ public class SqliteStorageService implements StorageService {
                 "token TEXT PRIMARY KEY," +
                 "user_id TEXT NOT NULL," +
                 "ip TEXT," +
+                "browser TEXT," +
                 "created_at TEXT," +
                 "expires_at INTEGER NOT NULL DEFAULT 0" +
                 ")");
         jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_token_user ON t_token(user_id)");
+        // 老数据库补充 browser 列（幂等迁移）
+        ensureTokenBrowserColumn();
 
         // 会话分享表（只读链接，两种存储模式共用 SQLite）
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_chat_share (" +
@@ -198,6 +201,20 @@ public class SqliteStorageService implements StorageService {
         if (!hasColumn) {
             jdbcTemplate.execute("ALTER TABLE t_user ADD COLUMN system_prompt TEXT");
             log.info("SQLite: t_user 表已补充 system_prompt 列");
+        }
+    }
+
+    /**
+     * 为 t_token 表补充 browser 列（幂等迁移）。
+     * 记录登录时的浏览器/终端信息，用于个人设置中的登录设备管理。
+     */
+    private void ensureTokenBrowserColumn() {
+        List<Map<String, Object>> columns = jdbcTemplate.queryForList("PRAGMA table_info(t_token)");
+        boolean hasColumn = columns.stream()
+                .anyMatch(c -> "browser".equals(String.valueOf(c.get("name"))));
+        if (!hasColumn) {
+            jdbcTemplate.execute("ALTER TABLE t_token ADD COLUMN browser TEXT");
+            log.info("SQLite: t_token 表已补充 browser 列");
         }
     }
 
@@ -943,12 +960,24 @@ public class SqliteStorageService implements StorageService {
      * @param token token 字符串
      * @param userId 用户ID
      * @param ip 登录IP
+     * @param browser 登录浏览器/终端
      * @param expiresAt 过期时间戳（毫秒）
      */
-    public void insertToken(String token, String userId, String ip, long expiresAt) {
+    public void insertToken(String token, String userId, String ip, String browser, long expiresAt) {
         jdbcTemplate.update(
-                "INSERT OR REPLACE INTO t_token (token, user_id, ip, created_at, expires_at) VALUES (?,?,?,?,?)",
-                token, userId, ip, nowString(), expiresAt);
+                "INSERT OR REPLACE INTO t_token (token, user_id, ip, browser, created_at, expires_at) VALUES (?,?,?,?,?,?)",
+                token, userId, ip, browser, nowString(), expiresAt);
+    }
+
+    /**
+     * 查询指定用户的所有登录 Token 记录（登录设备管理，新登录在前）
+     * @param userId 用户ID
+     * @return 每条记录含 token/ip/browser/created_at/expires_at
+     */
+    public List<Map<String, Object>> listTokensByUser(String userId) {
+        return jdbcTemplate.queryForList(
+                "SELECT token, ip, browser, created_at, expires_at FROM t_token WHERE user_id = ? ORDER BY created_at DESC",
+                userId);
     }
 
     /**
@@ -974,6 +1003,16 @@ public class SqliteStorageService implements StorageService {
      */
     public void updateTokenExpiry(String token, long expiresAt) {
         jdbcTemplate.update("UPDATE t_token SET expires_at = ? WHERE token = ?", expiresAt, token);
+    }
+
+    /**
+     * 回填 Token 的浏览器信息（browser 列上线前登录的旧 token 值为空，
+     * 当前设备访问登录管理时用本次请求的 UA 补齐）
+     * @param token token 字符串
+     * @param browser 浏览器/终端名称
+     */
+    public void updateTokenBrowser(String token, String browser) {
+        jdbcTemplate.update("UPDATE t_token SET browser = ? WHERE token = ?", browser, token);
     }
 
     /**

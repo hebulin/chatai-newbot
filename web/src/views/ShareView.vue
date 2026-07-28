@@ -106,7 +106,9 @@ onMounted(async () => {
       expiresAt.value = res.expiresAt || ''
       messages.value = res.messages || []
       document.title = title.value + ' - 会话分享'
-      // 渲染完成后处理代码高亮与 mermaid 图表
+      // 先退出 loading 让 v-else 分支渲染出 containerRef，再处理代码高亮与 mermaid 图表；
+      // 否则 containerRef 为 null，mermaid 渲染被整体跳过，图表永远停在“渲染中”占位
+      loading.value = false
       await nextTick()
       if (containerRef.value) {
         processSpecialContent(containerRef.value)
