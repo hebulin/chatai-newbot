@@ -87,10 +87,18 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* chat.css 全局锁死了 html/body 的滚动（overflow:hidden，聊天页自行管理滚动），
+   该 CSS 经 JS 引入后常驻文档，会波及后台管理页，导致 body 无法滚动。
+   故这里让 .admin-layout 自己作为滚动容器，数据量多时可正常下滑 */
 .admin-layout {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+@supports (height: 100dvh) {
+  .admin-layout { height: 100dvh; }
 }
 .admin-nav {
   position: sticky;

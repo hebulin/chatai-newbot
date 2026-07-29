@@ -201,6 +201,15 @@ input, button, textarea, select { font: inherit; color: inherit; background: non
 }
 .icon-btn:hover::before { content: none; }
 
+/* 顶栏分享/侧栏按钮：去掉描边走简约风，悬停仅变色加淡底；
+   用 transparent 而非 border:none，保持与其他 icon-btn 尺寸对齐 */
+.share-chat-btn,
+.share-chat-btn:hover,
+.toggle-sidebar-btn,
+.toggle-sidebar-btn:hover {
+    border-color: transparent;
+}
+
 /* Theme toggle - pill-shaped switch */
 .theme-toggle-btn {
     width: 48px; height: 26px;
@@ -446,7 +455,7 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
 .chat-date-header {
     font-family: var(--mono);
     font-size: 9px;
-    color: var(--fg-4);
+    color: var(--primary);
     font-weight: 500;
     padding: 12px 4px 6px;
     user-select: none;

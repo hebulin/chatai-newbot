@@ -95,13 +95,23 @@ export const useChatStore = defineStore('chat', () => {
     const now = new Date()
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
     const chatDate = new Date(date.getFullYear(), date.getMonth(), date.getDate())
-    const diffDays = Math.floor((today.getTime() - chatDate.getTime()) / 86400000)
-    if (diffDays === 0) return '今天'
-    if (diffDays <= 30) return '30天内'
+
+    // 今天
+    if (chatDate.getTime() === today.getTime()) return '今天'
+
+    // 本周（以周一为一周起点，排除今天）
+    const dowMon = (today.getDay() + 6) % 7 // 周一=0 … 周日=6
+    const weekStart = new Date(today)
+    weekStart.setDate(today.getDate() - dowMon)
+    if (chatDate.getTime() >= weekStart.getTime() && chatDate.getTime() < today.getTime()) return '本周'
+
+    // 本月（同年同月，排除已归入本周的部分）
+    if (chatDate.getFullYear() === today.getFullYear() && chatDate.getMonth() === today.getMonth()) return '本月'
+
+    // 超过本月：按月份区分，格式 YYYY年MM月（月份补零，如 2025年06月）
     const year = date.getFullYear()
-    const month = date.getMonth() + 1
-    if (year === now.getFullYear()) return month + '月'
-    return year + '年' + month + '月'
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    return `${year}年${month}月`
   }
 
   // 从服务端加载会话历史
