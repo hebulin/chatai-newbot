@@ -1,6 +1,8 @@
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import hljs from 'highlight.js'
+// lib/common 仅含常用~40种语言，相比全量包（190+语言）大幅减小打包体积；
+// 未收录语言会回退到无高亮纯文本展示，不影响内容可读
+import hljs from 'highlight.js/lib/common'
 import 'highlight.js/styles/atom-one-dark.css'
 
 // ===== Mermaid 懒加载与渲染 =====

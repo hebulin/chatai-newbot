@@ -161,6 +161,32 @@ public class SqliteStorageService implements StorageService {
                 "updated_at_ts INTEGER DEFAULT 0" +
                 ")");
 
+        // 按会话行存储表（每行一个会话，保存时仅重写变更会话，避免整文档重写的写放大；
+        // 冗余摘要列供侧边栏列表直查，无需解析消息 JSON；旧 t_chat_history 整文档保留作迁移来源与备份）
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_chat_session (" +
+                "user_id TEXT NOT NULL," +
+                "chat_id TEXT NOT NULL," +
+                "messages TEXT NOT NULL," +
+                "meta TEXT," +
+                "title TEXT," +
+                "preview TEXT," +
+                "last_time TEXT," +
+                "msg_count INTEGER DEFAULT 0," +
+                "updated_at TEXT," +
+                "updated_at_ts INTEGER DEFAULT 0," +
+                "PRIMARY KEY (user_id, chat_id)" +
+                ")");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_chat_session_user ON t_chat_session(user_id)");
+
+        // 用户会话全局状态（最后所在会话 + 已删除会话ID累积；行存在即表示该用户已完成按会话行迁移）
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_chat_user_state (" +
+                "user_id TEXT PRIMARY KEY," +
+                "last_chat_id TEXT," +
+                "deleted_chat_ids TEXT," +
+                "updated_at TEXT," +
+                "updated_at_ts INTEGER DEFAULT 0" +
+                ")");
+
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_setting (" +
                 "key TEXT PRIMARY KEY," +
                 "value TEXT" +
@@ -982,10 +1008,20 @@ public class SqliteStorageService implements StorageService {
                 String.class);
     }
 
-    // ========== 聊天记录（整文档存储） ==========
+    /**
+     * 删除指定日期之前的使用记录（定期清理过期日志用）
+     * @param day 截止日期（yyyy-MM-dd，不含当天）
+     * @return 删除条数
+     */
+    public int deleteUsageLogsBefore(String day) {
+        return jdbcTemplate.update(
+                "DELETE FROM t_usage_log WHERE SUBSTR(timestamp, 1, 10) < ?", day);
+    }
+
+    // ========== 聊天记录（按会话行存储 + 旧整文档兼容） ==========
 
     /**
-     * 加载用户聊天记录 JSON 文档
+     * 加载用户聊天记录 JSON 文档（旧整文档表，仅作按会话行迁移来源与备份）
      * @param userId 用户ID
      * @return JSON 字符串，不存在返回 null
      */
@@ -996,7 +1032,9 @@ public class SqliteStorageService implements StorageService {
     }
 
     /**
-     * 保存用户聊天记录 JSON 文档（存在则更新，不存在则插入）
+     * 保存用户聊天记录 JSON 文档（存在则更新，不存在则插入）。
+     * 现仅用于 JSON → SQLite 一键迁移写入整文档；同时重置该用户的按会话行数据，
+     * 使下次访问时从新写入的整文档重新拆分迁移，避免新旧数据不一致。
      * @param userId 用户ID
      * @param chatData JSON 字符串
      * @param updatedAt 更新时间字符串
@@ -1011,14 +1049,148 @@ public class SqliteStorageService implements StorageService {
                     "INSERT INTO t_chat_history (user_id, chat_data, updated_at, updated_at_ts) VALUES (?,?,?,?)",
                     userId, chatData, updatedAt, updatedAtTs);
         }
+        jdbcTemplate.update("DELETE FROM t_chat_session WHERE user_id = ?", userId);
+        jdbcTemplate.update("DELETE FROM t_chat_user_state WHERE user_id = ?", userId);
     }
 
     /**
-     * 删除用户聊天记录
+     * 删除用户聊天记录（整文档备份 + 按会话行 + 用户状态三张表一并清理）
      * @param userId 用户ID
      */
     public void deleteChatData(String userId) {
         jdbcTemplate.update("DELETE FROM t_chat_history WHERE user_id = ?", userId);
+        jdbcTemplate.update("DELETE FROM t_chat_session WHERE user_id = ?", userId);
+        jdbcTemplate.update("DELETE FROM t_chat_user_state WHERE user_id = ?", userId);
+    }
+
+    /**
+     * 判断用户是否已存在会话状态行（存在即表示已完成按会话行迁移）
+     * @param userId 用户ID
+     * @return true=已迁移
+     */
+    public boolean hasChatUserState(String userId) {
+        Integer n = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_chat_user_state WHERE user_id = ?", Integer.class, userId);
+        return n != null && n > 0;
+    }
+
+    /**
+     * 加载用户会话全局状态
+     * @param userId 用户ID
+     * @return 含 last_chat_id、deleted_chat_ids 的记录，不存在返回 null
+     */
+    public Map<String, Object> loadChatUserState(String userId) {
+        List<Map<String, Object>> list = jdbcTemplate.queryForList(
+                "SELECT last_chat_id, deleted_chat_ids FROM t_chat_user_state WHERE user_id = ?", userId);
+        return list.isEmpty() ? null : list.get(0);
+    }
+
+    /**
+     * 保存用户会话全局状态（存在则更新，不存在则插入）
+     * @param userId 用户ID
+     * @param lastChatId 最后所在会话ID
+     * @param deletedChatIdsJson 已删除会话ID列表 JSON
+     * @param updatedAt 更新时间字符串
+     * @param updatedAtTs 更新时间戳
+     */
+    public void saveChatUserState(String userId, String lastChatId, String deletedChatIdsJson,
+                                   String updatedAt, long updatedAtTs) {
+        int updated = jdbcTemplate.update(
+                "UPDATE t_chat_user_state SET last_chat_id=?, deleted_chat_ids=?, updated_at=?, updated_at_ts=? WHERE user_id=?",
+                lastChatId, deletedChatIdsJson, updatedAt, updatedAtTs, userId);
+        if (updated == 0) {
+            jdbcTemplate.update(
+                    "INSERT INTO t_chat_user_state (user_id, last_chat_id, deleted_chat_ids, updated_at, updated_at_ts) VALUES (?,?,?,?,?)",
+                    userId, lastChatId, deletedChatIdsJson, updatedAt, updatedAtTs);
+        }
+    }
+
+    /**
+     * 加载用户全部会话行（含消息正文，导出/全文搜索等全量场景用）
+     * @param userId 用户ID
+     * @return 每条记录含 chat_id/messages/meta，按插入顺序返回
+     */
+    public List<Map<String, Object>> listChatSessions(String userId) {
+        return jdbcTemplate.queryForList(
+                "SELECT chat_id, messages, meta FROM t_chat_session WHERE user_id = ? ORDER BY rowid", userId);
+    }
+
+    /**
+     * 加载用户全部会话摘要行（仅冗余摘要列 + 元信息，不含消息正文，侧边栏首屏用）
+     * @param userId 用户ID
+     * @return 每条记录含 chat_id/title/preview/last_time/msg_count/meta，按插入顺序返回
+     */
+    public List<Map<String, Object>> listChatSessionSummaries(String userId) {
+        return jdbcTemplate.queryForList(
+                "SELECT chat_id, title, preview, last_time, msg_count, meta FROM t_chat_session WHERE user_id = ? ORDER BY rowid",
+                userId);
+    }
+
+    /**
+     * 加载单个会话行（切换会话按需加载用）
+     * @param userId 用户ID
+     * @param chatId 会话ID
+     * @return 含 messages/meta 的记录，不存在返回 null
+     */
+    public Map<String, Object> getChatSession(String userId, String chatId) {
+        List<Map<String, Object>> list = jdbcTemplate.queryForList(
+                "SELECT messages, meta FROM t_chat_session WHERE user_id = ? AND chat_id = ?", userId, chatId);
+        return list.isEmpty() ? null : list.get(0);
+    }
+
+    /**
+     * 插入或更新单个会话行
+     * @param userId 用户ID
+     * @param chatId 会话ID
+     * @param messagesJson 消息列表 JSON
+     * @param metaJson 会话元信息 JSON（null 时保留原值，上传数据可能不带该会话的元信息）
+     * @param title 会话标题
+     * @param preview 首条用户消息预览
+     * @param lastTime 最后消息时间
+     * @param msgCount 消息条数
+     * @param updatedAt 更新时间字符串
+     * @param updatedAtTs 更新时间戳
+     */
+    public void upsertChatSession(String userId, String chatId, String messagesJson, String metaJson,
+                                   String title, String preview, String lastTime, int msgCount,
+                                   String updatedAt, long updatedAtTs) {
+        int updated = jdbcTemplate.update(
+                "UPDATE t_chat_session SET messages=?, meta=COALESCE(?, meta), title=?, preview=?, last_time=?, " +
+                "msg_count=?, updated_at=?, updated_at_ts=? WHERE user_id=? AND chat_id=?",
+                messagesJson, metaJson, title, preview, lastTime, msgCount, updatedAt, updatedAtTs, userId, chatId);
+        if (updated == 0) {
+            jdbcTemplate.update(
+                    "INSERT INTO t_chat_session (user_id, chat_id, messages, meta, title, preview, last_time, msg_count, updated_at, updated_at_ts) " +
+                    "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    userId, chatId, messagesJson, metaJson, title, preview, lastTime, msgCount, updatedAt, updatedAtTs);
+        }
+    }
+
+    /**
+     * 删除用户的指定会话行（同步 deletedChatIds 时清理）
+     * @param userId 用户ID
+     * @param chatIds 待删除的会话ID集合
+     */
+    public void deleteChatSessions(String userId, Collection<String> chatIds) {
+        if (chatIds == null || chatIds.isEmpty()) return;
+        for (String chatId : chatIds) {
+            jdbcTemplate.update("DELETE FROM t_chat_session WHERE user_id = ? AND chat_id = ?", userId, chatId);
+        }
+    }
+
+    /**
+     * 加载全部聊天数据的原始 JSON 文本（含按会话行与旧整文档备份），
+     * 供孤儿上传文件清理时正则提取附件引用，不做 JSON 解析避免解析失败遗漏引用
+     * @return 原始 JSON 文本列表
+     */
+    public List<String> listAllChatPayloads() {
+        List<String> payloads = new ArrayList<>();
+        payloads.addAll(jdbcTemplate.queryForList("SELECT chat_data FROM t_chat_history", String.class));
+        for (Map<String, Object> row : jdbcTemplate.queryForList("SELECT messages, meta FROM t_chat_session")) {
+            if (row.get("messages") instanceof String s) payloads.add(s);
+            if (row.get("meta") instanceof String s) payloads.add(s);
+        }
+        return payloads;
     }
 
     // ========== 登录 Token 持久化 ==========

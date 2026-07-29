@@ -211,7 +211,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 import { changePassword, getSessions, kickSession } from '@/api/auth'
 import { getPromptPresets, savePromptPresets } from '@/api/user'
 import { getMyShares, deleteShare, batchDeleteMyShares } from '@/api/share'
@@ -379,12 +379,19 @@ function confirmExport() {
     confirmButtonText: '导出',
     cancelButtonText: '取消'
   }).then(async () => {
-    // 懒加载模式下导出前需先补齐未加载的会话正文
+    // 懒加载模式下导出前需先补齐未加载的会话正文，会话多时耗时较长，全屏 loading 提示进度
+    const loading = ElLoading.service({
+      lock: true,
+      text: `正在导出 ${count} 条会话，请稍候…`,
+      background: 'rgba(0, 0, 0, 0.5)'
+    })
     try {
       await chatStore.exportChats(exportFormat.value)
       ElMessage.success('已导出')
     } catch (e) {
       ElMessage.error('导出失败：拉取全量会话内容失败，请重试')
+    } finally {
+      loading.close()
     }
   }).catch(() => {})
 }
