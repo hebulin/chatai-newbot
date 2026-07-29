@@ -193,7 +193,35 @@ public class SqliteStorageService implements StorageService {
         // 老数据库补充 expires_at 列（幂等迁移）
         ensureChatShareExpiresColumn();
 
+        // 系统公告表（支持公告期与历史公告，两种存储模式共用 SQLite）
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_announcement (" +
+                "id TEXT PRIMARY KEY," +
+                "title TEXT," +
+                "content TEXT NOT NULL," +
+                "start_at TEXT," +
+                "end_at TEXT," +
+                "enabled INTEGER DEFAULT 1," +
+                "created_at TEXT," +
+                "updated_at TEXT" +
+                ")");
+        // 老数据库补充 title 列（幂等迁移）
+        ensureAnnouncementTitleColumn();
+
         log.info("SQLite: 数据表已就绪");
+    }
+
+    /**
+     * 为 t_announcement 表补充 title 列（幂等迁移）。
+     * 旧版公告表无标题列时自动执行 ALTER TABLE；已存在则跳过。
+     */
+    private void ensureAnnouncementTitleColumn() {
+        List<Map<String, Object>> columns = jdbcTemplate.queryForList("PRAGMA table_info(t_announcement)");
+        boolean hasColumn = columns.stream()
+                .anyMatch(c -> "title".equals(String.valueOf(c.get("name"))));
+        if (!hasColumn) {
+            jdbcTemplate.execute("ALTER TABLE t_announcement ADD COLUMN title TEXT");
+            log.info("SQLite: t_announcement 表已补充 title 列");
+        }
     }
 
     /**
@@ -1167,6 +1195,100 @@ public class SqliteStorageService implements StorageService {
      */
     public void updateChatShareExpiry(String id, String expiresAt) {
         jdbcTemplate.update("UPDATE t_chat_share SET expires_at = ? WHERE id = ?", expiresAt, id);
+    }
+
+    // ========== 系统公告（恒走 SQLite，与存储模式开关无关） ==========
+
+    /** 公告行映射器 */
+    private final RowMapper<Announcement> announcementRowMapper = (ResultSet rs, int rowNum) -> {
+        Announcement a = new Announcement();
+        a.setId(rs.getString("id"));
+        a.setTitle(rs.getString("title"));
+        a.setContent(rs.getString("content"));
+        a.setStartAt(rs.getString("start_at"));
+        a.setEndAt(rs.getString("end_at"));
+        a.setEnabled(rs.getInt("enabled") == 1);
+        a.setCreatedAt(rs.getString("created_at"));
+        a.setUpdatedAt(rs.getString("updated_at"));
+        return a;
+    };
+
+    /**
+     * 新增公告记录（自动生成ID与创建/更新时间）
+     * @param a 公告记录
+     * @return 保存后的记录
+     */
+    public Announcement addAnnouncement(Announcement a) {
+        if (a.getId() == null || a.getId().isEmpty()) {
+            a.setId(UUID.randomUUID().toString().replace("-", ""));
+        }
+        if (a.getCreatedAt() == null) {
+            a.setCreatedAt(nowString());
+        }
+        if (a.getUpdatedAt() == null) {
+            a.setUpdatedAt(a.getCreatedAt());
+        }
+        jdbcTemplate.update(
+                "INSERT INTO t_announcement (id, title, content, start_at, end_at, enabled, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+                a.getId(), a.getTitle(), a.getContent(), a.getStartAt(), a.getEndAt(), a.isEnabled() ? 1 : 0, a.getCreatedAt(), a.getUpdatedAt());
+        return a;
+    }
+
+    /**
+     * 根据ID获取公告记录
+     * @param id 公告ID
+     * @return 公告记录，不存在返回 null
+     */
+    public Announcement getAnnouncementById(String id) {
+        List<Announcement> list = jdbcTemplate.query(
+                "SELECT * FROM t_announcement WHERE id = ?", announcementRowMapper, id);
+        return list.isEmpty() ? null : list.get(0);
+    }
+
+    /**
+     * 获取全部公告记录（含历史公告，最近更新在前）
+     * @return 公告列表
+     */
+    public List<Announcement> getAllAnnouncements() {
+        return jdbcTemplate.query(
+                "SELECT * FROM t_announcement ORDER BY updated_at DESC, created_at DESC", announcementRowMapper);
+    }
+
+    /**
+     * 获取当前启用的公告（最多一条）
+     * @return 启用中的公告，无则返回 null
+     */
+    public Announcement getEnabledAnnouncement() {
+        List<Announcement> list = jdbcTemplate.query(
+                "SELECT * FROM t_announcement WHERE enabled = 1 ORDER BY updated_at DESC LIMIT 1", announcementRowMapper);
+        return list.isEmpty() ? null : list.get(0);
+    }
+
+    /**
+     * 更新公告标题、内容与公告期（重新生效/改期时刷新 updated_at）
+     * @param a 公告记录（需包含 id）
+     */
+    public void updateAnnouncement(Announcement a) {
+        jdbcTemplate.update(
+                "UPDATE t_announcement SET title = ?, content = ?, start_at = ?, end_at = ?, enabled = ?, updated_at = ? WHERE id = ?",
+                a.getTitle(), a.getContent(), a.getStartAt(), a.getEndAt(), a.isEnabled() ? 1 : 0, a.getUpdatedAt(), a.getId());
+    }
+
+    /**
+     * 下线除指定ID外的全部公告（保证同一时刻最多一条启用）
+     * @param exceptId 保留启用的公告ID
+     */
+    public void disableOtherAnnouncements(String exceptId) {
+        jdbcTemplate.update("UPDATE t_announcement SET enabled = 0 WHERE id <> ?", exceptId);
+    }
+
+    /**
+     * 删除公告记录
+     * @param id 公告ID
+     * @return true=删除成功
+     */
+    public boolean deleteAnnouncement(String id) {
+        return jdbcTemplate.update("DELETE FROM t_announcement WHERE id = ?", id) > 0;
     }
 
     // ========== 数据迁移辅助方法（供 StorageManager 调用） ==========

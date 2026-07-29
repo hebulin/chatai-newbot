@@ -20,6 +20,11 @@ export function deleteModel(id) {
   return request.delete(`/admin/models/${id}`)
 }
 
+// 批量删除模型
+export function batchDeleteModels(ids) {
+  return request.post('/admin/models/batch-delete', { ids })
+}
+
 // 模型连通性测试（手动触发：连通验证 + 测速两次请求，超时适当放宽）
 export function testModel(id) {
   return request.post(`/admin/models/${id}/test`, null, { timeout: 60000 })

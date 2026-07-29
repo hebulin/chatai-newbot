@@ -40,12 +40,27 @@ export function testWebSearch(apiKey) {
   return request.post('/admin/settings/websearch/test', { apiKey }, { timeout: 30000 })
 }
 
-// 获取公告设置（admin）
-export function getAnnouncementSettings() {
-  return request.get('/admin/settings/announcement')
+// 获取全部公告列表（含历史公告，admin）
+export function listAnnouncements() {
+  return request.get('/admin/announcements')
 }
 
-// 保存公告设置（content 传空则清除公告）
-export function setAnnouncementSettings(content) {
-  return request.put('/admin/settings/announcement', { content })
+// 发布新公告（payload: { content, startAt, endAt }，公告期可空）
+export function publishAnnouncement(payload) {
+  return request.post('/admin/announcements', payload)
+}
+
+// 重新生效/更改公告期（payload: { content, startAt, endAt }，content 空=不修改）
+export function republishAnnouncement(id, payload) {
+  return request.put(`/admin/announcements/${id}`, payload)
+}
+
+// 下线公告（保留历史记录，可重新生效）
+export function offlineAnnouncement(id) {
+  return request.put(`/admin/announcements/${id}/offline`)
+}
+
+// 删除公告记录
+export function deleteAnnouncement(id) {
+  return request.delete(`/admin/announcements/${id}`)
 }

@@ -155,17 +155,18 @@ public class ChatController {
     }
 
     /**
-     * 获取系统公告（登录用户可见）
-     * 返回: { "success": true, "content": "...", "updatedAt": "2026-07-29 10:00:00" }，无公告时 content 为空串
+     * 获取系统公告（登录用户可见，仅返回启用且处于公告期内的公告）
+     * 返回: { "success": true, "id": "...", "title": "...", "content": "...", "updatedAt": "2026-07-29 10:00:00" }，无生效公告时 content 为空串
      */
     @GetMapping("/announcement")
     public Map<String, Object> getAnnouncement() {
         Map<String, Object> result = new HashMap<>();
-        String content = storageService.getAnnouncement();
-        String updatedAt = storageService.getAnnouncementUpdatedAt();
+        Announcement a = storageService.getActiveAnnouncement();
         result.put("success", true);
-        result.put("content", content == null ? "" : content);
-        result.put("updatedAt", updatedAt == null ? "" : updatedAt);
+        result.put("id", a == null || a.getId() == null ? "" : a.getId());
+        result.put("title", a == null || a.getTitle() == null ? "" : a.getTitle());
+        result.put("content", a == null ? "" : a.getContent());
+        result.put("updatedAt", a == null || a.getUpdatedAt() == null ? "" : a.getUpdatedAt());
         return result;
     }
 
@@ -208,7 +209,7 @@ public class ChatController {
     // ========== 会话历史同步（多端统一） ==========
 
     /**
-     * 获取当前用户的会话历史
+     * 获取当前用户的会话历史（全量，含消息内容；供导出备份等场景使用）
      */
     @GetMapping("/chat/history")
     public Map<String, Object> getChatHistory(HttpServletRequest request) {
@@ -219,8 +220,20 @@ public class ChatController {
     }
 
     /**
-     * 保存当前用户的会话历史
-     * 请求体格式: { "lastChatId": "xxx", "chats": {...}, "deletedChatIds": [...] }
+     * 获取当前用户的会话摘要列表（仅标题/预览/时间/条数，不含消息内容）
+     * 懒加载模式的首屏接口：会话正文由前端切换会话时通过 /chat/history/single 按需拉取
+     */
+    @GetMapping("/chat/history/summary")
+    public Map<String, Object> getChatHistorySummary(HttpServletRequest request) {
+        User user = (User) request.getAttribute("currentUser");
+        Map<String, Object> result = chatHistoryService.loadChatSummaries(user.getId());
+        result.put("success", true);
+        return result;
+    }
+
+    /**
+     * 保存当前用户的会话历史（增量合并：可只上传已加载的部分会话）
+     * 请求体格式: { "lastChatId": "xxx", "chats": {...}, "chatMeta": {...}, "deletedChatIds": [...] }
      */
     @PostMapping("/chat/history")
     public Map<String, Object> saveChatHistory(@RequestBody Map<String, Object> body,

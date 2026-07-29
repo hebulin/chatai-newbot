@@ -61,6 +61,18 @@ const routes = [
         name: 'Settings',
         component: () => import('@/views/admin/Settings.vue'),
         meta: { title: '系统设置' }
+      },
+      {
+        path: 'websearch',
+        name: 'WebSearch',
+        component: () => import('@/views/admin/WebSearch.vue'),
+        meta: { title: '联网功能配置' }
+      },
+      {
+        path: 'announcements',
+        name: 'Announcements',
+        component: () => import('@/views/admin/Announcements.vue'),
+        meta: { title: '系统公告管理' }
       }
     ]
   }

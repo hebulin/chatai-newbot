@@ -5,9 +5,14 @@ export function fetchModels() {
   return request.get('/models')
 }
 
-// 获取会话历史
+// 获取会话历史（全量，含消息内容；仅导出备份等场景使用）
 export function loadChatHistory() {
   return request.get('/chat/history')
+}
+
+// 获取会话摘要列表（仅标题/预览/时间/条数，懒加载模式的首屏拉取）
+export function loadChatSummaries() {
+  return request.get('/chat/history/summary')
 }
 
 // 保存会话历史

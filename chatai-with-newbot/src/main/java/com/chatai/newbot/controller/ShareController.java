@@ -9,7 +9,9 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -31,14 +33,30 @@ public class ShareController {
     }
 
     /**
-     * 获取当前用户创建的所有分享记录
+     * 获取当前用户创建的所有分享记录，附带失效状态判定（口径与后台分享管理一致）
+     * status: valid=有效 expired=已过期 orphaned=源会话已被删除
      */
     @GetMapping
     public Map<String, Object> list(HttpServletRequest request) {
         User user = (User) request.getAttribute("currentUser");
         Map<String, Object> result = new HashMap<>();
+        // 只涉及当前用户，会话历史加载一次即可
+        Object chats = chatHistoryService.loadChatHistory(user.getId()).get("chats");
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (ChatShare s : storageManager.getChatSharesByUser(user.getId())) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", s.getId());
+            item.put("chatId", s.getChatId());
+            item.put("userId", s.getUserId());
+            item.put("userName", s.getUserName());
+            item.put("title", s.getTitle());
+            item.put("createdAt", s.getCreatedAt());
+            item.put("expiresAt", s.getExpiresAt());
+            item.put("status", resolveShareStatus(s, chats));
+            list.add(item);
+        }
         result.put("success", true);
-        result.put("data", storageManager.getChatSharesByUser(user.getId()));
+        result.put("data", list);
         return result;
     }
 
@@ -123,6 +141,32 @@ public class ShareController {
     }
 
     /**
+     * 批量删除当前用户自己的分享（清除失效/批量撤销）。请求体: {"ids": ["..."]}
+     */
+    @PostMapping("/batch-delete")
+    public Map<String, Object> batchDelete(@RequestBody Map<String, Object> body, HttpServletRequest request) {
+        User user = (User) request.getAttribute("currentUser");
+        Map<String, Object> result = new HashMap<>();
+        Object idsObj = body == null ? null : body.get("ids");
+        if (!(idsObj instanceof List<?> ids) || ids.isEmpty()) {
+            result.put("success", false);
+            result.put("message", "请指定要删除的分享");
+            return result;
+        }
+        int deleted = 0;
+        for (Object idObj : ids) {
+            if (!(idObj instanceof String id) || id.isEmpty()) continue;
+            ChatShare share = storageManager.getChatShareById(id);
+            // 仅允许删除自己创建的分享
+            if (share == null || !user.getId().equals(share.getUserId())) continue;
+            if (storageManager.deleteChatShare(id)) deleted++;
+        }
+        result.put("success", true);
+        result.put("deleted", deleted);
+        return result;
+    }
+
+    /**
      * 匿名查看分享的会话内容（只读，无需登录）
      */
     @GetMapping("/view/{id}")
@@ -137,18 +181,10 @@ public class ShareController {
         }
 
         // 过期校验：expiresAt 非空且已过期则拒绝访问
-        if (share.getExpiresAt() != null && !share.getExpiresAt().isEmpty()) {
-            try {
-                LocalDateTime expiry = LocalDateTime.parse(share.getExpiresAt(),
-                        DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
-                if (LocalDateTime.now().isAfter(expiry)) {
-                    result.put("success", false);
-                    result.put("message", "分享链接已过期");
-                    return result;
-                }
-            } catch (Exception ignore) {
-                // 时间解析失败视为未设置过期，不阻断访问
-            }
+        if (isExpired(share.getExpiresAt())) {
+            result.put("success", false);
+            result.put("message", "分享链接已过期");
+            return result;
         }
 
         List<Map<String, Object>> messages = extractChatMessages(share.getUserId(), share.getChatId());
@@ -165,6 +201,30 @@ public class ShareController {
         result.put("expiresAt", share.getExpiresAt());
         result.put("messages", messages);
         return result;
+    }
+
+    /**
+     * 判断过期时间是否已到期（空/解析失败视为未设置过期）
+     */
+    private boolean isExpired(String expiresAt) {
+        if (expiresAt == null || expiresAt.isEmpty()) return false;
+        try {
+            LocalDateTime expiry = LocalDateTime.parse(expiresAt, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+            return LocalDateTime.now().isAfter(expiry);
+        } catch (Exception ignore) {
+            return false;
+        }
+    }
+
+    /**
+     * 判定分享状态：已过期 > 源会话已删 > 有效（与后台分享管理口径一致）
+     */
+    private String resolveShareStatus(ChatShare s, Object chats) {
+        if (isExpired(s.getExpiresAt())) return "expired";
+        if (!(chats instanceof Map) || !(((Map<?, ?>) chats).get(s.getChatId()) instanceof List)) {
+            return "orphaned";
+        }
+        return "valid";
     }
 
     /**

@@ -1,8 +1,13 @@
 import request from './request'
 
-// 获取我创建的分享列表
+// 获取我创建的分享列表（含失效状态 status: valid/expired/orphaned）
 export function getMyShares() {
   return request.get('/share')
+}
+
+// 批量删除我自己的分享（清除失效/批量撤销）
+export function batchDeleteMyShares(ids) {
+  return request.post('/share/batch-delete', { ids })
 }
 
 // 为指定会话创建分享（同一会话复用已有分享码）
