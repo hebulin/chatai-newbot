@@ -132,20 +132,22 @@
           </template>
         </el-form-item>
         <el-form-item label="每日限额">
-          <div style="display:flex;gap:8px;width:100%;">
-            <el-select v-model="editForm.dailyLimitType" style="width:130px;" @change="onLimitTypeChange">
-              <el-option label="不单独限制" value="" />
-              <el-option label="每日次数" value="count" />
-              <el-option label="每日Token量" value="token" />
-            </el-select>
+          <el-select v-model="editForm.dailyLimitType" style="width:100%;" @change="onLimitTypeChange">
+            <el-option label="不单独限制" value="" />
+            <el-option label="每日次数" value="count" />
+            <el-option label="每日Token量" value="token" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="editForm.dailyLimitType" label="参数设置">
+          <div style="display:flex;align-items:center;gap:8px;width:100%;">
             <el-input-number
-              v-if="editForm.dailyLimitType"
               v-model="editForm.dailyLimitValue"
               :min="1"
               :max="editForm.dailyLimitType === 'token' ? 100000000 : 100000"
               :step="editForm.dailyLimitType === 'token' ? 1000 : 10"
               style="flex:1;"
             />
+            <span style="flex-shrink:0;color:var(--ink-2);font-size:13px;">{{ editForm.dailyLimitType === 'token' ? 'Token/日' : '次/日' }}</span>
           </div>
         </el-form-item>
         <el-form-item v-if="editForm.username !== 'admin'" label=" ">
