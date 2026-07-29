@@ -1476,6 +1476,30 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
     transform: translateY(-1px);
 }
 
+/* 长会话按需渲染：加载更早消息按钮 */
+.load-earlier {
+    display: flex;
+    justify-content: center;
+    padding: 10px 0 4px;
+}
+.load-earlier-btn {
+    padding: 6px 16px;
+    font-size: 12px;
+    color: var(--fg-3);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    cursor: pointer;
+    transition: all 0.2s var(--ease);
+    letter-spacing: 0.02em;
+    box-shadow: var(--shadow-sm);
+}
+.load-earlier-btn:hover {
+    color: var(--primary);
+    border-color: var(--primary);
+    background: var(--primary-soft);
+}
+
 /* ============================================
    INPUT AREA
    ============================================ */
@@ -1782,6 +1806,22 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
 .model-select-popper-mobile .el-select-dropdown__item.is-selected {
     color: var(--primary);
     font-weight: 500;
+}
+
+/* 智能体/角色下拉：分组标题（内置智能体 / 我的提示词）+ 限高滚动 */
+.role-preset-menu {
+    max-height: 60vh;
+    overflow-y: auto;
+}
+.role-preset-group-title {
+    list-style: none;
+    padding: 8px 16px 4px;
+    font-size: 11px;
+    color: var(--fg-4);
+    letter-spacing: 0.04em;
+    user-select: none;
+    border-top: 1px solid var(--border);
+    margin-top: 4px;
 }
 
 /* Send button */

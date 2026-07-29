@@ -961,6 +961,20 @@ marked.use({
   }
 })
 
+// 链接统一新标签页打开：marked 渲染的 <a> 默认在当前页跳转，会顶掉聊天页面。
+// 在 DOMPurify 清洗后阶段统一补 target/rel，同时覆盖 markdown 链接与 AI 输出的裸 HTML 链接；
+// 页内锚点（#开头）不处理
+
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  if (node.tagName === 'A') {
+    const href = node.getAttribute('href') || ''
+    if (href && !href.startsWith('#')) {
+      node.setAttribute('target', '_blank')
+      node.setAttribute('rel', 'noopener noreferrer')
+    }
+  }
+})
+
 export function escapeHtml(str) {
   const div = document.createElement('div')
   div.textContent = str

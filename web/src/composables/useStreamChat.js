@@ -85,7 +85,7 @@ export function useStreamChat() {
             try {
               const json = JSON.parse(remaining)
               if (json.error) {
-                answerContent.value += '\n\n**错误:** ' + (json.error.message || '未知错误')
+                error.value = json.error.message || '未知错误'
               }
             } catch (e) { /* skip */ }
           }
@@ -96,7 +96,8 @@ export function useStreamChat() {
             content: answerContent.value,
             reasoning_content: thinkingContent.value,
             thinkingTime: thinkingTime.value,
-            usage: usage.value
+            usage: usage.value,
+            error: error.value
           })
           return
         }
@@ -118,8 +119,8 @@ export function useStreamChat() {
             try {
               const json = JSON.parse(payload)
               if (json.error) {
-                answerContent.value += '\n\n**错误:** ' + (json.error.message || '未知错误')
-                updated = true
+                // 流内错误不再拼接到正文，统一由 onDone 带出后渲染为错误气泡
+                error.value = json.error.message || '未知错误'
                 continue
               }
               // 提取usage数据

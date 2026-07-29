@@ -47,8 +47,12 @@
     <main class="main-content" :class="{ 'sidebar-collapsed': sidebarCollapsed && !isMobile }">
       <div class="chat-viewport">
         <div class="chat-container" ref="chatContainerRef">
+          <!-- 长会话性能：默认只渲染最近一窗口消息，更早的按需展开 -->
+          <div v-if="hiddenCount > 0" class="load-earlier">
+            <button class="load-earlier-btn" @click="loadEarlier">加载更早消息（还有 {{ hiddenCount }} 条）</button>
+          </div>
           <ChatMessages
-            :messages="chatStore.currentMessages"
+            :messages="displayMessages"
             :is-streaming="streamChat.isStreaming.value"
             :streaming-msg="streamingMsg"
             @copy="copyMsgContent"
@@ -106,7 +110,7 @@ import { useStreamChat } from '@/composables/useStreamChat'
 import { useScrollFollow } from '@/composables/useScrollFollow'
 import { useTheme } from '@/composables/useTheme'
 import { logout as apiLogout } from '@/api/auth'
-import { saveChatHistory, generateChatTitle } from '@/api/chat'
+import { saveChatHistory, generateChatTitle, fetchAnnouncement } from '@/api/chat'
 import { createShare } from '@/api/share'
 import ChatSidebar from '@/components/chat/ChatSidebar.vue'
 import ChatMessages from '@/components/chat/ChatMessages.vue'
@@ -134,10 +138,35 @@ const showAbout = ref(false)
 const showStats = ref(false)
 const lightboxSrc = ref(null)
 const isDeepThinking = ref(false)
+// 本轮对话是否开启联网搜索（重新生成/编辑重发时沿用上次选择）
+const isWebSearch = ref(false)
 const pendingImages = ref([])
 
 const streamingMsg = ref(null)
 const syncTipVisible = ref(false)
+
+// ===== 长会话渲染窗口：默认只渲染最近 50 条，点“加载更早消息”每次再展开 100 条 =====
+const RENDER_WINDOW = 50
+const RENDER_BATCH = 100
+const visibleCount = ref(RENDER_WINDOW)
+const hiddenCount = computed(() => Math.max(0, chatStore.currentMessages.length - visibleCount.value))
+const displayMessages = computed(() => {
+  const msgs = chatStore.currentMessages
+  return hiddenCount.value > 0 ? msgs.slice(hiddenCount.value) : msgs
+})
+
+// 切换/新建会话时重置渲染窗口
+watch(() => chatStore.currentChatId, () => { visibleCount.value = RENDER_WINDOW })
+
+// 展开更早消息并保持当前阅读位置（补齐新增内容的高度差）
+async function loadEarlier() {
+  const el = chatContainerRef.value
+  const prevHeight = el ? el.scrollHeight : 0
+  const prevTop = el ? el.scrollTop : 0
+  visibleCount.value += RENDER_BATCH
+  await nextTick()
+  if (el) el.scrollTop = prevTop + (el.scrollHeight - prevHeight)
+}
 
 const brandIconSrc = computed(() => {
   const theme = getTheme()
@@ -172,12 +201,33 @@ onMounted(async () => {
   setTimeout(() => scrollFollow.requestScrollToBottom(), 300)
 
   window.addEventListener('resize', handleResize)
+
+  // 拉取系统公告（异步不阻塞首屏，同一公告只弹一次）
+  checkAnnouncement()
 })
 
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
   scrollFollow.unbindEvents()
 })
+
+// 拉取公告并弹窗展示：用 localStorage 记录已读的更新时间，公告重新发布后会再次提醒
+async function checkAnnouncement() {
+  try {
+    const res = await fetchAnnouncement()
+    const content = ((res && res.content) || '').trim()
+    const updatedAt = (res && res.updatedAt) || ''
+    if (!content) return
+    const readAt = localStorage.getItem('announcement_read_at')
+    if (readAt && readAt === updatedAt) return
+    await ElMessageBox.alert(content, '📢 系统公告', {
+      confirmButtonText: '我知道了',
+      dangerouslyUseHTMLString: false,
+      customStyle: { whiteSpace: 'pre-wrap', maxWidth: '520px' }
+    }).catch(() => {})
+    localStorage.setItem('announcement_read_at', updatedAt)
+  } catch (e) { /* 公告拉取失败不影响聊天 */ }
+}
 
 function handleResize() {
   isMobile.value = window.innerWidth <= 768
@@ -303,7 +353,7 @@ async function handleLogout() {
   } catch (e) { /* cancelled */ }
 }
 
-async function handleSend({ text, images, attachments, deepThinking }) {
+async function handleSend({ text, images, attachments, deepThinking, webSearch }) {
   if (streamChat.isStreaming.value) {
     ElMessage.warning('当前还有内容没回答完，请点击右侧停止按钮中断')
     return
@@ -315,6 +365,7 @@ async function handleSend({ text, images, attachments, deepThinking }) {
   }
 
   isDeepThinking.value = deepThinking
+  isWebSearch.value = !!webSearch
   const chatId = chatStore.currentChatId
 
   // 挂起全量同步：发送阶段只做当前会话同步，全量上传延后到 bot 输出结束
@@ -367,7 +418,7 @@ async function startStream(chatId, deepThinking) {
     if (source[i].role === 'divider') { startIdx = i + 1; break }
   }
   const messages = source.slice(startIdx)
-    .filter(m => m.role === 'user' || (m.role === 'assistant' && m.content && m.content.trim()))
+    .filter(m => m.role === 'user' || (m.role === 'assistant' && !m.isError && m.content && m.content.trim()))
     .map(m => {
       const base = { role: m.role, content: m.content }
       if (m.role === 'user') {
@@ -383,6 +434,9 @@ async function startStream(chatId, deepThinking) {
     messages,
     stream: true,
     deepThinking,
+    webSearch: isWebSearch.value,
+    // 会话绑定的角色提示词预设（后端优先于全局启用的预设）
+    promptPresetId: (chatStore.chatMeta[chatId] || {}).promptPresetId || '',
     temperature: 0.7
   }
 
@@ -401,6 +455,17 @@ async function startStream(chatId, deepThinking) {
       scrollFollow.syncScrollToBottom()
     },
     onDone: (data) => {
+      // 无任何正文且存在错误：只落一条错误气泡，不保存空回答
+      const hasContent = !!(data.content && data.content.trim())
+      if (!hasContent && !data.reasoning_content && data.error) {
+        chatStore.addMessage(chatId, makeErrorMsg(data.error))
+        streamingMsg.value = null
+        nextTick(() => {
+          scrollFollow.syncScrollToBottom()
+          scrollFollow.updateNavButtons()
+        })
+        return
+      }
       const content = data.content || (data.interrupted ? '（回答已中断）' : '（无正式回答）')
       const msg = {
         role: 'assistant',
@@ -437,6 +502,10 @@ async function startStream(chatId, deepThinking) {
         }
       }
       chatStore.addMessage(chatId, msg)
+      // 流中途出错（已有部分正文/思考）：正文后追加一条错误气泡
+      if (data.error) {
+        chatStore.addMessage(chatId, makeErrorMsg(data.error))
+      }
       streamingMsg.value = null
       // 首次问答完成后尝试 AI 自动命名（未手动命名时）
       maybeGenerateTitle(chatId)
@@ -446,11 +515,21 @@ async function startStream(chatId, deepThinking) {
       })
     },
     onError: (err) => {
-      const msg = { role: 'assistant', content: '❌ ' + err.message, time: nowStr() }
-      chatStore.addMessage(chatId, msg)
+      chatStore.addMessage(chatId, makeErrorMsg(err.message))
       streamingMsg.value = null
     }
   })
+}
+
+// 统一的错误气泡消息：请求失败/流内错误都以此样式展示，与正常回答区分
+function makeErrorMsg(text) {
+  return {
+    role: 'assistant',
+    content: text || '未知错误',
+    isError: true,
+    time: nowStr(),
+    modelName: modelsStore.currentModelName
+  }
 }
 
 function handleStop() {
@@ -489,7 +568,7 @@ async function handleClearContext() {
 async function maybeGenerateTitle(chatId) {
   const msgs = chatStore.chats[chatId] || []
   const userMsgs = msgs.filter(m => m.role === 'user')
-  const assistantMsgs = msgs.filter(m => m.role === 'assistant' && m.content && !m.interrupted)
+  const assistantMsgs = msgs.filter(m => m.role === 'assistant' && m.content && !m.interrupted && !m.isError)
   if (userMsgs.length !== 1 || assistantMsgs.length < 1) return
   const meta = chatStore.chatMeta[chatId] || {}
   if (meta.title && meta.title.trim()) return
@@ -503,6 +582,8 @@ async function maybeGenerateTitle(chatId) {
 
 // 重新生成：删除最后一条 AI 回复，基于其前的历史重新请求
 async function handleRegenerate(idx) {
+  // 渲染窗口裁剪后，子组件回传的是展示列表下标，需换算回完整列表下标
+  idx += hiddenCount.value
   if (streamChat.isStreaming.value) {
     ElMessage.warning('请等待回答完成')
     return
@@ -525,6 +606,8 @@ async function handleRegenerate(idx) {
 
 // 编辑重发：弹窗编辑用户消息，删除该消息及其后所有消息后重新发送
 async function handleEditResend(idx) {
+  // 同样需将展示列表下标换算回完整列表下标
+  idx += hiddenCount.value
   if (streamChat.isStreaming.value) {
     ElMessage.warning('请等待回答完成')
     return

@@ -148,6 +148,24 @@ public class ChatController {
         result.put("success", true);
         result.put("data", modelList);
         result.put("defaultModelId", storageService.getDefaultModelId());
+        // 联网搜索能力：全局开启且已配置 Key 时，聊天输入框才展示“联网”开关
+        result.put("webSearchEnabled", storageService.getWebSearchEnabled()
+                && storageService.getTavilyApiKey() != null && !storageService.getTavilyApiKey().trim().isEmpty());
+        return result;
+    }
+
+    /**
+     * 获取系统公告（登录用户可见）
+     * 返回: { "success": true, "content": "...", "updatedAt": "2026-07-29 10:00:00" }，无公告时 content 为空串
+     */
+    @GetMapping("/announcement")
+    public Map<String, Object> getAnnouncement() {
+        Map<String, Object> result = new HashMap<>();
+        String content = storageService.getAnnouncement();
+        String updatedAt = storageService.getAnnouncementUpdatedAt();
+        result.put("success", true);
+        result.put("content", content == null ? "" : content);
+        result.put("updatedAt", updatedAt == null ? "" : updatedAt);
         return result;
     }
 
@@ -290,7 +308,7 @@ public class ChatController {
     /**
      * 获取当前登录用户的提示词预设列表。
      * 兼容旧版：若预设为空但存在旧的单条 systemPrompt，则自动迁移为一条启用的预设。
-     * @return { "success": true, "presets": [ { id, title, content, enabled } ] }
+     * @return { "success": true, "presets": [ { id, title, content, enabled } ], "builtinAgents": [...] }
      */
     @GetMapping("/user/prompt-presets")
     public Map<String, Object> getPromptPresets(HttpServletRequest request) {
@@ -315,6 +333,8 @@ public class ChatController {
         }
         result.put("success", true);
         result.put("presets", presets);
+        // 内置智能体：系统预设角色，所有用户可用，不可编辑、不占个人预设配额
+        result.put("builtinAgents", com.chatai.newbot.service.BuiltinAgents.list());
         return result;
     }
 
@@ -357,6 +377,8 @@ public class ChatController {
                 if (enabled) enabledUsed = true;
                 PromptPreset p = new PromptPreset();
                 String id = m.get("id") instanceof String s ? s.trim() : "";
+                // 禁止占用内置智能体 ID 前缀，避免与系统预设角色冲突
+                if (id.startsWith("builtin-")) id = "";
                 p.setId(id.isEmpty() ? UUID.randomUUID().toString() : id);
                 p.setTitle(title);
                 p.setContent(content);

@@ -5,6 +5,7 @@ import com.chatai.newbot.service.ChatHistoryService;
 import com.chatai.newbot.service.PasswordHasher;
 import com.chatai.newbot.service.StorageManager;
 import com.chatai.newbot.service.UnifiedChatService;
+import com.chatai.newbot.service.WebSearchService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
@@ -25,12 +26,14 @@ public class AdminController {
     private final StorageManager storageService;
     private final UnifiedChatService unifiedChatService;
     private final ChatHistoryService chatHistoryService;
+    private final WebSearchService webSearchService;
 
     public AdminController(StorageManager storageService, UnifiedChatService unifiedChatService,
-                           ChatHistoryService chatHistoryService) {
+                           ChatHistoryService chatHistoryService, WebSearchService webSearchService) {
         this.storageService = storageService;
         this.unifiedChatService = unifiedChatService;
         this.chatHistoryService = chatHistoryService;
+        this.webSearchService = webSearchService;
     }
 
     private boolean checkAdmin(HttpServletRequest request, HttpServletResponse response) {
@@ -895,6 +898,157 @@ public class AdminController {
             result.put("message", limit == 0 ? "已取消每日调用限制" : "每日调用上限已设为 " + limit + " 次");
         } catch (Exception e) {
             log.error("保存配额设置失败", e);
+            result.put("success", false);
+            result.put("message", "保存失败: " + e.getMessage());
+        }
+        return result;
+    }
+
+    // ========== 系统设置（联网搜索 Tavily） ==========
+
+    /**
+     * 获取联网搜索设置（API Key 仅返回掩码）
+     * 返回: { "success": true, "data": { "enabled": true, "apiKeyMasked": "tvly-****Cn5", "hasKey": true } }
+     */
+    @GetMapping("/settings/websearch")
+    public Map<String, Object> getWebSearchSettings(HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        String apiKey = storageService.getTavilyApiKey();
+        boolean hasKey = apiKey != null && !apiKey.trim().isEmpty();
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("enabled", storageService.getWebSearchEnabled());
+        data.put("hasKey", hasKey);
+        data.put("apiKeyMasked", hasKey ? maskKey(apiKey.trim()) : "");
+        result.put("success", true);
+        result.put("data", data);
+        return result;
+    }
+
+    /**
+     * 保存联网搜索设置
+     * 请求体: { "enabled": true, "apiKey": "tvly-xxx" }（apiKey 为空或含 * 时保留原 Key）
+     */
+    @PutMapping("/settings/websearch")
+    public Map<String, Object> setWebSearchSettings(@RequestBody Map<String, Object> body,
+                                                    HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        try {
+            // API Key：为空或掩码值（含*）时保留原 Key，与模型管理的 Key 更新策略一致
+            Object rawKey = body == null ? null : body.get("apiKey");
+            if (rawKey instanceof String s && !s.trim().isEmpty() && !s.contains("*")) {
+                storageService.setTavilyApiKey(s.trim());
+            }
+            Object rawEnabled = body == null ? null : body.get("enabled");
+            if (rawEnabled instanceof Boolean b) {
+                // 开启前校验已配置 Key，避免前台开关开了但实际不可用
+                String key = storageService.getTavilyApiKey();
+                if (b && (key == null || key.trim().isEmpty())) {
+                    result.put("success", false);
+                    result.put("message", "请先配置 Tavily API Key 再开启联网搜索");
+                    return result;
+                }
+                storageService.setWebSearchEnabled(b);
+            }
+            result.put("success", true);
+            result.put("message", "联网搜索设置已保存");
+        } catch (Exception e) {
+            log.error("保存联网搜索设置失败", e);
+            result.put("success", false);
+            result.put("message", "保存失败: " + e.getMessage());
+        }
+        return result;
+    }
+
+    /**
+     * Tavily 连通性测试：用请求体中的 Key（或已保存的 Key）发一次最小检索
+     * 请求体: { "apiKey": "tvly-xxx" }（可空/掩码，空时用已保存的 Key）
+     */
+    @PostMapping("/settings/websearch/test")
+    public Map<String, Object> testWebSearch(@RequestBody(required = false) Map<String, Object> body,
+                                             HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        String apiKey = null;
+        Object rawKey = body == null ? null : body.get("apiKey");
+        if (rawKey instanceof String s && !s.trim().isEmpty() && !s.contains("*")) {
+            apiKey = s.trim();
+        } else {
+            apiKey = storageService.getTavilyApiKey();
+        }
+        return webSearchService.testConnection(apiKey);
+    }
+
+    /** API Key 掩码：保留前 5 后 3 位，中间用 * 代替 */
+    private String maskKey(String key) {
+        if (key.length() <= 8) {
+            return "****";
+        }
+        return key.substring(0, 5) + "****" + key.substring(key.length() - 3);
+    }
+
+    // ========== 系统设置（公告） ==========
+
+    /**
+     * 获取公告设置
+     * 返回: { "success": true, "data": { "content": "...", "updatedAt": "2026-07-29 10:00:00" } }
+     */
+    @GetMapping("/settings/announcement")
+    public Map<String, Object> getAnnouncement(HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("content", storageService.getAnnouncement() == null ? "" : storageService.getAnnouncement());
+        data.put("updatedAt", storageService.getAnnouncementUpdatedAt() == null ? "" : storageService.getAnnouncementUpdatedAt());
+        result.put("success", true);
+        result.put("data", data);
+        return result;
+    }
+
+    /**
+     * 保存公告设置（内容传空则清除公告）
+     * 请求体: { "content": "公告正文" }
+     */
+    @PutMapping("/settings/announcement")
+    public Map<String, Object> setAnnouncement(@RequestBody Map<String, Object> body,
+                                               HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        try {
+            Object raw = body == null ? null : body.get("content");
+            String content = raw instanceof String s ? s : "";
+            if (content.length() > 5000) {
+                result.put("success", false);
+                result.put("message", "公告内容不能超过 5000 字符");
+                return result;
+            }
+            storageService.setAnnouncement(content);
+            result.put("success", true);
+            result.put("message", content.trim().isEmpty() ? "公告已清除" : "公告已发布");
+            result.put("updatedAt", storageService.getAnnouncementUpdatedAt());
+        } catch (Exception e) {
+            log.error("保存公告失败", e);
             result.put("success", false);
             result.put("message", "保存失败: " + e.getMessage());
         }

@@ -30,6 +30,11 @@ export function generateChatTitle(modelConfigId, userContent, assistantContent) 
   return request.post('/chat/generate-title', { modelConfigId, userContent, assistantContent })
 }
 
+// 获取系统公告（登录用户可见）
+export function fetchAnnouncement() {
+  return request.get('/announcement')
+}
+
 // 上传聊天图片（返回服务端文件 URL，替代 base64 内嵌）
 export function uploadChatImage(file) {
   const formData = new FormData()

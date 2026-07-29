@@ -43,6 +43,29 @@
             <img :src="thinkIconSrc" style="width:14px;height:14px;" />
           </div>
           <span v-if="supportsThinking" class="toolbar-divider"></span>
+          <div v-if="modelsStore.webSearchEnabled" class="think-icon-btn" :class="{ active: webSearch }" @click="webSearch = !webSearch" :title="webSearch ? '联网搜索：已开启（回答前先检索实时网络信息）' : '联网搜索：已关闭'">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          </div>
+          <span v-if="modelsStore.webSearchEnabled" class="toolbar-divider"></span>
+          <el-dropdown v-if="allRolePresets.length" trigger="click" placement="top-start" @command="selectRolePreset">
+            <div class="think-icon-btn" :class="{ active: !!boundPresetId }" :title="boundPresetTitle ? '角色：' + boundPresetTitle + '（仅对当前会话生效）' : '选择智能体/角色（仅对当前会话生效）'">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V5"/><circle cx="12" cy="4" r="1"/><circle cx="9" cy="13" r="1"/><circle cx="15" cy="13" r="1"/><path d="M9 17h6"/></svg>
+            </div>
+            <template #dropdown>
+              <el-dropdown-menu class="role-preset-menu">
+                <el-dropdown-item command="" :disabled="!boundPresetId">默认（跟随全局提示词）</el-dropdown-item>
+                <template v-if="builtinAgents.length">
+                  <li class="role-preset-group-title">内置智能体</li>
+                  <el-dropdown-item v-for="p in builtinAgents" :key="p.id" :command="p.id" :disabled="p.id === boundPresetId">{{ p.title }}</el-dropdown-item>
+                </template>
+                <template v-if="rolePresets.length">
+                  <li class="role-preset-group-title">我的提示词</li>
+                  <el-dropdown-item v-for="p in rolePresets" :key="p.id" :command="p.id" :disabled="p.id === boundPresetId">{{ p.title }}</el-dropdown-item>
+                </template>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <span v-if="allRolePresets.length" class="toolbar-divider"></span>
           <div class="upload-image-btn" title="上传图片" @click="triggerUpload">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
           </div>
@@ -112,10 +135,12 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useModelsStore } from '@/stores/models'
+import { useChatStore } from '@/stores/chat'
 import { useTheme } from '@/composables/useTheme'
 import { ElMessage, ElNotification } from 'element-plus'
 import { APP_VERSION } from '@/config/version'
 import { uploadChatImage, uploadChatDocument } from '@/api/chat'
+import { getPromptPresets } from '@/api/user'
 
 const props = defineProps({
   isStreaming: { type: Boolean, default: false },
@@ -126,10 +151,12 @@ const props = defineProps({
 const emit = defineEmits(['send', 'stop', 'clear-context'])
 
 const modelsStore = useModelsStore()
+const chatStore = useChatStore()
 const { getTheme } = useTheme()
 
 const inputText = ref('')
 const deepThinking = ref(false)
+const webSearch = ref(false)
 const pendingImages = ref([])
 const pendingFiles = ref([]) // 待发送附件文档：{ name, url, chars, uploading }
 const pasteWarning = ref('')
@@ -170,6 +197,42 @@ onBeforeUnmount(() => {
 const thinkIconSrc = computed(() => {
   return getTheme() === 'dark' ? '/icons/icon_深度思考_ss.svg' : '/icons/icon_深度思考.svg'
 })
+
+// ===== 智能体/角色（提示词预设按会话绑定）=====
+const rolePresets = ref([])
+const builtinAgents = ref([])
+onMounted(async () => {
+  try {
+    const data = await getPromptPresets()
+    if (data && data.success) {
+      rolePresets.value = data.presets || []
+      builtinAgents.value = data.builtinAgents || []
+    }
+  } catch (e) { /* 未加载到预设时隐藏角色入口即可 */ }
+})
+
+// 内置智能体 + 用户自定义预设的合并列表（用于入口显隐与标题查找）
+const allRolePresets = computed(() => [...builtinAgents.value, ...rolePresets.value])
+
+// 当前会话绑定的预设 ID（存于 chatMeta，随会话历史同步）
+const boundPresetId = computed(() => {
+  const meta = chatStore.chatMeta[chatStore.currentChatId] || {}
+  return meta.promptPresetId || ''
+})
+const boundPresetTitle = computed(() => {
+  const p = allRolePresets.value.find(p => p.id === boundPresetId.value)
+  return p ? p.title : ''
+})
+
+function selectRolePreset(presetId) {
+  chatStore.setChatPromptPreset(chatStore.currentChatId, presetId)
+  if (presetId) {
+    const p = allRolePresets.value.find(p => p.id === presetId)
+    ElMessage.success('当前会话已绑定角色：' + (p ? p.title : ''))
+  } else {
+    ElMessage.success('已恢复默认提示词')
+  }
+}
 
 // ===== 模型级联选择器 =====
 const cascaderValue = ref([])
@@ -362,7 +425,8 @@ function doSend() {
     text,
     images: pendingImages.value.slice(),
     attachments: pendingFiles.value.map(f => ({ name: f.name, url: f.url })),
-    deepThinking: deepThinking.value
+    deepThinking: deepThinking.value,
+    webSearch: webSearch.value
   })
   inputText.value = ''
   pendingImages.value = []
@@ -421,12 +485,14 @@ function handleFileUpload(e) {
 
 // 上传图片到服务端，成功后以文件 URL 加入待发送列表（替代原 base64 内嵌）
 async function addImageFile(file) {
-  if (file.size > MAX_IMAGE_SIZE) {
+  // 先尝试前端压缩，降低上传体积与模型多模态 token 消耗
+  const compressed = await compressImage(file)
+  if (compressed.size > MAX_IMAGE_SIZE) {
     ElMessage.warning('图片超过5MB限制')
     return
   }
   try {
-    const res = await uploadChatImage(file)
+    const res = await uploadChatImage(compressed)
     if (res && res.success) {
       if (!props.supportsMultimodal) {
         pasteWarning.value = '当前模型不支持图像理解，请切换支持多模态的模型或删除图片'
@@ -437,6 +503,38 @@ async function addImageFile(file) {
     }
   } catch (e) {
     // 错误提示已由 request 拦截器统一处理
+  }
+}
+
+// 压缩阈值：小于 300KB 的图直接上传，长边超过 2048px 的图等比缩小
+const COMPRESS_SIZE_THRESHOLD = 300 * 1024
+const COMPRESS_MAX_EDGE = 2048
+
+// canvas 压缩图片：转 JPEG(0.85) 并限制长边；GIF/SVG 不压缩（保动图/矢量），
+// 压缩失败或压后反而变大时回退原图
+async function compressImage(file) {
+  if (file.size <= COMPRESS_SIZE_THRESHOLD) return file
+  if (/gif|svg/i.test(file.type)) return file
+  try {
+    const bitmap = await createImageBitmap(file)
+    const scale = Math.min(1, COMPRESS_MAX_EDGE / Math.max(bitmap.width, bitmap.height))
+    const w = Math.max(1, Math.round(bitmap.width * scale))
+    const h = Math.max(1, Math.round(bitmap.height * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = w
+    canvas.height = h
+    const ctx = canvas.getContext('2d')
+    // JPEG 无透明通道，先铺白底避免 PNG 透明区域变黑
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, w, h)
+    ctx.drawImage(bitmap, 0, 0, w, h)
+    bitmap.close()
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.85))
+    if (!blob || blob.size >= file.size) return file
+    const newName = file.name.replace(/\.[^.]+$/, '') + '.jpg'
+    return new File([blob], newName, { type: 'image/jpeg' })
+  } catch (e) {
+    return file
   }
 }
 

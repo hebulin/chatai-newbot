@@ -289,6 +289,50 @@ export const useChatStore = defineStore('chat', () => {
     a.click()
   }
 
+  // 全量 JSON 备份：导出会话内容与元信息，可用于跨账号/跨部署迁移后导回
+  function exportChatsJson() {
+    const data = {
+      app: 'chatai-newbot',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      chats: chats.value,
+      chatMeta: chatMeta.value
+    }
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = 'chat-backup-' + new Date().toISOString().slice(0, 10) + '.json'
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
+
+  // 导入 JSON 备份：按会话 ID 合并，已存在的会话跳过不覆盖；返回 { imported, skipped }
+  function importChatsJson(data) {
+    if (!data || typeof data !== 'object' || !data.chats || typeof data.chats !== 'object') {
+      throw new Error('备份文件格式不正确（缺少 chats 字段）')
+    }
+    let imported = 0
+    let skipped = 0
+    const srcMeta = (data.chatMeta && typeof data.chatMeta === 'object') ? data.chatMeta : {}
+    Object.keys(data.chats).forEach(id => {
+      const msgs = data.chats[id]
+      if (!Array.isArray(msgs)) { skipped++; return }
+      const existing = chats.value[id]
+      // 已有同 ID 且有内容的会话不覆盖，避免导入旧备份丢失新消息
+      if (existing && existing.length > 0) { skipped++; return }
+      chats.value[id] = msgs
+      if (srcMeta[id] && typeof srcMeta[id] === 'object') {
+        chatMeta.value[id] = { ...srcMeta[id] }
+      }
+      // 从删除列表移除，防止服务端将导入的会话当作已删除而丢弃
+      const delIdx = deletedChatIds.value.indexOf(id)
+      if (delIdx >= 0) deletedChatIds.value.splice(delIdx, 1)
+      imported++
+    })
+    if (imported > 0) syncToServer()
+    return { imported, skipped }
+  }
+
   function countValidChats() {
     let count = 0
     Object.keys(chats.value).forEach(id => {
@@ -314,6 +358,18 @@ export const useChatStore = defineStore('chat', () => {
       meta.title = t
     } else {
       delete meta.title
+    }
+    chatMeta.value[id] = { ...meta }
+    syncToServer()
+  }
+
+  // 绑定/解绑会话的角色提示词预设（presetId 为空则恢复默认，跟随全局提示词设置）
+  function setChatPromptPreset(id, presetId) {
+    const meta = chatMeta.value[id] || {}
+    if (presetId) {
+      meta.promptPresetId = presetId
+    } else {
+      delete meta.promptPresetId
     }
     chatMeta.value[id] = { ...meta }
     syncToServer()
@@ -358,7 +414,7 @@ export const useChatStore = defineStore('chat', () => {
     sortedChatList, currentMessages,
     loadFromServer, syncToServer, suspendSync, resumeSync, syncCurrentChatFromServer,
     newChat, switchChat, deleteChat, deleteAllChats,
-    addMessage, truncateMessages, updateLastAssistantMessage, exportChats, countValidChats, findEmptyChatId,
-    togglePin, renameChat, setAutoTitleIfEmpty, exportChatMarkdown
+    addMessage, truncateMessages, updateLastAssistantMessage, exportChats, exportChatsJson, importChatsJson, countValidChats, findEmptyChatId,
+    togglePin, renameChat, setAutoTitleIfEmpty, exportChatMarkdown, setChatPromptPreset
   }
 })

@@ -25,16 +25,23 @@
               <span v-html="formatUserContent(msg.content)"></span>
             </template>
             <template v-else>
-              <!-- 历史消息必然已完成：固定显示“已思考”，不依赖 thinkingTime 判断状态，
-                   兼容旧数据中 thinkingTime 缺失/为 0 时误显“正在思考”的问题 -->
-              <div v-if="msg.reasoning_content" class="thinking-block collapsed">
-                <div class="thinking-header" @click="toggleThinking($event)">
-                  <span class="arrow">▼</span>
-                  {{ msg.interrupted ? '思考被中断' : (msg.thinkingTime ? '已思考（用时 ' + msg.thinkingTime + ' 秒）' : '已思考') }}
-                </div>
-                <div class="thinking-body" v-html="renderMd(msg.reasoning_content)"></div>
+              <!-- 错误气泡：请求失败/流内错误统一样式，与正常回答区分 -->
+              <div v-if="msg.isError" class="error-bubble">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <span>{{ msg.content }}</span>
               </div>
-              <div v-if="msg.content" class="answer-content" v-html="renderMd(msg.content)"></div>
+              <template v-else>
+                <!-- 历史消息必然已完成：固定显示“已思考”，不依赖 thinkingTime 判断状态，
+                     兼容旧数据中 thinkingTime 缺失/为 0 时误显“正在思考”的问题 -->
+                <div v-if="msg.reasoning_content" class="thinking-block collapsed">
+                  <div class="thinking-header" @click="toggleThinking($event)">
+                    <span class="arrow">▼</span>
+                    {{ msg.interrupted ? '思考被中断' : (msg.thinkingTime ? '已思考（用时 ' + msg.thinkingTime + ' 秒）' : '已思考') }}
+                  </div>
+                  <div class="thinking-body" v-html="renderMd(msg.reasoning_content)"></div>
+                </div>
+                <div v-if="msg.content" class="answer-content" v-html="renderMd(msg.content)"></div>
+              </template>
             </template>
           </div>
         </div>
@@ -184,6 +191,25 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* 错误气泡：红色警示风格，与正常回答区分 */
+.error-bubble {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: #e5484d;
+  background: rgba(229, 72, 77, 0.08);
+  border: 1px solid rgba(229, 72, 77, 0.35);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+.error-bubble svg {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+
 /* 上下文清除分隔线 */
 .context-divider {
   display: flex;
