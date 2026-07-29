@@ -33,11 +33,21 @@ public class UnifiedChatService {
     private static final String ANTHROPIC_VERSION = "2023-06-01";
     private final StorageManager storageService;
     private final FileStorageService fileStorageService;
+    private final WebSearchService webSearchService;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    /** 共享 WebClient：所有厂商请求复用同一实例（鉴权头按请求设置），避免每次对话新建客户端与连接池 */
+    private final WebClient sharedWebClient = WebClient.builder()
+            .defaultHeader("Content-Type", "application/json")
+            .codecs(configurer -> configurer
+                    .defaultCodecs()
+                    .maxInMemorySize(16 * 1024 * 1024))
+            .build();
 
-    public UnifiedChatService(StorageManager storageService, FileStorageService fileStorageService) {
+    public UnifiedChatService(StorageManager storageService, FileStorageService fileStorageService,
+                              WebSearchService webSearchService) {
         this.storageService = storageService;
         this.fileStorageService = fileStorageService;
+        this.webSearchService = webSearchService;
     }
 
     public Flux<String> chat(ChatRequest request, String modelConfigId, UsageLog usageLog) {
@@ -49,16 +59,35 @@ public class UnifiedChatService {
             return Flux.just("{\"error\":{\"message\":\"该模型已被禁用\",\"type\":\"config_error\"}}");
         }
 
+        // 联网搜索：用户开启且全局启用时，用最后一条用户消息检索，将结果作为参考资料注入
+        String searchContext = null;
+        if (request.isWebSearch() && webSearchService.isEnabled()) {
+            searchContext = webSearchService.searchAsContext(lastUserText(request.getMessages()));
+        }
+
         String protocol = config.getProtocol();
         if ("anthropic".equalsIgnoreCase(protocol)) {
-            return chatAnthropic(request, config, usageLog);
+            return chatAnthropic(request, config, usageLog, searchContext);
         }
-        return chatOpenAI(request, config, usageLog);
+        return chatOpenAI(request, config, usageLog, searchContext);
+    }
+
+    /** 取最后一条用户消息的纯文本内容（用作联网检索词） */
+    private String lastUserText(List<NewBotMessage> messages) {
+        if (messages == null) return null;
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            NewBotMessage m = messages.get(i);
+            if (m != null && "user".equals(m.getRole()) && m.getContent() != null
+                    && !m.getContent().trim().isEmpty()) {
+                return m.getContent().trim();
+            }
+        }
+        return null;
     }
 
     // ==================== OpenAI 兼容协议 ====================
 
-    private Flux<String> chatOpenAI(ChatRequest request, ModelConfig config, UsageLog usageLog) {
+    private Flux<String> chatOpenAI(ChatRequest request, ModelConfig config, UsageLog usageLog, String searchContext) {
         String apiUrl = config.getApiUrl();
         String apiKey = config.getApiKey();
         String modelId = config.getModelId();
@@ -78,7 +107,7 @@ public class UnifiedChatService {
         // 解析当前用户的全局提示词（System Prompt）：
         // 优先级最高，永远置于消息列表起始位置（system role），时间顺序上先于对话历史与当前用户输入。
         // 由后端统一注入，客户端无法伪造或遗漏，从而保证每次 API 调用都必然携带。
-        String systemPrompt = resolveSystemPrompt(usageLog);
+        String systemPrompt = resolveSystemPrompt(request, usageLog);
 
         // 构建消息列表（支持多模态：当消息含图片时，content转为数组格式）
         List<Object> messages = new ArrayList<>();
@@ -87,6 +116,14 @@ public class UnifiedChatService {
         systemMsg.put("role", "system");
         systemMsg.put("content", systemPrompt);
         messages.add(systemMsg);
+
+        // 1.5) 联网搜索参考资料：作为额外的 system 消息注入（RAG），紧随全局提示词之后
+        if (searchContext != null && !searchContext.trim().isEmpty()) {
+            Map<String, Object> searchMsg = new HashMap<>();
+            searchMsg.put("role", "system");
+            searchMsg.put("content", searchContext);
+            messages.add(searchMsg);
+        }
 
         // 2) 追加对话历史与当前用户输入（忽略客户端自带的 system 消息，统一由后端注入）
         // 上下文截断：仅保留最近 N 条（后端兜底，system 不占名额）
@@ -232,20 +269,13 @@ public class UnifiedChatService {
         }
         fullUrl += "chat/completions";
 
-        WebClient webClient = WebClient.builder()
-                .defaultHeader("Authorization", "Bearer " + apiKey)
-                .defaultHeader("Content-Type", "application/json")
-                .codecs(configurer -> configurer
-                        .defaultCodecs()
-                        .maxInMemorySize(16 * 1024 * 1024))
-                .build();
-
         // 用于从流式响应中提取 usage token 数据
         AtomicReference<Map<String, Object>> usageRef = new AtomicReference<>();
 
-        return webClient
+        return sharedWebClient
                 .post()
                 .uri(fullUrl)
+                .header("Authorization", "Bearer " + apiKey)
                 .bodyValue(requestBody)
                 .retrieve()
                 .bodyToFlux(String.class)
@@ -266,14 +296,18 @@ public class UnifiedChatService {
 
     // ==================== Anthropic 协议 ====================
 
-    private Flux<String> chatAnthropic(ChatRequest request, ModelConfig config, UsageLog usageLog) {
+    private Flux<String> chatAnthropic(ChatRequest request, ModelConfig config, UsageLog usageLog, String searchContext) {
         String apiUrl = config.getApiUrl();
         String apiKey = config.getApiKey();
         String modelId = config.getModelId();
 
         log.info("调用模型[Anthropic]: {} ({}), API: {}, 思考模式: {}", config.getDisplayName(), modelId, apiUrl, request.isDeepThinking());
 
-        String systemPrompt = resolveSystemPrompt(usageLog);
+        String systemPrompt = resolveSystemPrompt(request, usageLog);
+        // 联网搜索参考资料：追加到 system 提示词之后（Anthropic 的 system 单独传参）
+        if (searchContext != null && !searchContext.trim().isEmpty()) {
+            systemPrompt = systemPrompt + "\n\n" + searchContext;
+        }
 
         // 构建 Anthropic Messages API 请求体
         Map<String, Object> requestBody = new HashMap<>();
@@ -375,22 +409,15 @@ public class UnifiedChatService {
         }
         fullUrl += "messages";
 
-        // Anthropic 使用 x-api-key 头认证
-        WebClient webClient = WebClient.builder()
-                .defaultHeader("x-api-key", apiKey)
-                .defaultHeader("anthropic-version", ANTHROPIC_VERSION)
-                .defaultHeader("Content-Type", "application/json")
-                .codecs(configurer -> configurer
-                        .defaultCodecs()
-                        .maxInMemorySize(16 * 1024 * 1024))
-                .build();
-
         // 用于累计 Anthropic usage 数据
         AtomicReference<Map<String, Object>> usageRef = new AtomicReference<>();
 
-        return webClient
+        // Anthropic 使用 x-api-key 头认证
+        return sharedWebClient
                 .post()
                 .uri(fullUrl)
+                .header("x-api-key", apiKey)
+                .header("anthropic-version", ANTHROPIC_VERSION)
                 .bodyValue(requestBody)
                 .retrieve()
                 .bodyToFlux(String.class)
@@ -539,14 +566,29 @@ public class UnifiedChatService {
     // ==================== 公共方法 ====================
 
     /**
-     * 解析当前用户的全局提示词
+     * 解析当前会话生效的提示词：会话绑定的预设（内置智能体/用户角色）> 全局启用的预设 > 旧版单条提示词 > 默认提示词
      */
-    private String resolveSystemPrompt(UsageLog usageLog) {
+    private String resolveSystemPrompt(ChatRequest request, UsageLog usageLog) {
         String systemPrompt = DEFAULT_SYSTEM_PROMPT;
         if (usageLog != null && usageLog.getUserId() != null) {
             User currentUser = storageService.getUserById(usageLog.getUserId());
             if (currentUser != null) {
-                // 1) 优先使用用户已启用的提示词预设（最多 1 条）
+                // 0) 会话绑定的预设优先：先匹配内置智能体（builtin- 前缀），再按 ID 精确匹配用户预设（不要求 enabled，绑定即生效）
+                String presetId = request == null ? null : request.getPromptPresetId();
+                String builtinContent = BuiltinAgents.contentById(presetId);
+                if (builtinContent != null) {
+                    return builtinContent;
+                }
+                if (presetId != null && !presetId.trim().isEmpty()
+                        && currentUser.getPromptPresets() != null) {
+                    for (PromptPreset p : currentUser.getPromptPresets()) {
+                        if (p != null && presetId.equals(p.getId()) && p.getContent() != null
+                                && !p.getContent().trim().isEmpty()) {
+                            return p.getContent().trim();
+                        }
+                    }
+                }
+                // 1) 其次使用用户已启用的提示词预设（最多 1 条）
                 if (currentUser.getPromptPresets() != null) {
                     for (PromptPreset p : currentUser.getPromptPresets()) {
                         if (p != null && p.isEnabled() && p.getContent() != null
@@ -666,18 +708,10 @@ public class UnifiedChatService {
         }
         fullUrl += anthropic ? "messages" : "chat/completions";
 
-        WebClient.Builder builder = WebClient.builder()
-                .defaultHeader("Content-Type", "application/json");
-        if (anthropic) {
-            builder.defaultHeader("x-api-key", config.getApiKey())
-                    .defaultHeader("anthropic-version", ANTHROPIC_VERSION);
-        } else {
-            builder.defaultHeader("Authorization", "Bearer " + config.getApiKey());
-        }
-
         try {
-            String resp = builder.build().post()
+            String resp = sharedWebClient.post()
                     .uri(fullUrl)
+                    .headers(h -> applyAuthHeaders(h, config, anthropic))
                     .bodyValue(body)
                     .retrieve()
                     .bodyToMono(String.class)
@@ -740,6 +774,16 @@ public class UnifiedChatService {
         return s.length() <= max ? s : s.substring(0, max);
     }
 
+    /** 按厂商协议设置鉴权头：Anthropic 用 x-api-key + anthropic-version，其余 OpenAI 兼容协议用 Bearer */
+    private void applyAuthHeaders(org.springframework.http.HttpHeaders headers, ModelConfig config, boolean anthropic) {
+        if (anthropic) {
+            headers.set("x-api-key", config.getApiKey());
+            headers.set("anthropic-version", ANTHROPIC_VERSION);
+        } else {
+            headers.set("Authorization", "Bearer " + config.getApiKey());
+        }
+    }
+
     /**
      * 模型连通性测试：向厂商 API 发一条最小非流式请求，验证 API Key/URL/模型ID 是否可用。
      * 连通成功后追加一次短生成请求测算生成速度（token/s），并将延迟/速度/测试时间持久化到模型配置。
@@ -771,21 +815,12 @@ public class UnifiedChatService {
         }
         fullUrl += anthropic ? "messages" : "chat/completions";
 
-        WebClient.Builder builder = WebClient.builder()
-                .defaultHeader("Content-Type", "application/json");
-        if (anthropic) {
-            builder.defaultHeader("x-api-key", config.getApiKey())
-                    .defaultHeader("anthropic-version", ANTHROPIC_VERSION);
-        } else {
-            builder.defaultHeader("Authorization", "Bearer " + config.getApiKey());
-        }
-        WebClient client = builder.build();
-
         long start = System.currentTimeMillis();
         try {
             // 第一次：最小请求（"hi" + max_tokens=16）测连通与延迟
-            client.post()
+            sharedWebClient.post()
                     .uri(fullUrl)
+                    .headers(h -> applyAuthHeaders(h, config, anthropic))
                     .bodyValue(buildTestBody(config, anthropic, "hi", 16))
                     .retrieve()
                     .bodyToMono(String.class)
@@ -793,7 +828,7 @@ public class UnifiedChatService {
             long cost = System.currentTimeMillis() - start;
 
             // 第二次：短生成请求测速度（失败不影响连通结论，速度记为未知）
-            Double speed = measureSpeed(client, fullUrl, config, anthropic);
+            Double speed = measureSpeed(fullUrl, config, anthropic);
 
             // 持久化测试指标（config 来自存储层含真实 apiKey，写回时会重新加密）
             config.setTestLatencyMs((int) cost);
@@ -884,12 +919,13 @@ public class UnifiedChatService {
      * 测算生成速度：发一条短生成请求，用 usage 中的输出 token 数 / 总耗时估算 token/s。
      * 任一环节失败返回 null（速度未知），不影响连通测试结论。
      */
-    private Double measureSpeed(WebClient client, String fullUrl, ModelConfig config, boolean anthropic) {
+    private Double measureSpeed(String fullUrl, ModelConfig config, boolean anthropic) {
         try {
             String prompt = "请从1数到50，用逗号分隔，不要输出任何其他内容";
             long start = System.currentTimeMillis();
-            String resp = client.post()
+            String resp = sharedWebClient.post()
                     .uri(fullUrl)
+                    .headers(h -> applyAuthHeaders(h, config, anthropic))
                     .bodyValue(buildTestBody(config, anthropic, prompt, 256))
                     .retrieve()
                     .bodyToMono(String.class)

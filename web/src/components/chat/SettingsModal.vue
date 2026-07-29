@@ -115,6 +115,21 @@
                   </div>
                   <button class="settings-btn settings-btn-primary" @click="confirmExport">导出</button>
                 </div>
+                <div class="data-mgmt-row">
+                  <div class="data-mgmt-info">
+                    <div class="data-mgmt-title">导出 JSON 备份</div>
+                    <div class="data-mgmt-desc">导出全部会话及标题/置顶等元信息为 JSON 文件，可在其他账号或部署中导入恢复</div>
+                  </div>
+                  <button class="settings-btn settings-btn-primary" @click="confirmExportJson">导出备份</button>
+                </div>
+                <div class="data-mgmt-row">
+                  <div class="data-mgmt-info">
+                    <div class="data-mgmt-title">导入 JSON 备份</div>
+                    <div class="data-mgmt-desc">从备份文件恢复会话；按会话合并，已存在的会话不会被覆盖</div>
+                  </div>
+                  <button class="settings-btn settings-btn-primary" @click="importFileRef && importFileRef.click()">选择文件</button>
+                  <input ref="importFileRef" type="file" accept=".json,application/json" style="display:none" @change="handleImportJson" />
+                </div>
                 <div class="data-mgmt-row data-mgmt-row-danger">
                   <div class="data-mgmt-info">
                     <div class="data-mgmt-title">删除全部对话</div>
@@ -278,6 +293,37 @@ function confirmExport() {
     chatStore.exportChats()
     ElMessage.success('已导出')
   }).catch(() => {})
+}
+
+// 导出全量 JSON 备份（含会话内容与标题/置顶等元信息）
+function confirmExportJson() {
+  const count = chatStore.countValidChats()
+  if (count === 0) {
+    ElMessage.info('当前没有可导出的会话')
+    return
+  }
+  chatStore.exportChatsJson()
+  ElMessage.success('备份已导出')
+}
+
+// 导入 JSON 备份：解析文件后按会话合并，导入成功后自动同步到服务端
+const importFileRef = ref(null)
+async function handleImportJson(e) {
+  const file = e.target.files && e.target.files[0]
+  e.target.value = ''
+  if (!file) return
+  try {
+    const text = await file.text()
+    const data = JSON.parse(text)
+    const { imported, skipped } = chatStore.importChatsJson(data)
+    if (imported > 0) {
+      ElMessage.success(`导入完成：新增 ${imported} 条会话` + (skipped > 0 ? `，跳过 ${skipped} 条已存在/无效会话` : ''))
+    } else {
+      ElMessage.info(skipped > 0 ? `未导入新会话（${skipped} 条已存在或无效）` : '备份文件中没有会话')
+    }
+  } catch (err) {
+    ElMessage.error('导入失败：' + (err.message || '文件不是有效的备份 JSON'))
+  }
 }
 
 function confirmDeleteAll() {

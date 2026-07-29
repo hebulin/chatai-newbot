@@ -403,6 +403,69 @@ public class StorageManager implements StorageService {
         sqliteStorage.setSetting("context_max_messages", String.valueOf(Math.max(0, max)));
     }
 
+    // ========== 联网搜索配置（Tavily，存于 t_setting，两种存储模式通用） ==========
+
+    /**
+     * 联网搜索全局开关是否开启
+     * @return true=已开启
+     */
+    public boolean getWebSearchEnabled() {
+        return "true".equals(sqliteStorage.getSetting("web_search_enabled"));
+    }
+
+    /**
+     * 设置联网搜索全局开关
+     * @param enabled 是否开启
+     */
+    public void setWebSearchEnabled(boolean enabled) {
+        sqliteStorage.setSetting("web_search_enabled", enabled ? "true" : "false");
+    }
+
+    /**
+     * 获取 Tavily API Key
+     * @return API Key，未配置返回 null
+     */
+    public String getTavilyApiKey() {
+        return sqliteStorage.getSetting("tavily_api_key");
+    }
+
+    /**
+     * 设置 Tavily API Key
+     * @param apiKey API Key（传空则清除）
+     */
+    public void setTavilyApiKey(String apiKey) {
+        sqliteStorage.setSetting("tavily_api_key", apiKey == null ? "" : apiKey.trim());
+    }
+
+    // ========== 公告配置（存于 t_setting，两种存储模式通用） ==========
+
+    /**
+     * 获取公告内容
+     * @return 公告正文，未设置返回 null
+     */
+    public String getAnnouncement() {
+        return sqliteStorage.getSetting("announcement_content");
+    }
+
+    /**
+     * 获取公告最后更新时间（yyyy-MM-dd HH:mm:ss）
+     * @return 更新时间，未设置返回 null
+     */
+    public String getAnnouncementUpdatedAt() {
+        return sqliteStorage.getSetting("announcement_updated_at");
+    }
+
+    /**
+     * 设置公告内容，同时刷新更新时间（传空则清除公告）
+     * @param content 公告正文
+     */
+    public void setAnnouncement(String content) {
+        String trimmed = content == null ? "" : content.trim();
+        sqliteStorage.setSetting("announcement_content", trimmed);
+        sqliteStorage.setSetting("announcement_updated_at", trimmed.isEmpty() ? ""
+                : new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date()));
+    }
+
     // ========== 委托方法：用户相关 ==========
 
     @Override
