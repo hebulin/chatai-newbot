@@ -78,7 +78,8 @@
         </el-table-column>
         <el-table-column prop="updatedAt" label="最后生效时间" :width="colW.updatedAt" show-overflow-tooltip />
         <el-table-column prop="createdAt" label="创建时间" :width="colW.createdAt" show-overflow-tooltip />
-        <el-table-column label="操作" width="200" align="center" fixed="right">
+        <!-- 列宽需容纳最长组合「重新生效+下线+删除」，fixed 列会裁切溢出内容导致按钮文字不显示 -->
+        <el-table-column label="操作" width="230" align="center" fixed="right">
           <template #default="{ row }">
             <el-button size="small" text type="primary" @click="openRepublish(row)">
               {{ row.status === 'active' ? '改期' : '重新生效' }}

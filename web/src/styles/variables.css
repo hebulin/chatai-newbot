@@ -27,6 +27,10 @@
   --sans: 'DM Sans', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  /* 别名变量：部分组件引用了 -1 后缀命名，指向现有主题变量，随深浅主题自动切换 */
+  --ink-1: var(--ink);
+  --surface-1: var(--paper);
+  --line-1: var(--line-2);
 }
 
 [data-theme="light"] {
