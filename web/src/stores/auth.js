@@ -52,6 +52,8 @@ export const useAuthStore = defineStore('auth', () => {
     username.value = data.username
     role.value = data.role
     isLoggedIn.value = true
+    // 清除“本次登录已提示公告”标记：未勾选不再提示的公告每次登录都会重新弹窗
+    try { sessionStorage.removeItem('announcement_shown') } catch (e) { /* ignore */ }
   }
 
   // 登出并清空本地态

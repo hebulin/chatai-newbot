@@ -31,6 +31,8 @@
         <el-tab-pane label="用户管理" name="users" />
         <el-tab-pane label="分享管理" name="shares" />
         <el-tab-pane label="系统设置" name="settings" />
+        <el-tab-pane label="联网配置" name="websearch" />
+        <el-tab-pane label="公告管理" name="announcements" />
       </el-tabs>
     </div>
 

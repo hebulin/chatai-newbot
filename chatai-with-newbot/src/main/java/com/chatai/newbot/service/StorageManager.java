@@ -437,33 +437,165 @@ public class StorageManager implements StorageService {
         sqliteStorage.setSetting("tavily_api_key", apiKey == null ? "" : apiKey.trim());
     }
 
-    // ========== 公告配置（存于 t_setting，两种存储模式通用） ==========
+    // ========== 公告配置（存于 t_announcement，两种存储模式通用） ==========
+
+    /** 公告时间格式 yyyy-MM-dd HH:mm:ss */
+    private static final DateTimeFormatter ANNOUNCEMENT_TIME_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     /**
-     * 获取公告内容
-     * @return 公告正文，未设置返回 null
+     * 将旧版单条公告（t_setting 键值）迁移到 t_announcement（幂等，仅首次执行）
      */
-    public String getAnnouncement() {
-        return sqliteStorage.getSetting("announcement_content");
+    private void ensureAnnouncementMigrated() {
+        try {
+            String legacy = sqliteStorage.getSetting("announcement_content");
+            if (legacy == null || legacy.trim().isEmpty()) return;
+            if (!sqliteStorage.getAllAnnouncements().isEmpty()) return;
+            Announcement a = new Announcement();
+            a.setTitle("系统公告");
+            a.setContent(legacy.trim());
+            a.setEnabled(true);
+            String legacyTime = sqliteStorage.getSetting("announcement_updated_at");
+            if (legacyTime != null && !legacyTime.trim().isEmpty()) {
+                a.setCreatedAt(legacyTime.trim());
+                a.setUpdatedAt(legacyTime.trim());
+            }
+            sqliteStorage.addAnnouncement(a);
+            // 清除旧键，避免重复迁移
+            sqliteStorage.setSetting("announcement_content", "");
+            sqliteStorage.setSetting("announcement_updated_at", "");
+            log.info("已将旧版单条公告迁移到 t_announcement");
+        } catch (Exception e) {
+            log.warn("迁移旧版公告失败", e);
+        }
     }
 
     /**
-     * 获取公告最后更新时间（yyyy-MM-dd HH:mm:ss）
-     * @return 更新时间，未设置返回 null
+     * 获取全部公告记录（含历史公告，最近更新在前）
+     * @return 公告列表
      */
-    public String getAnnouncementUpdatedAt() {
-        return sqliteStorage.getSetting("announcement_updated_at");
+    public List<Announcement> getAllAnnouncements() {
+        ensureAnnouncementMigrated();
+        return sqliteStorage.getAllAnnouncements();
     }
 
     /**
-     * 设置公告内容，同时刷新更新时间（传空则清除公告）
+     * 根据ID获取公告记录
+     * @param id 公告ID
+     * @return 公告记录，不存在返回 null
+     */
+    public Announcement getAnnouncementById(String id) {
+        return sqliteStorage.getAnnouncementById(id);
+    }
+
+    /**
+     * 发布新公告（自动下线其它公告，保证同一时刻最多一条启用）
+     * @param title 公告标题
      * @param content 公告正文
+     * @param startAt 公告期开始时间，空=立即生效
+     * @param endAt 公告期结束时间，空=长期有效
+     * @return 保存后的公告记录
      */
-    public void setAnnouncement(String content) {
-        String trimmed = content == null ? "" : content.trim();
-        sqliteStorage.setSetting("announcement_content", trimmed);
-        sqliteStorage.setSetting("announcement_updated_at", trimmed.isEmpty() ? ""
-                : new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date()));
+    public Announcement publishAnnouncement(String title, String content, String startAt, String endAt) {
+        ensureAnnouncementMigrated();
+        Announcement a = new Announcement();
+        a.setTitle(title == null ? "" : title.trim());
+        a.setContent(content.trim());
+        a.setStartAt(emptyToNull(startAt));
+        a.setEndAt(emptyToNull(endAt));
+        a.setEnabled(true);
+        sqliteStorage.addAnnouncement(a);
+        sqliteStorage.disableOtherAnnouncements(a.getId());
+        return a;
+    }
+
+    /**
+     * 重新生效/更改公告期：更新内容与公告期并启用，刷新 updatedAt（用户端会重新弹窗提醒），
+     * 同时下线其它公告
+     * @param id 公告ID
+     * @param title 公告标题（null/空=不修改）
+     * @param content 公告正文（null=不修改）
+     * @param startAt 公告期开始时间，空=立即生效
+     * @param endAt 公告期结束时间，空=长期有效
+     * @return 更新后的公告记录，公告不存在返回 null
+     */
+    public Announcement republishAnnouncement(String id, String title, String content, String startAt, String endAt) {
+        Announcement a = sqliteStorage.getAnnouncementById(id);
+        if (a == null) return null;
+        if (title != null && !title.trim().isEmpty()) {
+            a.setTitle(title.trim());
+        }
+        if (content != null && !content.trim().isEmpty()) {
+            a.setContent(content.trim());
+        }
+        a.setStartAt(emptyToNull(startAt));
+        a.setEndAt(emptyToNull(endAt));
+        a.setEnabled(true);
+        a.setUpdatedAt(LocalDateTime.now().format(ANNOUNCEMENT_TIME_FMT));
+        sqliteStorage.updateAnnouncement(a);
+        sqliteStorage.disableOtherAnnouncements(id);
+        return a;
+    }
+
+    /**
+     * 下线公告（不删除记录，可在历史公告中重新生效）
+     * @param id 公告ID
+     * @return true=下线成功，false=公告不存在
+     */
+    public boolean offlineAnnouncement(String id) {
+        Announcement a = sqliteStorage.getAnnouncementById(id);
+        if (a == null) return false;
+        a.setEnabled(false);
+        sqliteStorage.updateAnnouncement(a);
+        return true;
+    }
+
+    /**
+     * 删除公告记录
+     * @param id 公告ID
+     * @return true=删除成功
+     */
+    public boolean deleteAnnouncement(String id) {
+        return sqliteStorage.deleteAnnouncement(id);
+    }
+
+    /**
+     * 获取当前对用户生效的公告（启用且处于公告期内）
+     * @return 生效中的公告，无则返回 null
+     */
+    public Announcement getActiveAnnouncement() {
+        ensureAnnouncementMigrated();
+        Announcement a = sqliteStorage.getEnabledAnnouncement();
+        if (a == null) return null;
+        return isWithinPeriod(a) ? a : null;
+    }
+
+    /**
+     * 判断公告当前是否处于公告期内（时间解析失败视为未设置该边界）
+     * @param a 公告记录
+     * @return true=公告期内
+     */
+    public boolean isWithinPeriod(Announcement a) {
+        LocalDateTime now = LocalDateTime.now();
+        if (a.getStartAt() != null && !a.getStartAt().isEmpty()) {
+            try {
+                if (now.isBefore(LocalDateTime.parse(a.getStartAt(), ANNOUNCEMENT_TIME_FMT))) return false;
+            } catch (Exception ignore) {
+                // 解析失败视为立即生效
+            }
+        }
+        if (a.getEndAt() != null && !a.getEndAt().isEmpty()) {
+            try {
+                if (now.isAfter(LocalDateTime.parse(a.getEndAt(), ANNOUNCEMENT_TIME_FMT))) return false;
+            } catch (Exception ignore) {
+                // 解析失败视为长期有效
+            }
+        }
+        return true;
+    }
+
+    /** 空白字符串归一化为 null（公告期边界未设置） */
+    private String emptyToNull(String s) {
+        return (s == null || s.trim().isEmpty()) ? null : s.trim();
     }
 
     // ========== 委托方法：用户相关 ==========

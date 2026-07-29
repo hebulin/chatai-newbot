@@ -1,9 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { loadChatHistory, saveChatHistory, loadSingleChatHistory } from '@/api/chat'
+import { loadChatHistory, loadChatSummaries, saveChatHistory, loadSingleChatHistory } from '@/api/chat'
 
 export const useChatStore = defineStore('chat', () => {
   const chats = ref({})
+  // 未加载会话的摘要（id -> { title, preview, lastTime, count }）：
+  // 懒加载模式下首屏只拉摘要，会话正文切换时才按需加载进 chats
+  const chatSummaries = ref({})
   const chatMeta = ref({})
   const currentChatId = ref(null)
   const deletedChatIds = ref([])
@@ -16,26 +19,35 @@ export const useChatStore = defineStore('chat', () => {
   let syncSuspended = false
   let pendingSyncWhileSuspended = false
 
-  // 按日期分组的会话列表
+  // 按日期分组的会话列表（已加载会话按消息实时推导，未加载会话用服务端摘要）
   const sortedChatList = computed(() => {
     const chatInfos = []
-    const ids = Object.keys(chats.value)
+    const ids = new Set([...Object.keys(chats.value), ...Object.keys(chatSummaries.value)])
     ids.forEach(id => {
-      const msgs = chats.value[id] || []
-      let first = null
-      let lastTime = null
-      for (let i = 0; i < msgs.length; i++) {
-        if (msgs[i].role === 'user' && !first) first = msgs[i]
-        if (msgs[i].time) lastTime = msgs[i].time
-      }
       const meta = chatMeta.value[id] || {}
-      const autoTitle = first ? first.content.substring(0, 20) : '新会话'
+      let autoTitle, fullContent, lastTime
+      if (chats.value[id] !== undefined) {
+        const msgs = chats.value[id] || []
+        let first = null
+        lastTime = null
+        for (let i = 0; i < msgs.length; i++) {
+          if (msgs[i].role === 'user' && !first) first = msgs[i]
+          if (msgs[i].time) lastTime = msgs[i].time
+        }
+        autoTitle = first ? first.content.substring(0, 20) : '新会话'
+        fullContent = first ? first.content : ''
+      } else {
+        const s = chatSummaries.value[id] || {}
+        autoTitle = s.title || '新会话'
+        fullContent = s.preview || ''
+        lastTime = s.lastTime || null
+      }
       const title = (meta.title && meta.title.trim()) ? meta.title : autoTitle
       chatInfos.push({
         id,
         title,
         pinned: !!meta.pinned,
-        fullContent: first ? first.content : '',
+        fullContent,
         lastTime,
         lastTimeDate: parseDateFromStr(lastTime)
       })
@@ -114,16 +126,20 @@ export const useChatStore = defineStore('chat', () => {
     return `${year}年${month}月`
   }
 
-  // 从服务端加载会话历史
+  // 从服务端加载会话列表（只拉摘要，不含消息内容），再按需加载上次打开的会话
   async function loadFromServer() {
     try {
-      const data = await loadChatHistory()
+      const data = await loadChatSummaries()
       if (data && data.success) {
-        chats.value = data.chats || {}
+        chats.value = {}
         chatMeta.value = data.chatMeta || {}
         deletedChatIds.value = data.deletedChatIds || []
+        const map = {}
+        ;(data.summaries || []).forEach(s => { if (s && s.id) map[s.id] = s })
+        chatSummaries.value = map
         const lastId = data.lastChatId
-        if (lastId && chats.value[lastId]) {
+        if (lastId && map[lastId]) {
+          await ensureChatLoaded(lastId)
           currentChatId.value = lastId
         } else {
           newChat()
@@ -140,6 +156,38 @@ export const useChatStore = defineStore('chat', () => {
       newChat()
     }
     isChatHistoryLoaded.value = true
+  }
+
+  // 按需加载会话正文：未加载时从服务端拉取单会话消息；加载失败时抛出异常，
+  // 绝不能置空数组占位，否则后续同步会把服务端该会话内容覆盖为空
+  async function ensureChatLoaded(id) {
+    if (!id || chats.value[id] !== undefined) return
+    // 摘要中不存在的 ID 视为本地新会话，直接初始化
+    if (!chatSummaries.value[id]) {
+      chats.value[id] = []
+      return
+    }
+    const res = await loadSingleChatHistory(id)
+    if (!res || !res.success) {
+      throw new Error((res && res.message) || '加载会话内容失败')
+    }
+    chats.value[id] = Array.isArray(res.messages) ? res.messages : []
+    if (res.meta && typeof res.meta === 'object') {
+      chatMeta.value[id] = { ...res.meta }
+    }
+  }
+
+  // 拉取全量会话内容（导出备份用）：未加载的会话用服务端数据补齐，已加载的以本地为准
+  async function ensureAllChatsLoaded() {
+    const missing = Object.keys(chatSummaries.value).filter(id => chats.value[id] === undefined)
+    if (missing.length === 0) return
+    const data = await loadChatHistory()
+    if (!data || !data.success || !data.chats) {
+      throw new Error('拉取全量会话失败')
+    }
+    missing.forEach(id => {
+      if (data.chats[id] !== undefined) chats.value[id] = data.chats[id]
+    })
   }
 
   // 同步到服务端（500ms防抖）
@@ -213,8 +261,15 @@ export const useChatStore = defineStore('chat', () => {
     syncToServer()
   }
 
+  // 切换会话（懒加载）：先确保目标会话正文已加载再切换，加载失败时保持当前会话不变
+  async function switchChatLazy(id) {
+    await ensureChatLoaded(id)
+    switchChat(id)
+  }
+
   function deleteChat(id) {
     delete chats.value[id]
+    delete chatSummaries.value[id]
     delete chatMeta.value[id]
     deletedChatIds.value.push(id)
     syncToServer()
@@ -229,9 +284,10 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function deleteAllChats() {
-    const ids = Object.keys(chats.value)
+    const ids = new Set([...Object.keys(chats.value), ...Object.keys(chatSummaries.value)])
     ids.forEach(id => deletedChatIds.value.push(id))
     chats.value = {}
+    chatSummaries.value = {}
     chatMeta.value = {}
     currentChatId.value = null
     newChat()
@@ -244,6 +300,12 @@ export const useChatStore = defineStore('chat', () => {
       if (!msgs || msgs.length === 0) return ids[i]
       const hasUserMsg = msgs.some(m => m.role === 'user')
       if (!hasUserMsg) return ids[i]
+    }
+    // 未加载但摘要显示无消息的会话也视为空会话
+    const sids = Object.keys(chatSummaries.value)
+    for (let i = 0; i < sids.length; i++) {
+      if (chats.value[sids[i]] !== undefined) continue
+      if ((chatSummaries.value[sids[i]].count || 0) === 0) return sids[i]
     }
     return null
   }
@@ -274,7 +336,27 @@ export const useChatStore = defineStore('chat', () => {
     syncToServer()
   }
 
-  function exportChats() {
+  // 会话标题：自定义标题优先，其次首条用户消息前 20 字（未加载会话回退服务端摘要标题）
+  function chatTitle(id) {
+    const meta = chatMeta.value[id] || {}
+    if (meta.title && meta.title.trim()) return meta.title.trim()
+    const first = (chats.value[id] || []).find(m => m.role === 'user')
+    if (first) return String(first.content || '').substring(0, 20)
+    const s = chatSummaries.value[id]
+    return (s && s.title) ? s.title : '新会话'
+  }
+
+  // 导出全部会话（先补齐未加载的会话内容），format: txt=纯文本 md=Markdown json=完整 JSON 备份
+  async function exportChats(format = 'txt') {
+    await ensureAllChatsLoaded()
+    if (format === 'json') {
+      exportChatsJson()
+      return
+    }
+    if (format === 'md') {
+      exportChatsMarkdown()
+      return
+    }
     let text = ''
     Object.entries(chats.value).forEach((entry, idx) => {
       if (idx > 0) text += '\n====================\n\n'
@@ -287,6 +369,29 @@ export const useChatStore = defineStore('chat', () => {
     a.href = URL.createObjectURL(blob)
     a.download = 'chat-export-' + new Date().toISOString().slice(0, 10) + '.txt'
     a.click()
+    URL.revokeObjectURL(a.href)
+  }
+
+  // 全量 Markdown 导出：每个会话一个一级标题，会话之间以分隔线分隔（格式与单会话导出一致）
+  function exportChatsMarkdown() {
+    const sections = []
+    Object.keys(chats.value).forEach(id => {
+      const msgs = chats.value[id] || []
+      if (!msgs.some(m => m.role === 'user')) return
+      let md = '# ' + chatTitle(id) + '\n\n'
+      msgs.forEach(m => {
+        const roleLabel = m.role === 'user' ? '👤 用户' : '🤖 助手'
+        md += '## ' + roleLabel + (m.time ? '  `' + m.time + '`' : '') + '\n\n'
+        md += (m.content || '') + '\n\n'
+      })
+      sections.push(md.trimEnd())
+    })
+    const blob = new Blob([sections.join('\n\n---\n\n') + '\n'], { type: 'text/markdown;charset=utf-8' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = 'chat-export-' + new Date().toISOString().slice(0, 10) + '.md'
+    a.click()
+    URL.revokeObjectURL(a.href)
   }
 
   // 全量 JSON 备份：导出会话内容与元信息，可用于跨账号/跨部署迁移后导回
@@ -318,8 +423,10 @@ export const useChatStore = defineStore('chat', () => {
       const msgs = data.chats[id]
       if (!Array.isArray(msgs)) { skipped++; return }
       const existing = chats.value[id]
-      // 已有同 ID 且有内容的会话不覆盖，避免导入旧备份丢失新消息
+      const summary = chatSummaries.value[id]
+      // 已有同 ID 且有内容的会话（含未加载但摘要显示有消息的）不覆盖，避免导入旧备份丢失新消息
       if (existing && existing.length > 0) { skipped++; return }
+      if (!existing && summary && (summary.count || 0) > 0) { skipped++; return }
       chats.value[id] = msgs
       if (srcMeta[id] && typeof srcMeta[id] === 'object') {
         chatMeta.value[id] = { ...srcMeta[id] }
@@ -335,9 +442,14 @@ export const useChatStore = defineStore('chat', () => {
 
   function countValidChats() {
     let count = 0
-    Object.keys(chats.value).forEach(id => {
-      const msgs = chats.value[id] || []
-      if (msgs.some(m => m.role === 'user')) count++
+    const ids = new Set([...Object.keys(chats.value), ...Object.keys(chatSummaries.value)])
+    ids.forEach(id => {
+      if (chats.value[id] !== undefined) {
+        if ((chats.value[id] || []).some(m => m.role === 'user')) count++
+      } else if ((chatSummaries.value[id].preview || '') !== '') {
+        // 未加载会话：摘要预览非空即含用户消息
+        count++
+      }
     })
     return count
   }
@@ -386,14 +498,11 @@ export const useChatStore = defineStore('chat', () => {
     syncToServer()
   }
 
-  // 导出单个会话为 Markdown
-  function exportChatMarkdown(id) {
+  // 导出单个会话为 Markdown（未加载时先拉取正文）
+  async function exportChatMarkdown(id) {
+    await ensureChatLoaded(id)
     const msgs = chats.value[id] || []
-    const meta = chatMeta.value[id] || {}
-    let first = msgs.find(m => m.role === 'user')
-    const title = (meta.title && meta.title.trim())
-      ? meta.title
-      : (first ? first.content.substring(0, 20) : '新会话')
+    const title = chatTitle(id)
     let md = '# ' + title + '\n\n'
     msgs.forEach(m => {
       const roleLabel = m.role === 'user' ? '👤 用户' : '🤖 助手'
@@ -410,10 +519,11 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   return {
-    chats, chatMeta, currentChatId, deletedChatIds, isChatHistoryLoaded, searchKeyword,
+    chats, chatSummaries, chatMeta, currentChatId, deletedChatIds, isChatHistoryLoaded, searchKeyword,
     sortedChatList, currentMessages,
     loadFromServer, syncToServer, suspendSync, resumeSync, syncCurrentChatFromServer,
-    newChat, switchChat, deleteChat, deleteAllChats,
+    ensureChatLoaded, ensureAllChatsLoaded,
+    newChat, switchChat, switchChatLazy, deleteChat, deleteAllChats,
     addMessage, truncateMessages, updateLastAssistantMessage, exportChats, exportChatsJson, importChatsJson, countValidChats, findEmptyChatId,
     togglePin, renameChat, setAutoTitleIfEmpty, exportChatMarkdown, setChatPromptPreset
   }

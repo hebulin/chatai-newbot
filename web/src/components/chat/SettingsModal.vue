@@ -12,24 +12,49 @@
           <button class="modal-close" @click="$emit('close')">✕</button>
         </div>
         <div class="settings-modal">
-          <div class="settings-sidebar">
-            <div class="settings-menu-item" :class="{ active: tab === 'changePassword' }" @click="tab = 'changePassword'">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-              <span>修改密码</span>
-            </div>
-            <div class="settings-menu-item" :class="{ active: tab === 'systemPrompt' }" @click="tab = 'systemPrompt'; loadPresets()">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>
-              <span>提示词</span>
-            </div>
-            <div class="settings-menu-item" :class="{ active: tab === 'loginDevices' }" @click="tab = 'loginDevices'; loadSessions()">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-              <span>登录管理</span>
-            </div>
-            <div class="settings-menu-item" :class="{ active: tab === 'dataManagement' }" @click="tab = 'dataManagement'">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
-              <span>数据管理</span>
-            </div>
-          </div>
+          <!-- 导航：el-tabs 仅作菜单栏（内容区隐藏），桌面端左侧竖排、窄屏顶部横排可滑动 -->
+          <el-tabs v-model="tab" :tab-position="isMobile ? 'top' : 'left'" class="settings-tabs-nav" @tab-change="onTabChange">
+            <el-tab-pane name="changePassword">
+              <template #label>
+                <span class="settings-tab-label">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                  <span>修改密码</span>
+                </span>
+              </template>
+            </el-tab-pane>
+            <el-tab-pane name="systemPrompt">
+              <template #label>
+                <span class="settings-tab-label">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>
+                  <span>提示词</span>
+                </span>
+              </template>
+            </el-tab-pane>
+            <el-tab-pane name="loginDevices">
+              <template #label>
+                <span class="settings-tab-label">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                  <span>登录管理</span>
+                </span>
+              </template>
+            </el-tab-pane>
+            <el-tab-pane name="shareManage">
+              <template #label>
+                <span class="settings-tab-label">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                  <span>分享管理</span>
+                </span>
+              </template>
+            </el-tab-pane>
+            <el-tab-pane name="dataManagement">
+              <template #label>
+                <span class="settings-tab-label">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                  <span>数据管理</span>
+                </span>
+              </template>
+            </el-tab-pane>
+          </el-tabs>
           <div class="settings-content">
             <!-- 修改密码 -->
             <div v-if="tab === 'changePassword'" class="settings-panel">
@@ -104,6 +129,45 @@
               <div class="settings-form-note">展示当前账号在各设备终端的登录会话；踢下线后对应设备需重新登录。同一浏览器重复登录会产生多条会话记录。</div>
             </div>
 
+            <!-- 分享管理 -->
+            <div v-if="tab === 'shareManage'" class="settings-panel">
+              <h3 class="settings-panel-title">分享管理</h3>
+              <div class="share-toolbar">
+                <select v-model="shareFilterStatus" class="settings-select">
+                  <option value="">全部状态</option>
+                  <option value="valid">有效</option>
+                  <option value="expired">已过期</option>
+                  <option value="orphaned">会话已删</option>
+                </select>
+                <button class="settings-btn settings-btn-ghost" :disabled="invalidShares.length === 0" @click="handleClearInvalidShares">清除失效（{{ invalidShares.length }}）</button>
+                <button class="settings-btn settings-btn-danger" :disabled="selectedShareIds.length === 0" @click="handleDeleteSelectedShares">删除选中（{{ selectedShareIds.length }}）</button>
+              </div>
+              <div v-if="sharesLoading" class="session-empty">加载中...</div>
+              <div v-else class="share-list">
+                <div v-for="s in filteredShares" :key="s.id" class="share-item" :class="{ invalid: s.status !== 'valid' }">
+                  <input type="checkbox" class="share-check" :value="s.id" v-model="selectedShareIds" />
+                  <div class="share-info">
+                    <div class="share-title-line">
+                      <span class="share-title">{{ s.title }}</span>
+                      <span class="share-status" :class="s.status === 'valid' ? 'ok' : 'bad'">{{ shareStatusText(s.status) }}</span>
+                    </div>
+                    <div class="share-meta">
+                      <span>创建：{{ s.createdAt || '未知' }}</span>
+                      <span>有效期至：{{ s.expiresAt || '永久' }}</span>
+                    </div>
+                    <div class="share-link">{{ shareUrl(s) }}</div>
+                  </div>
+                  <div class="share-actions">
+                    <button class="share-action-btn" title="复制链接" @click="copyShareLink(s)">复制</button>
+                    <button class="share-action-btn" title="新窗口打开" @click="openShareLink(s)">打开</button>
+                    <button class="share-action-btn danger" title="删除分享" @click="handleDeleteShare(s)">删除</button>
+                  </div>
+                </div>
+                <div v-if="filteredShares.length === 0" class="session-empty">暂无分享记录</div>
+              </div>
+              <div class="settings-form-note">仅展示当前账号创建的分享链接；删除后对应链接立即失效。失效分享 = 已过期或源会话已被删除。</div>
+            </div>
+
             <!-- 数据管理 -->
             <div v-if="tab === 'dataManagement'" class="settings-panel">
               <h3 class="settings-panel-title">数据管理</h3>
@@ -111,16 +175,14 @@
                 <div class="data-mgmt-row">
                   <div class="data-mgmt-info">
                     <div class="data-mgmt-title">导出全部历史对话</div>
-                    <div class="data-mgmt-desc">将当前账号下的全部会话记录（{{ chatStore.countValidChats() }} 条）导出为 TXT 文本文件</div>
+                    <div class="data-mgmt-desc">将当前账号下的全部会话记录（{{ chatStore.countValidChats() }} 条）按所选格式导出；JSON 为含元信息的完整备份，可用于下方导入恢复</div>
                   </div>
+                  <select v-model="exportFormat" class="settings-select">
+                    <option value="txt">TXT 文本</option>
+                    <option value="md">Markdown</option>
+                    <option value="json">JSON 备份</option>
+                  </select>
                   <button class="settings-btn settings-btn-primary" @click="confirmExport">导出</button>
-                </div>
-                <div class="data-mgmt-row">
-                  <div class="data-mgmt-info">
-                    <div class="data-mgmt-title">导出 JSON 备份</div>
-                    <div class="data-mgmt-desc">导出全部会话及标题/置顶等元信息为 JSON 文件，可在其他账号或部署中导入恢复</div>
-                  </div>
-                  <button class="settings-btn settings-btn-primary" @click="confirmExportJson">导出备份</button>
                 </div>
                 <div class="data-mgmt-row">
                   <div class="data-mgmt-info">
@@ -148,10 +210,11 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { changePassword, getSessions, kickSession } from '@/api/auth'
 import { getPromptPresets, savePromptPresets } from '@/api/user'
+import { getMyShares, deleteShare, batchDeleteMyShares } from '@/api/share'
 import { useChatStore } from '@/stores/chat'
 import { useAuthStore } from '@/stores/auth'
 
@@ -160,6 +223,20 @@ const chatStore = useChatStore()
 const authStore = useAuthStore()
 
 const tab = ref('changePassword')
+
+// 窄屏检测：≤480px 时导航改为顶部横排 Tab（与样式媒体查询断点一致）
+const mobileQuery = window.matchMedia('(max-width: 480px)')
+const isMobile = ref(mobileQuery.matches)
+const onMobileChange = e => { isMobile.value = e.matches }
+onMounted(() => mobileQuery.addEventListener('change', onMobileChange))
+onBeforeUnmount(() => mobileQuery.removeEventListener('change', onMobileChange))
+
+// 切换 Tab 时按需加载对应数据
+function onTabChange(name) {
+  if (name === 'systemPrompt') loadPresets()
+  else if (name === 'loginDevices') loadSessions()
+  else if (name === 'shareManage') loadShares()
+}
 
 // 修改密码
 const pwdForm = ref({ oldPwd: '', newPwd: '', confirmPwd: '' })
@@ -174,6 +251,15 @@ const promptTipError = ref(false)
 // 登录设备管理
 const sessions = ref([])
 const sessionsLoading = ref(false)
+
+// 分享管理
+const shares = ref([])
+const sharesLoading = ref(false)
+const shareFilterStatus = ref('')
+const selectedShareIds = ref([])
+
+// 导出格式（txt/md/json）
+const exportFormat = ref('txt')
 
 async function submitChangePassword() {
   pwdTip.value = ''
@@ -280,30 +366,27 @@ async function savePresets() {
   }
 }
 
+const EXPORT_FORMAT_TEXT = { txt: 'TXT 文本', md: 'Markdown', json: 'JSON 备份' }
+
 function confirmExport() {
   const count = chatStore.countValidChats()
   if (count === 0) {
     ElMessage.info('当前没有可导出的会话')
     return
   }
-  ElMessageBox.confirm(`确定导出全部 ${count} 条历史对话吗？`, '导出确认', {
+  const fmt = EXPORT_FORMAT_TEXT[exportFormat.value] || 'TXT 文本'
+  ElMessageBox.confirm(`确定将全部 ${count} 条历史对话导出为 ${fmt} 吗？`, '导出确认', {
     confirmButtonText: '导出',
     cancelButtonText: '取消'
-  }).then(() => {
-    chatStore.exportChats()
-    ElMessage.success('已导出')
+  }).then(async () => {
+    // 懒加载模式下导出前需先补齐未加载的会话正文
+    try {
+      await chatStore.exportChats(exportFormat.value)
+      ElMessage.success('已导出')
+    } catch (e) {
+      ElMessage.error('导出失败：拉取全量会话内容失败，请重试')
+    }
   }).catch(() => {})
-}
-
-// 导出全量 JSON 备份（含会话内容与标题/置顶等元信息）
-function confirmExportJson() {
-  const count = chatStore.countValidChats()
-  if (count === 0) {
-    ElMessage.info('当前没有可导出的会话')
-    return
-  }
-  chatStore.exportChatsJson()
-  ElMessage.success('备份已导出')
 }
 
 // 导入 JSON 备份：解析文件后按会话合并，导入成功后自动同步到服务端
@@ -372,6 +455,96 @@ function confirmKick(s) {
     loadSessions()
   }).catch(() => {})
 }
+
+// ===== 分享管理（仅管理当前账号自己的分享，功能口径与后台分享管理一致） =====
+
+const SHARE_STATUS_TEXT = { valid: '有效', expired: '已过期', orphaned: '会话已删' }
+function shareStatusText(s) {
+  return SHARE_STATUS_TEXT[s] || s
+}
+
+// 失效分享 = 已过期 + 源会话已删
+const invalidShares = computed(() => shares.value.filter(s => s.status !== 'valid'))
+
+const filteredShares = computed(() =>
+  shareFilterStatus.value ? shares.value.filter(s => s.status === shareFilterStatus.value) : shares.value
+)
+
+function shareUrl(s) {
+  return location.origin + '/share/' + s.id
+}
+
+async function loadShares() {
+  sharesLoading.value = true
+  selectedShareIds.value = []
+  try {
+    const res = await getMyShares()
+    if (res?.success) shares.value = res.data || []
+  } catch (e) { /* ignore */ } finally {
+    sharesLoading.value = false
+  }
+}
+
+async function copyShareLink(s) {
+  try {
+    await navigator.clipboard.writeText(shareUrl(s))
+    ElMessage.success('链接已复制')
+  } catch (e) {
+    // 非 https 环境剪贴板可能不可用，降级弹窗展示
+    ElMessageBox.alert(shareUrl(s), '分享链接（请手动复制）', { confirmButtonText: '知道了' })
+  }
+}
+
+function openShareLink(s) {
+  window.open(shareUrl(s), '_blank')
+}
+
+// 单条删除（撤销分享）
+async function handleDeleteShare(s) {
+  try {
+    await ElMessageBox.confirm(`确定删除分享 "${s.title}" 吗？删除后该链接立即失效。`, '确认删除', { type: 'warning' })
+    const res = await deleteShare(s.id)
+    if (res?.success) {
+      ElMessage.success('已删除')
+      await loadShares()
+    } else {
+      ElMessage.error(res?.message || '删除失败')
+    }
+  } catch { /* cancelled */ }
+}
+
+// 批量删除选中
+async function handleDeleteSelectedShares() {
+  const ids = selectedShareIds.value
+  if (ids.length === 0) return
+  try {
+    await ElMessageBox.confirm(`确定删除选中的 ${ids.length} 条分享吗？删除后链接立即失效。`, '确认批量删除', { type: 'warning' })
+    await doBatchDeleteShares(ids)
+  } catch { /* cancelled */ }
+}
+
+// 一键清除失效（已过期 + 源会话已删）
+async function handleClearInvalidShares() {
+  const rows = invalidShares.value
+  if (rows.length === 0) return
+  try {
+    await ElMessageBox.confirm(
+      `共 ${rows.length} 条失效分享（已过期或源会话已删除），确定全部清除吗？`,
+      '确认清除失效', { type: 'warning' }
+    )
+    await doBatchDeleteShares(rows.map(r => r.id))
+  } catch { /* cancelled */ }
+}
+
+async function doBatchDeleteShares(ids) {
+  const res = await batchDeleteMyShares(ids)
+  if (res?.success) {
+    ElMessage.success(`已删除 ${res.deleted ?? ids.length} 条分享`)
+    await loadShares()
+  } else {
+    ElMessage.error(res?.message || '删除失败')
+  }
+}
 </script>
 
 <style scoped>
@@ -419,29 +592,45 @@ function confirmKick(s) {
   flex: 1;
   overflow: hidden;
 }
-.settings-sidebar {
-  width: 180px;
-  border-right: 1px solid var(--border, #333);
-  padding: 12px;
+/* === 导航 Tab（el-tabs 仅作菜单栏，内容区由 .settings-content 承担） === */
+.settings-tabs-nav {
   flex-shrink: 0;
 }
-.settings-menu-item {
-  display: flex;
+.settings-tabs-nav :deep(.el-tabs__content) {
+  display: none;
+}
+.settings-tabs-nav :deep(.el-tabs__header.is-left) {
+  width: 160px;
+  margin-right: 0;
+  padding: 12px 0;
+}
+.settings-tabs-nav :deep(.el-tabs__item) {
+  color: var(--ink-2, #ccc);
+  font-size: 13px;
+}
+.settings-tabs-nav :deep(.el-tabs__item.is-left) {
+  justify-content: flex-start;
+  text-align: left;
+  padding: 0 16px;
+  height: 38px;
+}
+.settings-tabs-nav :deep(.el-tabs__item:hover),
+.settings-tabs-nav :deep(.el-tabs__item.is-active) {
+  color: var(--primary, #6366f1);
+}
+.settings-tabs-nav :deep(.el-tabs__active-bar) {
+  background-color: var(--primary, #6366f1);
+}
+.settings-tabs-nav :deep(.el-tabs__nav-wrap::after) {
+  background-color: var(--border, #333);
+}
+.settings-tab-label {
+  display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 13px;
-  color: var(--ink-2, #ccc);
-  margin-bottom: 4px;
 }
-.settings-menu-item:hover {
-  background: var(--paper-2, #2a2a3e);
-}
-.settings-menu-item.active {
-  background: var(--paper-2, #2a2a3e);
-  color: var(--primary, #6366f1);
+.settings-tab-label svg {
+  flex-shrink: 0;
 }
 .settings-content {
   flex: 1;
@@ -497,6 +686,24 @@ function confirmKick(s) {
   border-radius: 6px;
   cursor: pointer;
   font-size: 13px;
+}
+.settings-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.settings-select {
+  padding: 8px 10px;
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  background: var(--paper, #252536);
+  color: var(--ink, #eee);
+  font-size: 13px;
+  outline: none;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.settings-select:focus {
+  border-color: var(--primary, #6366f1);
 }
 .settings-btn-primary {
   background: var(--primary, #6366f1);
@@ -692,6 +899,112 @@ function confirmKick(s) {
   border-radius: 8px;
 }
 
+/* === 分享管理 === */
+.share-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.share-toolbar .settings-btn {
+  padding: 8px 12px;
+}
+.share-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.share-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border, #333);
+  border-radius: 8px;
+}
+.share-item.invalid {
+  opacity: 0.75;
+}
+.share-check {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  accent-color: var(--primary, #6366f1);
+  cursor: pointer;
+}
+.share-info {
+  flex: 1;
+  min-width: 0;
+}
+.share-title-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.share-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink, #eee);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.share-status {
+  font-size: 10px;
+  border-radius: 4px;
+  padding: 1px 6px;
+  flex-shrink: 0;
+}
+.share-status.ok {
+  color: #22c55e;
+  border: 1px solid #22c55e;
+}
+.share-status.bad {
+  color: #ef4444;
+  border: 1px solid #ef4444;
+}
+.share-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 11px;
+  color: var(--ink-3, #999);
+  margin-top: 4px;
+}
+.share-link {
+  font-size: 11px;
+  font-family: var(--mono, monospace);
+  color: var(--ink-3, #999);
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.share-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.share-action-btn {
+  background: transparent;
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  color: var(--ink-2, #ccc);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 5px 10px;
+}
+.share-action-btn:hover {
+  border-color: var(--primary, #6366f1);
+  color: var(--primary, #6366f1);
+}
+.share-action-btn.danger:hover {
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
 /* === 移动端：侧栏改为顶部水平标签栏 === */
 @media (max-width: 480px) {
   .modal-container {
@@ -701,24 +1014,21 @@ function confirmKick(s) {
   .settings-modal {
     flex-direction: column;
   }
-  .settings-sidebar {
-    width: 100%;
-    display: flex;
-    flex-direction: row;
-    flex-wrap: nowrap;
-    border-right: none;
-    border-bottom: 1px solid var(--border, #333);
-    padding: 8px 12px;
-    gap: 6px;
-    overflow-x: auto;
-    flex-shrink: 0;
+  /* 顶部横排 Tab：紧凑尺寸，隐藏图标以尽量一屏放下；放不下时由 el-tabs 自带导航滚动 */
+  .settings-tabs-nav :deep(.el-tabs__header.is-top) {
+    margin: 0;
+    padding: 0 8px;
   }
-  .settings-menu-item {
-    white-space: nowrap;
-    flex-shrink: 0;
-    padding: 8px 12px;
+  .settings-tabs-nav :deep(.el-tabs__item.is-top) {
+    padding: 0 10px;
     font-size: 12px;
-    margin-bottom: 0;
+    height: 40px;
+  }
+  .settings-tab-label {
+    gap: 0;
+  }
+  .settings-tab-label svg {
+    display: none;
   }
   .settings-content {
     padding: 16px 14px;
@@ -728,6 +1038,13 @@ function confirmKick(s) {
   }
   .session-item {
     flex-wrap: wrap;
+  }
+  .share-item {
+    flex-wrap: wrap;
+  }
+  .share-actions {
+    width: 100%;
+    justify-content: flex-end;
   }
 }
 </style>

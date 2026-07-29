@@ -87,6 +87,7 @@ public class ChatHistoryService {
                 result.put("lastChatId", data.get("lastChatId"));
                 result.put("chats", data.get("chats"));
                 result.put("chatMeta", data.get("chatMeta"));
+                result.put("deletedChatIds", data.get("deletedChatIds"));
                 return result;
             }
         } catch (Exception e) {
@@ -105,6 +106,7 @@ public class ChatHistoryService {
     private Map<String, Object> loadChatHistoryFromFiles(String userId) {
         Map<String, Object> mergedChats = new LinkedHashMap<>();
         Map<String, Object> mergedChatMeta = new LinkedHashMap<>();
+        Set<String> mergedDeletedIds = new LinkedHashSet<>();
         String lastChatId = null;
         long latestUpdateTime = 0;
 
@@ -130,6 +132,7 @@ public class ChatHistoryService {
                         for (String deletedId : deletedIds) {
                             mergedChats.remove(deletedId);
                             mergedChatMeta.remove(deletedId);
+                            mergedDeletedIds.add(deletedId);
                         }
                     }
                     @SuppressWarnings("unchecked")
@@ -158,6 +161,51 @@ public class ChatHistoryService {
         result.put("lastChatId", lastChatId);
         result.put("chats", mergedChats);
         result.put("chatMeta", mergedChatMeta);
+        result.put("deletedChatIds", new ArrayList<>(mergedDeletedIds));
+        return result;
+    }
+
+    /**
+     * 加载用户会话摘要列表（懒加载模式下的首屏拉取）
+     * 仅返回每个会话的标题/预览/最后时间/条数，不含消息内容，
+     * 会话正文由前端切换会话时通过 loadSingleChat 按需加载
+     * @param userId 用户ID
+     * @return 包含 lastChatId、chatMeta、deletedChatIds 与 summaries 列表
+     */
+    public Map<String, Object> loadChatSummaries(String userId) {
+        Map<String, Object> history = loadChatHistory(userId);
+        List<Map<String, Object>> summaries = new ArrayList<>();
+        if (history.get("chats") instanceof Map<?, ?> chats) {
+            for (Map.Entry<?, ?> entry : chats.entrySet()) {
+                if (!(entry.getValue() instanceof List)) continue;
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> msgs = (List<Map<String, Object>>) entry.getValue();
+                String preview = "";
+                String lastTime = null;
+                for (Map<String, Object> m : msgs) {
+                    if (preview.isEmpty() && "user".equals(m.get("role"))
+                            && m.get("content") instanceof String c && !c.isEmpty()) {
+                        // 首条用户消息前 300 字，供侧边栏标题回退与模糊搜索
+                        preview = c.length() > 300 ? c.substring(0, 300) : c;
+                    }
+                    if (m.get("time") instanceof String t && !t.isEmpty()) {
+                        lastTime = t;
+                    }
+                }
+                Map<String, Object> summary = new LinkedHashMap<>();
+                summary.put("id", String.valueOf(entry.getKey()));
+                summary.put("title", buildChatTitle(msgs));
+                summary.put("preview", preview);
+                summary.put("lastTime", lastTime);
+                summary.put("count", msgs.size());
+                summaries.add(summary);
+            }
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("lastChatId", history.get("lastChatId"));
+        result.put("chatMeta", history.get("chatMeta") != null ? history.get("chatMeta") : new LinkedHashMap<>());
+        result.put("deletedChatIds", history.get("deletedChatIds") != null ? history.get("deletedChatIds") : new ArrayList<>());
+        result.put("summaries", summaries);
         return result;
     }
 
@@ -185,13 +233,16 @@ public class ChatHistoryService {
     }
 
     /**
-     * 保存用户的会话历史
+     * 保存用户的会话历史（增量合并语义）
+     * 客户端可能只上传已加载的部分会话（懒加载模式），因此不做整体覆盖：
+     * 以服务端已存数据为底，按会话 ID 覆盖上传的会话，再按 deletedChatIds 删除
      * @param userId 用户ID
-     * @param chatData 会话数据，包含 lastChatId、chats、deletedChatIds
+     * @param chatData 会话数据，包含 lastChatId、chats、chatMeta、deletedChatIds
      */
     public void saveChatHistory(String userId, Map<String, Object> chatData) {
         Object lock = userLocks.computeIfAbsent(userId, k -> new Object());
         synchronized (lock) {
+            mergeWithStored(userId, chatData);
             chatData.put("userId", userId);
             String updatedAt = LocalDateTime.now().format(
                     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
@@ -205,6 +256,51 @@ public class ChatHistoryService {
                 saveChatHistoryToFiles(userId, chatData);
             }
         }
+    }
+
+    /**
+     * 将上传数据与服务端已存数据按会话合并（合并结果写回 chatData）：
+     * - chats/chatMeta：已存数据为底，按会话 ID 用上传数据覆盖
+     * - deletedChatIds：已存与上传累积合并后从 chats/chatMeta 中删除；
+     *   若上传的 chats 中重新出现某已删 ID（JSON 备份导入恢复），则不再视为已删除
+     * @param userId 用户ID
+     * @param chatData 本次上传的会话数据（原地改写为合并结果）
+     */
+    @SuppressWarnings("unchecked")
+    private void mergeWithStored(String userId, Map<String, Object> chatData) {
+        Map<String, Object> stored = loadChatHistory(userId);
+
+        Map<String, Object> incomingChats = chatData.get("chats") instanceof Map
+                ? (Map<String, Object>) chatData.get("chats") : new LinkedHashMap<>();
+        Map<String, Object> mergedChats = new LinkedHashMap<>();
+        if (stored.get("chats") instanceof Map) {
+            mergedChats.putAll((Map<String, Object>) stored.get("chats"));
+        }
+        mergedChats.putAll(incomingChats);
+
+        Map<String, Object> mergedMeta = new LinkedHashMap<>();
+        if (stored.get("chatMeta") instanceof Map) {
+            mergedMeta.putAll((Map<String, Object>) stored.get("chatMeta"));
+        }
+        if (chatData.get("chatMeta") instanceof Map) {
+            mergedMeta.putAll((Map<String, Object>) chatData.get("chatMeta"));
+        }
+
+        Set<String> deletedIds = new LinkedHashSet<>();
+        if (stored.get("deletedChatIds") instanceof List<?> list) {
+            for (Object id : list) if (id instanceof String s) deletedIds.add(s);
+        }
+        if (chatData.get("deletedChatIds") instanceof List<?> list) {
+            for (Object id : list) if (id instanceof String s) deletedIds.add(s);
+        }
+        // 备份导入等场景会重新上传已删 ID 的会话，视为恢复
+        deletedIds.removeAll(incomingChats.keySet());
+        mergedChats.keySet().removeAll(deletedIds);
+        mergedMeta.keySet().removeAll(deletedIds);
+
+        chatData.put("chats", mergedChats);
+        chatData.put("chatMeta", mergedMeta);
+        chatData.put("deletedChatIds", new ArrayList<>(deletedIds));
     }
 
     /**

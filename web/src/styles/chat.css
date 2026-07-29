@@ -471,10 +471,20 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
     gap: 0;
     margin: 0 -6px;
     padding: 0 6px;
+    /* Firefox：默认隐藏滚动条，悬停/滚动时显示 */
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
 }
-.chat-list::-webkit-scrollbar { width: 4px; }
-.chat-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-.chat-list::-webkit-scrollbar-thumb:hover { background: var(--primary); }
+.chat-list:hover,
+.chat-list.is-scrolling {
+    scrollbar-color: var(--border) transparent;
+}
+/* WebKit：滚动条默认透明，仅在鼠标移入或滚动时显示滑块 */
+.chat-list::-webkit-scrollbar { width: 4px; background: transparent; }
+.chat-list::-webkit-scrollbar-thumb { background: transparent; border-radius: 2px; transition: background 0.2s; }
+.chat-list:hover::-webkit-scrollbar-thumb,
+.chat-list.is-scrolling::-webkit-scrollbar-thumb { background: var(--border); }
+.chat-list:hover::-webkit-scrollbar-thumb:hover { background: var(--primary); }
 
 .chat-list-loading { display: flex; flex-direction: column; gap: 4px; padding: 4px 0; }
 .chat-list-skeleton { display: flex; align-items: center; gap: 8px; padding: 8px 4px; }
@@ -615,6 +625,34 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
     overflow: hidden;
     min-height: 0;
 }
+
+/* 切换会话加载缓冲层：覆盖对话区域，延迟淡入避免快速加载时闪烁 */
+.chat-switch-loading {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    font-size: 13px;
+    color: var(--fg-3);
+    letter-spacing: 0.04em;
+    background: color-mix(in srgb, var(--bg) 72%, transparent);
+    backdrop-filter: blur(2px);
+    opacity: 0;
+    animation: switchLoadingIn 0.15s ease 0.12s forwards;
+}
+.chat-switch-spinner {
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--border);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: switchSpin 0.8s linear infinite;
+}
+@keyframes switchLoadingIn { to { opacity: 1; } }
+@keyframes switchSpin { to { transform: rotate(360deg); } }
 .chat-container::-webkit-scrollbar { width: 8px; }
 .chat-container::-webkit-scrollbar-thumb { background: transparent; transition: background 0.2s; }
 .chat-container:hover::-webkit-scrollbar-thumb { background: var(--border); }

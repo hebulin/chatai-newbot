@@ -120,6 +120,36 @@ public class AdminController {
     }
 
     /**
+     * 批量删除模型。请求体: {"ids": ["..."]}
+     */
+    @PostMapping("/models/batch-delete")
+    public Map<String, Object> batchDeleteModels(@RequestBody Map<String, Object> body,
+                                                 HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        Object idsObj = body == null ? null : body.get("ids");
+        if (!(idsObj instanceof List<?> ids) || ids.isEmpty()) {
+            result.put("success", false);
+            result.put("message", "请指定要删除的模型");
+            return result;
+        }
+        int deleted = 0;
+        for (Object idObj : ids) {
+            if (idObj instanceof String id && !id.isEmpty() && storageService.deleteModelConfig(id)) {
+                deleted++;
+            }
+        }
+        log.info("后台批量删除模型：请求 {} 条，实际删除 {} 条", ids.size(), deleted);
+        result.put("success", true);
+        result.put("deleted", deleted);
+        return result;
+    }
+
+    /**
      * 模型连通性测试：向厂商 API 发一条最小请求，验证 API Key/URL/模型ID 是否可用
      */
     @PostMapping("/models/{id}/test")
@@ -524,6 +554,36 @@ public class AdminController {
         boolean deleted = storageService.deleteUser(id);
         result.put("success", deleted);
         if (!deleted) result.put("message", "用户不存在或不可删除");
+        return result;
+    }
+
+    /**
+     * 批量删除用户。请求体: {"ids": ["..."]}（管理员账号由存储层保护，不会被删除）
+     */
+    @PostMapping("/users/batch-delete")
+    public Map<String, Object> batchDeleteUsers(@RequestBody Map<String, Object> body,
+                                                HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        Object idsObj = body == null ? null : body.get("ids");
+        if (!(idsObj instanceof List<?> ids) || ids.isEmpty()) {
+            result.put("success", false);
+            result.put("message", "请指定要删除的用户");
+            return result;
+        }
+        int deleted = 0;
+        for (Object idObj : ids) {
+            if (idObj instanceof String id && !id.isEmpty() && storageService.deleteUser(id)) {
+                deleted++;
+            }
+        }
+        log.info("后台批量删除用户：请求 {} 条，实际删除 {} 条", ids.size(), deleted);
+        result.put("success", true);
+        result.put("deleted", deleted);
         return result;
     }
 
@@ -1000,59 +1060,239 @@ public class AdminController {
         return key.substring(0, 5) + "****" + key.substring(key.length() - 3);
     }
 
-    // ========== 系统设置（公告） ==========
+    // ========== 系统公告管理 ==========
 
     /**
-     * 获取公告设置
-     * 返回: { "success": true, "data": { "content": "...", "updatedAt": "2026-07-29 10:00:00" } }
+     * 获取全部公告（含历史公告），附带状态判定
+     * status: active=生效中 scheduled=待生效 expired=已过期 offline=已下线
      */
-    @GetMapping("/settings/announcement")
-    public Map<String, Object> getAnnouncement(HttpServletRequest request, HttpServletResponse response) {
+    @GetMapping("/announcements")
+    public Map<String, Object> listAnnouncements(HttpServletRequest request, HttpServletResponse response) {
         Map<String, Object> result = new HashMap<>();
         if (!checkAdmin(request, response)) {
             result.put("success", false);
             result.put("message", "无权限");
             return result;
         }
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("content", storageService.getAnnouncement() == null ? "" : storageService.getAnnouncement());
-        data.put("updatedAt", storageService.getAnnouncementUpdatedAt() == null ? "" : storageService.getAnnouncementUpdatedAt());
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (Announcement a : storageService.getAllAnnouncements()) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", a.getId());
+            item.put("title", a.getTitle() == null ? "" : a.getTitle());
+            item.put("content", a.getContent());
+            item.put("startAt", a.getStartAt() == null ? "" : a.getStartAt());
+            item.put("endAt", a.getEndAt() == null ? "" : a.getEndAt());
+            item.put("enabled", a.isEnabled());
+            item.put("createdAt", a.getCreatedAt());
+            item.put("updatedAt", a.getUpdatedAt());
+            item.put("status", resolveAnnouncementStatus(a));
+            list.add(item);
+        }
         result.put("success", true);
-        result.put("data", data);
+        result.put("data", list);
         return result;
     }
 
     /**
-     * 保存公告设置（内容传空则清除公告）
-     * 请求体: { "content": "公告正文" }
+     * 发布新公告（自动下线其它公告）
+     * 请求体: { "title": "公告标题", "content": "公告正文", "startAt": "yyyy-MM-dd HH:mm:ss"可空, "endAt": "yyyy-MM-dd HH:mm:ss"可空 }
      */
-    @PutMapping("/settings/announcement")
-    public Map<String, Object> setAnnouncement(@RequestBody Map<String, Object> body,
-                                               HttpServletRequest request, HttpServletResponse response) {
+    @PostMapping("/announcements")
+    public Map<String, Object> publishAnnouncement(@RequestBody Map<String, Object> body,
+                                                   HttpServletRequest request, HttpServletResponse response) {
         Map<String, Object> result = new HashMap<>();
         if (!checkAdmin(request, response)) {
             result.put("success", false);
             result.put("message", "无权限");
             return result;
         }
-        try {
-            Object raw = body == null ? null : body.get("content");
-            String content = raw instanceof String s ? s : "";
-            if (content.length() > 5000) {
-                result.put("success", false);
-                result.put("message", "公告内容不能超过 5000 字符");
-                return result;
-            }
-            storageService.setAnnouncement(content);
-            result.put("success", true);
-            result.put("message", content.trim().isEmpty() ? "公告已清除" : "公告已发布");
-            result.put("updatedAt", storageService.getAnnouncementUpdatedAt());
-        } catch (Exception e) {
-            log.error("保存公告失败", e);
+        String content = body == null ? "" : (body.get("content") instanceof String s ? s.trim() : "");
+        if (content.isEmpty()) {
             result.put("success", false);
-            result.put("message", "保存失败: " + e.getMessage());
+            result.put("message", "公告内容不能为空");
+            return result;
+        }
+        if (content.length() > 5000) {
+            result.put("success", false);
+            result.put("message", "公告内容不能超过 5000 字符");
+            return result;
+        }
+        String title = body.get("title") instanceof String s ? s.trim() : "";
+        if (title.isEmpty()) {
+            result.put("success", false);
+            result.put("message", "公告标题不能为空");
+            return result;
+        }
+        if (title.length() > 100) {
+            result.put("success", false);
+            result.put("message", "公告标题不能超过 100 字符");
+            return result;
+        }
+        String startAt = body.get("startAt") instanceof String s ? s.trim() : "";
+        String endAt = body.get("endAt") instanceof String s ? s.trim() : "";
+        String periodError = validateAnnouncementPeriod(startAt, endAt);
+        if (periodError != null) {
+            result.put("success", false);
+            result.put("message", periodError);
+            return result;
+        }
+        try {
+            storageService.publishAnnouncement(title, content, startAt, endAt);
+            result.put("success", true);
+            result.put("message", "公告已发布");
+        } catch (Exception e) {
+            log.error("发布公告失败", e);
+            result.put("success", false);
+            result.put("message", "发布失败: " + e.getMessage());
         }
         return result;
+    }
+
+    /**
+     * 重新生效/更改公告期：更新公告期（可选同时更新标题与内容）并启用，其它公告自动下线
+     * 请求体: { "title": "可空（空=不修改）", "content": "可空（空=不修改）", "startAt": "可空", "endAt": "可空" }
+     */
+    @PutMapping("/announcements/{id}")
+    public Map<String, Object> republishAnnouncement(@PathVariable String id,
+                                                     @RequestBody(required = false) Map<String, Object> body,
+                                                     HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        String content = body != null && body.get("content") instanceof String s ? s.trim() : "";
+        if (content.length() > 5000) {
+            result.put("success", false);
+            result.put("message", "公告内容不能超过 5000 字符");
+            return result;
+        }
+        String title = body != null && body.get("title") instanceof String s ? s.trim() : "";
+        if (title.length() > 100) {
+            result.put("success", false);
+            result.put("message", "公告标题不能超过 100 字符");
+            return result;
+        }
+        String startAt = body != null && body.get("startAt") instanceof String s ? s.trim() : "";
+        String endAt = body != null && body.get("endAt") instanceof String s ? s.trim() : "";
+        String periodError = validateAnnouncementPeriod(startAt, endAt);
+        if (periodError != null) {
+            result.put("success", false);
+            result.put("message", periodError);
+            return result;
+        }
+        try {
+            Announcement a = storageService.republishAnnouncement(id, title, content, startAt, endAt);
+            if (a == null) {
+                result.put("success", false);
+                result.put("message", "公告不存在");
+                return result;
+            }
+            result.put("success", true);
+            result.put("message", "公告已重新生效");
+        } catch (Exception e) {
+            log.error("更新公告失败: id={}", id, e);
+            result.put("success", false);
+            result.put("message", "更新失败: " + e.getMessage());
+        }
+        return result;
+    }
+
+    /**
+     * 下线公告（保留历史记录，可重新生效）
+     */
+    @PutMapping("/announcements/{id}/offline")
+    public Map<String, Object> offlineAnnouncement(@PathVariable String id,
+                                                   HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        if (storageService.offlineAnnouncement(id)) {
+            result.put("success", true);
+            result.put("message", "公告已下线");
+        } else {
+            result.put("success", false);
+            result.put("message", "公告不存在");
+        }
+        return result;
+    }
+
+    /**
+     * 删除公告记录
+     */
+    @DeleteMapping("/announcements/{id}")
+    public Map<String, Object> deleteAnnouncement(@PathVariable String id,
+                                                  HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        if (storageService.deleteAnnouncement(id)) {
+            result.put("success", true);
+            result.put("message", "公告已删除");
+        } else {
+            result.put("success", false);
+            result.put("message", "公告不存在");
+        }
+        return result;
+    }
+
+    /**
+     * 判定公告状态：已下线 > 待生效 > 已过期 > 生效中（时间解析失败视为未设置该边界）
+     */
+    private String resolveAnnouncementStatus(Announcement a) {
+        if (!a.isEnabled()) return "offline";
+        LocalDateTime now = LocalDateTime.now();
+        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+        if (a.getStartAt() != null && !a.getStartAt().isEmpty()) {
+            try {
+                if (now.isBefore(LocalDateTime.parse(a.getStartAt(), fmt))) return "scheduled";
+            } catch (Exception ignore) {
+                // 解析失败视为立即生效
+            }
+        }
+        if (a.getEndAt() != null && !a.getEndAt().isEmpty()) {
+            try {
+                if (now.isAfter(LocalDateTime.parse(a.getEndAt(), fmt))) return "expired";
+            } catch (Exception ignore) {
+                // 解析失败视为长期有效
+            }
+        }
+        return "active";
+    }
+
+    /**
+     * 校验公告期参数：非空时必须为 yyyy-MM-dd HH:mm:ss，且开始时间早于结束时间
+     * @return 错误信息，合法返回 null
+     */
+    private String validateAnnouncementPeriod(String startAt, String endAt) {
+        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+        LocalDateTime start = null;
+        LocalDateTime end = null;
+        if (startAt != null && !startAt.isEmpty()) {
+            try {
+                start = LocalDateTime.parse(startAt, fmt);
+            } catch (Exception e) {
+                return "公告期开始时间格式错误（yyyy-MM-dd HH:mm:ss）";
+            }
+        }
+        if (endAt != null && !endAt.isEmpty()) {
+            try {
+                end = LocalDateTime.parse(endAt, fmt);
+            } catch (Exception e) {
+                return "公告期结束时间格式错误（yyyy-MM-dd HH:mm:ss）";
+            }
+        }
+        if (start != null && end != null && !start.isBefore(end)) {
+            return "公告期开始时间必须早于结束时间";
+        }
+        return null;
     }
 
     /**

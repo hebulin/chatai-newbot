@@ -27,7 +27,7 @@
         </button>
       </div>
 
-      <div class="chat-list">
+      <div class="chat-list" :class="{ 'is-scrolling': listScrolling }" @scroll.passive="onChatListScroll">
         <!-- 加载骨架屏：会话历史未加载完成时显示 -->
         <div v-if="!chatStore.isChatHistoryLoaded" class="chat-list-skeleton">
           <div v-for="n in 5" :key="n" class="chat-skeleton-item"></div>
@@ -137,6 +137,16 @@ const { getTheme } = useTheme()
 
 const userMenuOpen = ref(false)
 
+// 会话列表滚动态：滚动时临时显示滚动条，停止后自动隐藏
+const listScrolling = ref(false)
+let scrollHideTimer = null
+
+function onChatListScroll() {
+  listScrolling.value = true
+  if (scrollHideTimer) clearTimeout(scrollHideTimer)
+  scrollHideTimer = setTimeout(() => { listScrolling.value = false }, 800)
+}
+
 // 会话项操作菜单（置顶/重命名/分享/导出/删除）
 const openMenuId = ref(null)
 
@@ -168,7 +178,8 @@ function onShare(id) {
 }
 
 function onExport(id) {
-  chatStore.exportChatMarkdown(id)
+  // 未加载会话会先拉取正文再导出，失败提示由请求拦截器统一处理
+  chatStore.exportChatMarkdown(id).catch(() => {})
   openMenuId.value = null
 }
 
@@ -233,6 +244,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   document.removeEventListener('click', closeMenuOnOutside)
+  if (scrollHideTimer) clearTimeout(scrollHideTimer)
 })
 
 const emit = defineEmits(['toggle', 'new-chat', 'switch-chat', 'delete-chat', 'open-settings', 'open-about', 'open-stats', 'logout', 'share-chat'])

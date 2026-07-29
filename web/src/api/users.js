@@ -20,6 +20,11 @@ export function deleteUser(id) {
   return request.delete(`/admin/users/${id}`)
 }
 
+// 批量删除用户（内置管理员由后端保护，不会被删除）
+export function batchDeleteUsers(ids) {
+  return request.post('/admin/users/batch-delete', { ids })
+}
+
 // 更新用户权限
 export function updateUserPermissions(id, allowedModelIds) {
   return request.put(`/admin/users/${id}/permissions`, { allowedModelIds })

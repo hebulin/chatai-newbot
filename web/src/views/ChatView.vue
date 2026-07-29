@@ -68,6 +68,12 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="6 9 12 15 18 9"/></svg>
           </button>
         </div>
+
+        <!-- 切换会话加载缓冲：懒加载拉取正文/长会话首屏渲染期间的视觉过渡 -->
+        <div v-if="chatSwitchLoading" class="chat-switch-loading">
+          <span class="chat-switch-spinner"></span>
+          <span>会话加载中…</span>
+        </div>
       </div>
 
       <!-- 当前会话同步提示（同步超过 3 秒才显示） -->
@@ -100,9 +106,9 @@
 
 <script setup>
 import '@/styles/chat.css'
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch, h } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, ElCheckbox } from 'element-plus'
 import { useChatStore } from '@/stores/chat'
 import { useModelsStore } from '@/stores/models'
 import { useAuthStore } from '@/stores/auth'
@@ -144,6 +150,8 @@ const pendingImages = ref([])
 
 const streamingMsg = ref(null)
 const syncTipVisible = ref(false)
+// 切换会话加载缓冲层（懒加载拉取正文期间显示）
+const chatSwitchLoading = ref(false)
 
 // ===== 长会话渲染窗口：默认只渲染最近 50 条，点“加载更早消息”每次再展开 100 条 =====
 const RENDER_WINDOW = 50
@@ -202,7 +210,7 @@ onMounted(async () => {
 
   window.addEventListener('resize', handleResize)
 
-  // 拉取系统公告（异步不阻塞首屏，同一公告只弹一次）
+  // 拉取系统公告（异步不阻塞首屏）
   checkAnnouncement()
 })
 
@@ -211,21 +219,41 @@ onUnmounted(() => {
   scrollFollow.unbindEvents()
 })
 
-// 拉取公告并弹窗展示：用 localStorage 记录已读的更新时间，公告重新发布后会再次提醒
+// 拉取公告并弹窗展示：勾选“以后不再提示”后该公告不再弹出（localStorage 永久记录）；
+// 未勾选则每次登录都会提示（登录时清除 sessionStorage 标记，见 stores/auth.js），直到公告失效；
+// 公告重新发布/重新生效（updatedAt 变化）后两类标记均失效，会再次提醒
 async function checkAnnouncement() {
   try {
     const res = await fetchAnnouncement()
     const content = ((res && res.content) || '').trim()
-    const updatedAt = (res && res.updatedAt) || ''
     if (!content) return
-    const readAt = localStorage.getItem('announcement_read_at')
-    if (readAt && readAt === updatedAt) return
-    await ElMessageBox.alert(content, '📢 系统公告', {
+    const key = `${(res && res.id) || ''}|${(res && res.updatedAt) || ''}`
+    // 勾选过“以后不再提示”的公告不再弹出
+    if (localStorage.getItem('announcement_dismissed') === key) return
+    // 本次登录已提示过（刷新/切页不重复弹）
+    if (sessionStorage.getItem('announcement_shown') === key) return
+    const dontRemind = ref(false)
+    await ElMessageBox({
+      title: '📢 ' + (((res && res.title) || '').trim() || '系统公告'),
+      message: () => h('div', null, [
+        h('div', { style: 'white-space:pre-wrap;max-height:50vh;overflow:auto;' }, content),
+        h(ElCheckbox, {
+          modelValue: dontRemind.value,
+          'onUpdate:modelValue': v => { dontRemind.value = v },
+          label: '以后不再提示',
+          style: 'margin-top:12px;'
+        })
+      ]),
       confirmButtonText: '我知道了',
-      dangerouslyUseHTMLString: false,
-      customStyle: { whiteSpace: 'pre-wrap', maxWidth: '520px' }
+      showCancelButton: false,
+      customStyle: { maxWidth: '520px' }
     }).catch(() => {})
-    localStorage.setItem('announcement_read_at', updatedAt)
+    sessionStorage.setItem('announcement_shown', key)
+    if (dontRemind.value) {
+      localStorage.setItem('announcement_dismissed', key)
+    }
+    // 清理旧版已读标记（已改用 dismissed/shown 双标记机制）
+    localStorage.removeItem('announcement_read_at')
   } catch (e) { /* 公告拉取失败不影响聊天 */ }
 }
 
@@ -252,6 +280,10 @@ function handleShareChat() {
 
 // 分享指定会话：先选择有效期，再强制同步会话到服务端，最后生成只读分享链接并复制
 async function doShare(chatId) {
+  // 懒加载模式：侧边栏分享未加载会话时先拉取正文
+  try {
+    await chatStore.ensureChatLoaded(chatId)
+  } catch { return }
   const msgs = chatStore.chats[chatId] || []
   if (!msgs.some(m => m.role === 'user')) {
     ElMessage.info('该会话还没有内容，无法分享')
@@ -317,16 +349,32 @@ function handleNewChat() {
   }
 }
 
-function handleSwitchChat(id) {
+async function handleSwitchChat(id) {
   if (streamChat.isStreaming.value) {
     ElMessage.warning('请等待回答完成')
     return
   }
-  chatStore.switchChat(id)
-  if (isMobile.value) {
-    sidebarOpen.value = false
+  if (id === chatStore.currentChatId) {
+    if (isMobile.value) sidebarOpen.value = false
+    return
   }
-  nextTick(() => scrollFollow.scrollToBottomImmediate())
+  // 懒加载：未加载会话先拉取正文再切换，期间盖 loading 缓冲网络与首屏渲染；
+  // 已在内存的会话直接切换不显示 loading，失败则保持当前会话
+  const needLoad = chatStore.chats[id] === undefined
+  if (needLoad) chatSwitchLoading.value = true
+  try {
+    await chatStore.switchChatLazy(id)
+    if (isMobile.value) {
+      sidebarOpen.value = false
+    }
+    // 等新会话消息渲染上屏后再撤 loading，渲染较慢时也有视觉缓冲
+    await nextTick()
+    scrollFollow.scrollToBottomImmediate()
+  } catch {
+    ElMessage.error('会话内容加载失败，请重试')
+  } finally {
+    chatSwitchLoading.value = false
+  }
 }
 
 function handleDeleteChat(id) {

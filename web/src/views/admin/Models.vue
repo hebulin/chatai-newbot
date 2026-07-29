@@ -5,9 +5,14 @@
         <span class="section-eyebrow">02 / MODELS · 模型</span>
         <h2>模型管理</h2>
       </div>
-      <el-button type="primary" @click="showAddModel">
-        <el-icon><Plus /></el-icon> 添加模型
-      </el-button>
+      <div style="display:flex;gap:8px;">
+        <el-button type="danger" :disabled="selectedRows.length === 0" @click="handleDeleteSelected">
+          <el-icon><Delete /></el-icon> 删除选中（{{ selectedRows.length }}）
+        </el-button>
+        <el-button type="primary" @click="showAddModel">
+          <el-icon><Plus /></el-icon> 添加模型
+        </el-button>
+      </div>
     </div>
 
     <div class="admin-card">
@@ -43,8 +48,10 @@
         </el-button>
       </div>
 
-      <!-- 模型表格：列宽按内容自适应（上限 50 汉字），border 模式支持拖拽表头调宽，超宽时横向滚动 -->
-      <el-table :data="pagedModels" v-loading="loading" stripe border style="width:100%">
+      <!-- 模型表格：列宽按内容自适应（上限 50 汉字），border 模式支持拖拽表头调宽，超宽时横向滚动；selection 列支持跨页勾选批量删除 -->
+      <el-table ref="tableRef" :data="pagedModels" v-loading="loading" stripe border style="width:100%"
+                @selection-change="onSelectionChange" row-key="id">
+        <el-table-column type="selection" width="44" align="center" reserve-selection />
         <el-table-column label="名称" :width="colW.name">
           <template #default="{ row }">
             <div class="model-name-cell">
@@ -286,7 +293,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Edit, Delete, Star, StarFilled, Connection, Loading, ArrowUp, ArrowDown } from '@element-plus/icons-vue'
-import { getModels, addModel, updateModel, deleteModel, testModel, setDefaultModel, clearDefaultModel } from '@/api/models'
+import { getModels, addModel, updateModel, deleteModel, batchDeleteModels, testModel, setDefaultModel, clearDefaultModel } from '@/api/models'
 import { getProviders } from '@/api/providers'
 import { autoColWidth } from '@/composables/useTableAutoWidth'
 
@@ -306,6 +313,8 @@ const submitting = ref(false)
 const allModels = ref([])
 const allProviders = ref([])
 const defaultModelId = ref(null)
+const tableRef = ref(null)
+const selectedRows = ref([])
 
 // 筛选
 const filters = ref({ name: '', providerId: '', modelId: '', thinking: '', multimodal: '', enabled: '', visible: '' })
@@ -438,6 +447,27 @@ async function handleDelete(row) {
     const res = await deleteModel(row.id)
     if (res?.success) { ElMessage.success('已删除'); await loadData() }
     else ElMessage.error(res?.message || '删除失败')
+  } catch { /* cancelled */ }
+}
+
+function onSelectionChange(rows) {
+  selectedRows.value = rows
+}
+
+// 批量删除选中模型
+async function handleDeleteSelected() {
+  const rows = selectedRows.value
+  if (rows.length === 0) return
+  try {
+    await ElMessageBox.confirm(`确定删除选中的 ${rows.length} 个模型吗？`, '确认批量删除', { type: 'warning' })
+    const res = await batchDeleteModels(rows.map(r => r.id))
+    if (res?.success) {
+      ElMessage.success(`已删除 ${res.deleted ?? rows.length} 个模型`)
+      tableRef.value?.clearSelection()
+      await loadData()
+    } else {
+      ElMessage.error(res?.message || '删除失败')
+    }
   } catch { /* cancelled */ }
 }
 

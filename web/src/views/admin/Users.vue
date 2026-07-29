@@ -5,9 +5,14 @@
         <span class="section-eyebrow">04 / USERS · 用户</span>
         <h2>用户管理</h2>
       </div>
-      <el-button type="primary" @click="showAddUser">
-        <el-icon><Plus /></el-icon> 添加用户
-      </el-button>
+      <div style="display:flex;gap:8px;">
+        <el-button type="danger" :disabled="selectedRows.length === 0" @click="handleDeleteSelected">
+          <el-icon><Delete /></el-icon> 删除选中（{{ selectedRows.length }}）
+        </el-button>
+        <el-button type="primary" @click="showAddUser">
+          <el-icon><Plus /></el-icon> 添加用户
+        </el-button>
+      </div>
     </div>
 
     <div class="admin-card">
@@ -17,8 +22,10 @@
         <el-button @click="filterUsername = ''; userPage = 1">重置</el-button>
       </div>
 
-      <!-- 用户表格：列宽按内容自适应（上限 50 汉字），border 模式支持拖拽表头调宽，超宽时横向滚动 -->
-      <el-table :data="pagedUsers" v-loading="loading" stripe border style="width:100%">
+      <!-- 用户表格：列宽按内容自适应（上限 50 汉字），border 模式支持拖拽表头调宽，超宽时横向滚动；selection 列支持跨页勾选批量删除（内置 admin 不可勾选） -->
+      <el-table ref="tableRef" :data="pagedUsers" v-loading="loading" stripe border style="width:100%"
+                @selection-change="onSelectionChange" row-key="id">
+        <el-table-column type="selection" width="44" align="center" reserve-selection :selectable="isRowSelectable" />
         <el-table-column prop="username" label="用户名" :width="colW.username" show-overflow-tooltip />
         <el-table-column label="角色" :width="colW.role" align="center">
           <template #default="{ row }">
@@ -188,7 +195,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Edit, Delete, Key, Lock, Unlock } from '@element-plus/icons-vue'
-import { getUsers, addUser, updateUser, deleteUser, updateUserPermissions } from '@/api/users'
+import { getUsers, addUser, updateUser, deleteUser, batchDeleteUsers, updateUserPermissions } from '@/api/users'
 import { getModels } from '@/api/models'
 import { autoColWidth } from '@/composables/useTableAutoWidth'
 
@@ -206,6 +213,8 @@ const submitting = ref(false)
 const allUsers = ref([])
 const allModels = ref([])
 const filterUsername = ref('')
+const tableRef = ref(null)
+const selectedRows = ref([])
 
 const userPage = ref(1)
 const userPageSize = ref(10)
@@ -360,6 +369,32 @@ async function handleDelete(row) {
     const res = await deleteUser(row.id)
     if (res?.success) {
       ElMessage.success('已删除')
+      await loadUsers()
+    } else {
+      ElMessage.error(res?.message || '删除失败')
+    }
+  } catch { /* cancelled */ }
+}
+
+// 内置 admin 账号不可勾选（不可删除）
+function isRowSelectable(row) {
+  return row.username !== 'admin'
+}
+
+function onSelectionChange(rows) {
+  selectedRows.value = rows
+}
+
+// 批量删除选中用户
+async function handleDeleteSelected() {
+  const rows = selectedRows.value
+  if (rows.length === 0) return
+  try {
+    await ElMessageBox.confirm(`确定删除选中的 ${rows.length} 个用户吗？删除后不可恢复。`, '确认批量删除', { type: 'warning' })
+    const res = await batchDeleteUsers(rows.map(r => r.id))
+    if (res?.success) {
+      ElMessage.success(`已删除 ${res.deleted ?? rows.length} 个用户`)
+      tableRef.value?.clearSelection()
       await loadUsers()
     } else {
       ElMessage.error(res?.message || '删除失败')
