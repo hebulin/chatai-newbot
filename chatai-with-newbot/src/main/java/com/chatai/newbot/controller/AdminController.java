@@ -1,6 +1,9 @@
 package com.chatai.newbot.controller;
 
+import com.chatai.newbot.config.IpUtils;
+import com.chatai.newbot.exception.ForbiddenException;
 import com.chatai.newbot.model.*;
+import com.chatai.newbot.service.AuditLogService;
 import com.chatai.newbot.service.ChatHistoryService;
 import com.chatai.newbot.service.PasswordHasher;
 import com.chatai.newbot.service.StorageManager;
@@ -11,7 +14,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -27,38 +29,47 @@ public class AdminController {
     private final UnifiedChatService unifiedChatService;
     private final ChatHistoryService chatHistoryService;
     private final WebSearchService webSearchService;
+    private final AuditLogService auditLogService;
 
     public AdminController(StorageManager storageService, UnifiedChatService unifiedChatService,
-                           ChatHistoryService chatHistoryService, WebSearchService webSearchService) {
+                           ChatHistoryService chatHistoryService, WebSearchService webSearchService,
+                           AuditLogService auditLogService) {
         this.storageService = storageService;
         this.unifiedChatService = unifiedChatService;
         this.chatHistoryService = chatHistoryService;
         this.webSearchService = webSearchService;
+        this.auditLogService = auditLogService;
     }
 
-    private boolean checkAdmin(HttpServletRequest request, HttpServletResponse response) {
+    /**
+     * 级联校验管理员身份（拦截器已统一拦截 /api/admin，此处为纵深防御），
+     * 不通过时抛出 ForbiddenException，由全局异常处理器统一返回 403
+     */
+    private void requireAdmin(HttpServletRequest request) {
         User user = (User) request.getAttribute("currentUser");
         if (user == null || !user.isAdmin()) {
-            response.setStatus(403);
-            return false;
+            throw new ForbiddenException();
         }
-        return true;
+    }
+
+    /**
+     * 记录管理员操作审计日志（操作人取当前登录管理员）
+     */
+    private void audit(HttpServletRequest request, String action, String detail) {
+        User user = (User) request.getAttribute("currentUser");
+        auditLogService.record(user == null ? null : user.getId(),
+                user == null ? null : user.getUsername(), action, detail, IpUtils.getClientIp(request));
     }
 
     // ========== 模型管理 ==========
 
     @GetMapping("/models")
-    public Map<String, Object> listModels(HttpServletRequest request, HttpServletResponse response) {
+    public Map<String, Object> listModels(HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         List<ModelConfig> models = storageService.getAllModelConfigs();
-        // 同步厂商显示名/图标（预置厂商）；思考/多模态能力由管理员手动维护，不自动覆盖
-        syncModelCapabilities(models);
-        // 脱敏 API Key，防止泄露（创建安全副本，不污染原始数据）
+        // 脱敏 API Key，防止泄露（创建安全副本，不污染原始数据）；
+        // 厂商名/图标同步已改为启动时一次性执行 + 改名时实时同步，读接口不再写库
         List<ModelConfig> safeModels = models.stream()
                 .map(this::toSafeModel)
                 .collect(Collectors.toList());
@@ -70,14 +81,11 @@ public class AdminController {
 
     @PostMapping("/models")
     public Map<String, Object> addModel(@RequestBody ModelConfig config,
-                                         HttpServletRequest request, HttpServletResponse response) {
+                                         HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         ModelConfig saved = storageService.addModelConfig(config);
+        audit(request, "model.add", "新增模型 " + (saved.getDisplayName() != null ? saved.getDisplayName() : saved.getModelId()));
         result.put("success", true);
         result.put("data", toSafeModel(saved));
         return result;
@@ -85,13 +93,9 @@ public class AdminController {
 
     @PutMapping("/models/{id}")
     public Map<String, Object> updateModel(@PathVariable String id, @RequestBody ModelConfig config,
-                                            HttpServletRequest request, HttpServletResponse response) {
+                                            HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         // 如果 API Key 为空或是脱敏值（含*），保留原来的 Key
         ModelConfig existing = storageService.getModelConfigById(id);
         if (existing != null && (config.getApiKey() == null || config.getApiKey().isEmpty()
@@ -100,20 +104,20 @@ public class AdminController {
         }
         config.setId(id);
         storageService.updateModelConfig(config);
+        audit(request, "model.update", "更新模型 " + (config.getDisplayName() != null ? config.getDisplayName() : id));
         result.put("success", true);
         return result;
     }
 
     @DeleteMapping("/models/{id}")
     public Map<String, Object> deleteModel(@PathVariable String id,
-                                            HttpServletRequest request, HttpServletResponse response) {
+                                            HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         boolean deleted = storageService.deleteModelConfig(id);
+        if (deleted) {
+            audit(request, "model.delete", "删除模型 " + id);
+        }
         result.put("success", deleted);
         if (!deleted) result.put("message", "模型不存在");
         return result;
@@ -124,13 +128,9 @@ public class AdminController {
      */
     @PostMapping("/models/batch-delete")
     public Map<String, Object> batchDeleteModels(@RequestBody Map<String, Object> body,
-                                                 HttpServletRequest request, HttpServletResponse response) {
+                                                 HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         Object idsObj = body == null ? null : body.get("ids");
         if (!(idsObj instanceof List<?> ids) || ids.isEmpty()) {
             result.put("success", false);
@@ -144,6 +144,7 @@ public class AdminController {
             }
         }
         log.info("后台批量删除模型：请求 {} 条，实际删除 {} 条", ids.size(), deleted);
+        audit(request, "model.batchDelete", "批量删除模型 " + deleted + " 个");
         result.put("success", true);
         result.put("deleted", deleted);
         return result;
@@ -154,13 +155,8 @@ public class AdminController {
      */
     @PostMapping("/models/{id}/test")
     public Map<String, Object> testModel(@PathVariable String id,
-                                          HttpServletRequest request, HttpServletResponse response) {
-        Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
+                                          HttpServletRequest request) {
+        requireAdmin(request);
         return unifiedChatService.testConnection(id);
     }
 
@@ -169,13 +165,9 @@ public class AdminController {
      */
     @PutMapping("/models/default")
     public Map<String, Object> setDefaultModel(@RequestBody Map<String, String> body,
-                                               HttpServletRequest request, HttpServletResponse response) {
+                                               HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         String modelId = body == null ? null : body.get("modelId");
         if (modelId == null || modelId.trim().isEmpty()) {
             result.put("success", false);
@@ -189,6 +181,7 @@ public class AdminController {
             return result;
         }
         storageService.setDefaultModelId(modelId);
+        audit(request, "model.setDefault", "设置默认模型 " + (m.getDisplayName() != null ? m.getDisplayName() : m.getModelId()));
         result.put("success", true);
         result.put("message", "已设为默认模型：" + (m.getDisplayName() != null ? m.getDisplayName() : m.getModelId()));
         return result;
@@ -198,14 +191,11 @@ public class AdminController {
      * 取消全局默认模型
      */
     @DeleteMapping("/models/default")
-    public Map<String, Object> clearDefaultModel(HttpServletRequest request, HttpServletResponse response) {
+    public Map<String, Object> clearDefaultModel(HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         storageService.clearDefaultModelId();
+        audit(request, "model.clearDefault", "取消默认模型");
         result.put("success", true);
         result.put("message", "已取消默认模型");
         return result;
@@ -213,13 +203,9 @@ public class AdminController {
 
     // ========== 厂商信息 =========
     @GetMapping("/providers")
-    public Map<String, Object> listProviders(HttpServletRequest request, HttpServletResponse response) {
+    public Map<String, Object> listProviders(HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         // 预置厂商（已应用显示名覆盖；图标直接来自 providers.json），附带原始 defaultName
         List<Provider> presetProviders = storageService.getAllProviders();
         List<Map<String, Object>> presetList = new ArrayList<>();
@@ -265,13 +251,9 @@ public class AdminController {
     @PatchMapping("/providers/{providerId}")
     public Map<String, Object> renameProvider(@PathVariable String providerId,
                                               @RequestBody Map<String, Object> body,
-                                              HttpServletRequest request, HttpServletResponse response) {
+                                              HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         String newName = (String) body.get("name");
         String newIcon = (String) body.get("icon");
         String oldName = (String) body.get("oldName");
@@ -323,13 +305,9 @@ public class AdminController {
      */
     @PostMapping("/models/batch")
     public Map<String, Object> batchAddModels(@RequestBody Map<String, Object> body,
-                                              HttpServletRequest request, HttpServletResponse response) {
+                                              HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
 
         String providerId = (String) body.get("providerId");
         String apiKey = (String) body.get("apiKey");
@@ -397,6 +375,7 @@ public class AdminController {
             added++;
         }
 
+        audit(request, "model.batchAdd", "批量接入厂商 " + providerId + " 模型 " + added + " 个");
         result.put("success", true);
         result.put("added", added);
         result.put("skipped", skipped);
@@ -407,14 +386,18 @@ public class AdminController {
     // ========== 用户管理 ==========
 
     @GetMapping("/users")
-    public Map<String, Object> listUsers(HttpServletRequest request, HttpServletResponse response) {
+    public Map<String, Object> listUsers(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) String username,
+            HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
-        List<User> users = storageService.getAllUsers();
+        if (page < 1) page = 1;
+        if (size < 1) size = 10;
+        if (size > 500) size = 500;
+        int total = storageService.countUsers(username);
+        List<User> users = storageService.queryUsers(username, (page - 1) * size, size);
         // 不返回密码
         List<Map<String, Object>> userList = users.stream().map(u -> {
             Map<String, Object> m = new HashMap<>();
@@ -434,18 +417,18 @@ public class AdminController {
 
         result.put("success", true);
         result.put("data", userList);
+        result.put("total", total);
+        result.put("page", page);
+        result.put("size", size);
+        result.put("totalPages", Math.max(1, (int) Math.ceil((double) total / size)));
         return result;
     }
 
     @PostMapping("/users")
     public Map<String, Object> addUser(@RequestBody Map<String, Object> body,
-                                        HttpServletRequest request, HttpServletResponse response) {
+                                        HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         String username = (String) body.get("username");
         String password = (String) body.get("password");
         String role = (String) body.get("role");
@@ -466,6 +449,7 @@ public class AdminController {
             user.setRole("admin");
             storageService.updateUser(user);
         }
+        audit(request, "user.add", "新增用户 " + user.getUsername() + "（角色 " + role + "）");
         result.put("success", true);
         result.put("message", "添加成功");
         return result;
@@ -473,13 +457,9 @@ public class AdminController {
 
     @PutMapping("/users/{id}")
     public Map<String, Object> updateUser(@PathVariable String id, @RequestBody Map<String, Object> body,
-                                           HttpServletRequest request, HttpServletResponse response) {
+                                           HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         User user = storageService.getUserById(id);
         if (user == null) {
             result.put("success", false);
@@ -533,6 +513,8 @@ public class AdminController {
             }
         }
         storageService.updateUser(user);
+        audit(request, "user.update", "更新用户 " + user.getUsername()
+                + (passwordReset ? "（重置密码）" : "") + (user.isDisabled() ? "（禁用）" : ""));
         // 重置密码或禁用后强制下线，旧登录态立即失效
         if (passwordReset || user.isDisabled()) {
             storageService.removeTokensByUserId(user.getId());
@@ -544,14 +526,13 @@ public class AdminController {
 
     @DeleteMapping("/users/{id}")
     public Map<String, Object> deleteUser(@PathVariable String id,
-                                           HttpServletRequest request, HttpServletResponse response) {
+                                           HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         boolean deleted = storageService.deleteUser(id);
+        if (deleted) {
+            audit(request, "user.delete", "删除用户 " + id);
+        }
         result.put("success", deleted);
         if (!deleted) result.put("message", "用户不存在或不可删除");
         return result;
@@ -562,13 +543,9 @@ public class AdminController {
      */
     @PostMapping("/users/batch-delete")
     public Map<String, Object> batchDeleteUsers(@RequestBody Map<String, Object> body,
-                                                HttpServletRequest request, HttpServletResponse response) {
+                                                HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         Object idsObj = body == null ? null : body.get("ids");
         if (!(idsObj instanceof List<?> ids) || ids.isEmpty()) {
             result.put("success", false);
@@ -582,6 +559,7 @@ public class AdminController {
             }
         }
         log.info("后台批量删除用户：请求 {} 条，实际删除 {} 条", ids.size(), deleted);
+        audit(request, "user.batchDelete", "批量删除用户 " + deleted + " 个");
         result.put("success", true);
         result.put("deleted", deleted);
         return result;
@@ -590,13 +568,9 @@ public class AdminController {
     @PutMapping("/users/{id}/permissions")
     public Map<String, Object> updateUserPermissions(@PathVariable String id,
                                                       @RequestBody Map<String, Object> body,
-                                                      HttpServletRequest request, HttpServletResponse response) {
+                                                      HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         User user = storageService.getUserById(id);
         if (user == null) {
             result.put("success", false);
@@ -609,6 +583,7 @@ public class AdminController {
         if (modelIds != null) {
             user.setAllowedModelIds(modelIds);
             storageService.updateUser(user);
+            audit(request, "user.permissions", "更新用户 " + user.getUsername() + " 可用模型（" + modelIds.size() + " 个）");
         }
 
         result.put("success", true);
@@ -629,13 +604,9 @@ public class AdminController {
             @RequestParam(required = false) String modelName,
             @RequestParam(required = false) String startDate,
             @RequestParam(required = false) String endDate,
-            HttpServletRequest request, HttpServletResponse response) {
+            HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         // 校验日期范围（最多 30 天）
         Map<String, Object> rangeCheck = validateDateRange(startDate, endDate);
         if (rangeCheck != null) return rangeCheck;
@@ -662,13 +633,9 @@ public class AdminController {
      * 筛选选项 - 返回可用的用户名和模型名列表（用于下拉框）
      */
     @GetMapping("/usage/filters")
-    public Map<String, Object> getUsageFilters(HttpServletRequest request, HttpServletResponse response) {
+    public Map<String, Object> getUsageFilters(HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         List<String> usernames = storageService.getUsageUsernames();
         List<String> modelNames = storageService.getUsageModelNames(null);
 
@@ -691,110 +658,40 @@ public class AdminController {
             @RequestParam(required = false) String startDate,
             @RequestParam(required = false) String endDate,
             @RequestParam(defaultValue = "false") boolean getAll,
-            HttpServletRequest request, HttpServletResponse response) {
+            HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         // 校验日期范围（最多 30 天）
         Map<String, Object> rangeCheck = validateDateRange(startDate, endDate);
         if (rangeCheck != null) return rangeCheck;
 
-        // 筛选+聚合下推到存储层（聚合结果集小，分页在内存完成）
+        // 筛选+聚合+分页均下推到存储层 SQL 完成
         List<String> nameList = (username != null && !username.isEmpty())
                 ? Collections.singletonList(username) : null;
-        List<Map<String, Object>> statsList = storageService.aggregateUsageStats(nameList, modelName, startDate, endDate);
 
-        int total = statsList.size();
         if (page < 1) page = 1;
         if (size < 1) size = 20;
         if (size > 500) size = 500;
         result.put("success", true);
-        result.put("total", total);
 
         if (getAll) {
             // 图表专用：不分页，一次性返回全量聚合数据
+            List<Map<String, Object>> statsList = storageService.aggregateUsageStats(nameList, modelName, startDate, endDate);
+            result.put("total", statsList.size());
             result.put("data", statsList);
             result.put("page", 1);
-            result.put("size", total);
+            result.put("size", statsList.size());
             result.put("totalPages", 1);
         } else {
-            // 列表专用：分页
-            int totalPages = Math.max(1, (int) Math.ceil((double) total / size));
-            int fromIndex = Math.min((page - 1) * size, total);
-            int toIndex = Math.min(fromIndex + size, total);
-            List<Map<String, Object>> pageData = statsList.subList(fromIndex, toIndex);
+            // 列表专用：SQL 分页
+            int total = storageService.countUsageStatGroups(nameList, modelName, startDate, endDate);
+            List<Map<String, Object>> pageData = storageService.aggregateUsageStats(
+                    nameList, modelName, startDate, endDate, (page - 1) * size, size);
+            result.put("total", total);
             result.put("data", pageData);
             result.put("page", page);
             result.put("size", size);
-            result.put("totalPages", totalPages);
-        }
-        return result;
-    }
-
-    // ========== 系统设置（存储模式） ==========
-
-    /**
-     * 获取当前存储模式
-     * 返回: { "success": true, "data": { "useSqlite": false, "dbFileSize": "2.3MB" } }
-     */
-    @GetMapping("/settings/storage")
-    public Map<String, Object> getStorageSettings(HttpServletRequest request, HttpServletResponse response) {
-        Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("useSqlite", storageService.isUseSqlite());
-        data.put("dbFileSize", storageService.getDbFileSize());
-        result.put("success", true);
-        result.put("data", data);
-        return result;
-    }
-
-    /**
-     * 切换存储模式
-     * 请求体: { "useSqlite": true }
-     * 首次开启 SQLite 时自动执行数据迁移
-     */
-    @PutMapping("/settings/storage")
-    public Map<String, Object> setStorageMode(@RequestBody Map<String, Object> body,
-                                               HttpServletRequest request, HttpServletResponse response) {
-        Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
-        Boolean useSqlite = (Boolean) body.get("useSqlite");
-        if (useSqlite == null) {
-            result.put("success", false);
-            result.put("message", "请指定 useSqlite 参数");
-            return result;
-        }
-        try {
-            if (useSqlite && !storageService.isUseSqlite()) {
-                // 首次开启 SQLite → 自动迁移数据
-                String migrationDone = null;
-                try {
-                    migrationDone = storageService.getSetting("migration_done");
-                } catch (Exception ignored) {}
-                if (!"true".equals(migrationDone)) {
-                    log.info("首次开启SQLite，自动执行数据迁移...");
-                    storageService.migrateJsonToSqlite();
-                }
-            }
-            storageService.setUseSqlite(useSqlite);
-            result.put("success", true);
-            result.put("message", useSqlite ? "已切换到 SQLite 存储" : "已切换到 JSON 文件存储");
-        } catch (Exception e) {
-            log.error("切换存储模式失败", e);
-            result.put("success", false);
-            result.put("message", "切换失败: " + e.getMessage());
+            result.put("totalPages", Math.max(1, (int) Math.ceil((double) total / size)));
         }
         return result;
     }
@@ -806,13 +703,9 @@ public class AdminController {
      * 返回: { "success": true, "data": { "dailyChatLimit": 100 } }（0 表示不限制）
      */
     @GetMapping("/settings/quota")
-    public Map<String, Object> getQuotaSettings(HttpServletRequest request, HttpServletResponse response) {
+    public Map<String, Object> getQuotaSettings(HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("dailyChatLimit", storageService.getDailyChatLimit());
         data.put("rateLimitPerMinute", storageService.getRateLimitPerMinute());
@@ -828,13 +721,9 @@ public class AdminController {
      */
     @PutMapping("/settings/quota")
     public Map<String, Object> setQuotaSettings(@RequestBody Map<String, Object> body,
-                                                 HttpServletRequest request, HttpServletResponse response) {
+                                                 HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         Object raw = body == null ? null : body.get("dailyChatLimit");
         if (!(raw instanceof Number)) {
             result.put("success", false);
@@ -871,6 +760,7 @@ public class AdminController {
             storageService.setDailyChatLimit(limit);
             if (ratePerMinute >= 0) storageService.setRateLimitPerMinute(ratePerMinute);
             if (contextMax >= 0) storageService.setContextMaxMessages(contextMax);
+            audit(request, "settings.quota", "修改配额设置：每日上限 " + limit);
             result.put("success", true);
             result.put("message", limit == 0 ? "已取消每日调用限制" : "每日调用上限已设为 " + limit + " 次");
         } catch (Exception e) {
@@ -888,13 +778,9 @@ public class AdminController {
      * 返回: { "success": true, "data": { "enabled": true, "apiKeyMasked": "tvly-****Cn5", "hasKey": true } }
      */
     @GetMapping("/settings/websearch")
-    public Map<String, Object> getWebSearchSettings(HttpServletRequest request, HttpServletResponse response) {
+    public Map<String, Object> getWebSearchSettings(HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         String apiKey = storageService.getTavilyApiKey();
         boolean hasKey = apiKey != null && !apiKey.trim().isEmpty();
         Map<String, Object> data = new LinkedHashMap<>();
@@ -912,13 +798,9 @@ public class AdminController {
      */
     @PutMapping("/settings/websearch")
     public Map<String, Object> setWebSearchSettings(@RequestBody Map<String, Object> body,
-                                                    HttpServletRequest request, HttpServletResponse response) {
+                                                    HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         try {
             // API Key：为空或掩码值（含*）时保留原 Key，与模型管理的 Key 更新策略一致
             Object rawKey = body == null ? null : body.get("apiKey");
@@ -936,6 +818,7 @@ public class AdminController {
                 }
                 storageService.setWebSearchEnabled(b);
             }
+            audit(request, "settings.websearch", "保存联网搜索设置");
             result.put("success", true);
             result.put("message", "联网搜索设置已保存");
         } catch (Exception e) {
@@ -952,13 +835,9 @@ public class AdminController {
      */
     @PostMapping("/settings/websearch/test")
     public Map<String, Object> testWebSearch(@RequestBody(required = false) Map<String, Object> body,
-                                             HttpServletRequest request, HttpServletResponse response) {
+                                             HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         String apiKey = null;
         Object rawKey = body == null ? null : body.get("apiKey");
         if (rawKey instanceof String s && !s.trim().isEmpty() && !s.contains("*")) {
@@ -984,13 +863,9 @@ public class AdminController {
      * status: active=生效中 scheduled=待生效 expired=已过期 offline=已下线
      */
     @GetMapping("/announcements")
-    public Map<String, Object> listAnnouncements(HttpServletRequest request, HttpServletResponse response) {
+    public Map<String, Object> listAnnouncements(HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         List<Map<String, Object>> list = new ArrayList<>();
         for (Announcement a : storageService.getAllAnnouncements()) {
             Map<String, Object> item = new LinkedHashMap<>();
@@ -1016,13 +891,9 @@ public class AdminController {
      */
     @PostMapping("/announcements")
     public Map<String, Object> publishAnnouncement(@RequestBody Map<String, Object> body,
-                                                   HttpServletRequest request, HttpServletResponse response) {
+                                                   HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         String content = body == null ? "" : (body.get("content") instanceof String s ? s.trim() : "");
         if (content.isEmpty()) {
             result.put("success", false);
@@ -1055,6 +926,7 @@ public class AdminController {
         }
         try {
             storageService.publishAnnouncement(title, content, startAt, endAt);
+            audit(request, "announcement.publish", "发布公告：" + title);
             result.put("success", true);
             result.put("message", "公告已发布");
         } catch (Exception e) {
@@ -1072,13 +944,9 @@ public class AdminController {
     @PutMapping("/announcements/{id}")
     public Map<String, Object> republishAnnouncement(@PathVariable String id,
                                                      @RequestBody(required = false) Map<String, Object> body,
-                                                     HttpServletRequest request, HttpServletResponse response) {
+                                                     HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         String content = body != null && body.get("content") instanceof String s ? s.trim() : "";
         if (content.length() > 5000) {
             result.put("success", false);
@@ -1106,6 +974,7 @@ public class AdminController {
                 result.put("message", "公告不存在");
                 return result;
             }
+            audit(request, "announcement.update", "更新/重新生效公告 " + id);
             result.put("success", true);
             result.put("message", "公告已重新生效");
         } catch (Exception e) {
@@ -1121,14 +990,11 @@ public class AdminController {
      */
     @PutMapping("/announcements/{id}/offline")
     public Map<String, Object> offlineAnnouncement(@PathVariable String id,
-                                                   HttpServletRequest request, HttpServletResponse response) {
+                                                   HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         if (storageService.offlineAnnouncement(id)) {
+            audit(request, "announcement.offline", "下线公告 " + id);
             result.put("success", true);
             result.put("message", "公告已下线");
         } else {
@@ -1143,14 +1009,11 @@ public class AdminController {
      */
     @DeleteMapping("/announcements/{id}")
     public Map<String, Object> deleteAnnouncement(@PathVariable String id,
-                                                  HttpServletRequest request, HttpServletResponse response) {
+                                                  HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         if (storageService.deleteAnnouncement(id)) {
+            audit(request, "announcement.delete", "删除公告 " + id);
             result.put("success", true);
             result.put("message", "公告已删除");
         } else {
@@ -1212,32 +1075,6 @@ public class AdminController {
         return null;
     }
 
-    /**
-     * 手动触发数据迁移（JSON → SQLite）
-     * 返回: { "success": true, "message": "迁移完成：users=12, models=8, logs=1523" }
-     */
-    @PostMapping("/settings/storage/migrate")
-    public Map<String, Object> migrateData(HttpServletRequest request, HttpServletResponse response) {
-        Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
-        try {
-            Map<String, Object> stats = storageService.migrateJsonToSqlite();
-            result.put("success", true);
-            result.put("message", String.format("迁移完成：users=%s, models=%s, logs=%s, chatHistories=%s",
-                    stats.get("users"), stats.get("models"), stats.get("logs"), stats.get("chatHistories")));
-            result.put("stats", stats);
-        } catch (Exception e) {
-            log.error("数据迁移失败", e);
-            result.put("success", false);
-            result.put("message", "迁移失败: " + e.getMessage());
-        }
-        return result;
-    }
-
     // ========== 系统设置（安全） ==========
 
     /**
@@ -1245,13 +1082,9 @@ public class AdminController {
      * 返回: { "success": true, "data": { "ipBindingEnabled": true } }
      */
     @GetMapping("/settings/security")
-    public Map<String, Object> getSecuritySettings(HttpServletRequest request, HttpServletResponse response) {
+    public Map<String, Object> getSecuritySettings(HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("ipBindingEnabled", storageService.getIpBindingEnabled());
         result.put("success", true);
@@ -1265,13 +1098,9 @@ public class AdminController {
      */
     @PutMapping("/settings/security")
     public Map<String, Object> setSecuritySettings(@RequestBody Map<String, Object> body,
-                                                    HttpServletRequest request, HttpServletResponse response) {
+                                                    HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         Object raw = body == null ? null : body.get("ipBindingEnabled");
         if (!(raw instanceof Boolean enabled)) {
             result.put("success", false);
@@ -1279,26 +1108,56 @@ public class AdminController {
             return result;
         }
         storageService.setIpBindingEnabled(enabled);
+        audit(request, "settings.security", "IP绑定校验" + (enabled ? "开启" : "关闭"));
         log.info("IP绑定校验已{}", enabled ? "开启" : "关闭");
         result.put("success", true);
         result.put("message", "保存成功");
         return result;
     }
 
+    // ========== 审计日志 ==========
+
+    /**
+     * 分页查询审计日志（时间倒序）
+     * 参数: page(从1开始), size, username(模糊), action(精确), startDate, endDate
+     */
+    @GetMapping("/audit-logs")
+    public Map<String, Object> listAuditLogs(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String username,
+            @RequestParam(required = false) String action,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate,
+            HttpServletRequest request) {
+        requireAdmin(request);
+        if (page < 1) page = 1;
+        if (size < 1) size = 20;
+        if (size > 500) size = 500;
+        Map<String, Object> result = new HashMap<>(auditLogService.query(username, action, startDate, endDate, page, size));
+        result.put("success", true);
+        return result;
+    }
+
+    /**
+     * 已出现过的操作类型列表（前端筛选下拉用）
+     */
+    @GetMapping("/audit-logs/actions")
+    public Map<String, Object> listAuditActions(HttpServletRequest request) {
+        requireAdmin(request);
+        Map<String, Object> result = new HashMap<>();
+        result.put("success", true);
+        result.put("data", auditLogService.listActions());
+        return result;
+    }
+
     // ========== 分享管理 ==========
 
     /**
-     * 获取全部用户的分享记录，附带失效状态判定
+     * 构建全量分享列表（轻量列 + 失效状态判定，不加载消息正文）
      * status: valid=有效 expired=已过期 orphaned=源会话已被删除
      */
-    @GetMapping("/shares")
-    public Map<String, Object> listShares(HttpServletRequest request, HttpServletResponse response) {
-        Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
+    private List<Map<String, Object>> buildShareList() {
         List<ChatShare> shares = storageService.getAllChatShares();
         // 按用户分组做一次性会话存在性检查（不加载消息正文）
         Map<String, List<String>> chatIdsByUser = new HashMap<>();
@@ -1324,8 +1183,73 @@ public class AdminController {
                     existingByUser.getOrDefault(s.getUserId(), Collections.emptySet())));
             list.add(item);
         }
+        return list;
+    }
+
+    /**
+     * 分页查询全部用户的分享记录（服务端筛选+分页）
+     * 参数：username 分享者模糊匹配；status 状态筛选（valid/expired/orphaned）
+     * 额外返回 invalidCount（全量失效条数，与筛选条件无关，供「清除失效」按钮用）
+     */
+    @GetMapping("/shares")
+    public Map<String, Object> listShares(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) String username,
+            @RequestParam(required = false) String status,
+            HttpServletRequest request) {
+        requireAdmin(request);
+        Map<String, Object> result = new HashMap<>();
+        if (page < 1) page = 1;
+        if (size < 1) size = 10;
+        if (size > 500) size = 500;
+        List<Map<String, Object>> all = buildShareList();
+        long invalidCount = all.stream().filter(i -> !"valid".equals(i.get("status"))).count();
+        // 服务端筛选：分享者模糊匹配 + 状态
+        List<Map<String, Object>> filtered = all;
+        if (username != null && !username.isEmpty()) {
+            String kw = username.toLowerCase();
+            filtered = filtered.stream()
+                    .filter(i -> i.get("userName") != null && ((String) i.get("userName")).toLowerCase().contains(kw))
+                    .collect(Collectors.toList());
+        }
+        if (status != null && !status.isEmpty()) {
+            String st = status;
+            filtered = filtered.stream()
+                    .filter(i -> st.equals(i.get("status")))
+                    .collect(Collectors.toList());
+        }
+        int total = filtered.size();
+        int fromIndex = Math.min((page - 1) * size, total);
+        int toIndex = Math.min(fromIndex + size, total);
         result.put("success", true);
-        result.put("data", list);
+        result.put("data", filtered.subList(fromIndex, toIndex));
+        result.put("total", total);
+        result.put("page", page);
+        result.put("size", size);
+        result.put("totalPages", Math.max(1, (int) Math.ceil((double) total / size)));
+        result.put("invalidCount", invalidCount);
+        return result;
+    }
+
+    /**
+     * 一键清除全部失效分享（已过期 + 源会话已删），失效判定在服务端完成
+     */
+    @PostMapping("/shares/delete-invalid")
+    public Map<String, Object> deleteInvalidShares(HttpServletRequest request) {
+        requireAdmin(request);
+        Map<String, Object> result = new HashMap<>();
+        int deleted = 0;
+        for (Map<String, Object> item : buildShareList()) {
+            if (!"valid".equals(item.get("status"))
+                    && storageService.deleteChatShare((String) item.get("id"))) {
+                deleted++;
+            }
+        }
+        log.info("后台清除失效分享：实际删除 {} 条", deleted);
+        audit(request, "share.batchDelete", "清除失效分享 " + deleted + " 条");
+        result.put("success", true);
+        result.put("deleted", deleted);
         return result;
     }
 
@@ -1334,13 +1258,9 @@ public class AdminController {
      */
     @PostMapping("/shares/batch-delete")
     public Map<String, Object> batchDeleteShares(@RequestBody Map<String, Object> body,
-                                                 HttpServletRequest request, HttpServletResponse response) {
+                                                 HttpServletRequest request) {
+        requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        if (!checkAdmin(request, response)) {
-            result.put("success", false);
-            result.put("message", "无权限");
-            return result;
-        }
         Object idsObj = body == null ? null : body.get("ids");
         if (!(idsObj instanceof List<?> ids) || ids.isEmpty()) {
             result.put("success", false);
@@ -1354,6 +1274,7 @@ public class AdminController {
             }
         }
         log.info("后台批量删除分享：请求 {} 条，实际删除 {} 条", ids.size(), deleted);
+        audit(request, "share.batchDelete", "批量删除分享 " + deleted + " 条");
         result.put("success", true);
         result.put("deleted", deleted);
         return result;
@@ -1438,34 +1359,6 @@ public class AdminController {
             return apiKey.substring(0, 2) + "****" + apiKey.substring(apiKey.length() - 2);
         }
         return apiKey.substring(0, 4) + "********" + apiKey.substring(apiKey.length() - 4);
-    }
-
-    /**
-     * 同步已存储模型的厂商显示名/图标（预置厂商）。
-     * 注意：supportsThinking / supportsMultimodal 不再自动覆盖，由管理员在"模型管理"中通过开关手动设置。
-     */
-    private void syncModelCapabilities(List<ModelConfig> models) {
-        boolean updated = false;
-        for (ModelConfig model : models) {
-            boolean needUpdate = false;
-            // 同步厂商显示名（如有覆盖）
-            String displayName = storageService.getProviderDisplayName(model.getProviderId());
-            if (displayName != null && !displayName.equals(model.getProviderName())) {
-                model.setProviderName(displayName);
-                needUpdate = true;
-            }
-            // 同步厂商图标（来自 providers.json，预置厂商不可改）
-            Provider rawProvider = storageService.getProvider(model.getProviderId());
-            if (rawProvider != null && rawProvider.getIcon() != null && !rawProvider.getIcon().equals(model.getProviderIcon())) {
-                model.setProviderIcon(rawProvider.getIcon());
-                needUpdate = true;
-            }
-            if (needUpdate) {
-                storageService.updateModelConfig(model);
-                updated = true;
-            }
-        }
-        if (updated) log.info("已自动同步模型厂商名/图标");
     }
 
     /**

@@ -33,6 +33,7 @@
         <el-tab-pane label="系统设置" name="settings" />
         <el-tab-pane label="联网配置" name="websearch" />
         <el-tab-pane label="公告管理" name="announcements" />
+        <el-tab-pane label="审计日志" name="audit-logs" />
       </el-tabs>
     </div>
 

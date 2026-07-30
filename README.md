@@ -1,6 +1,6 @@
 # Chatai With Newbot
 
-多厂商 AI 大模型聊天平台，前后端分离架构（Spring Boot 3 + Vue 3），支持动态模型配置、权限管理、流式输出、深度思考模式、多模态对话。
+多厂商 AI 大模型聊天平台，前后端分离架构（Spring Boot 3 + Vue 3），支持动态模型配置、权限管理、流式输出、深度思考模式、多模态对话，用户端界面中英双语。
 
 ## 功能特性
 
@@ -14,10 +14,11 @@
 - **富内容渲染**：Markdown、代码高亮、Mermaid 图表、表格、图片灯箱
 - **会话管理**：新建/切换/重命名/删除会话，服务端持久化，多端同步
 - **会话导出**：一键导出会话记录
+- **界面双语**：用户端中英双语（vue-i18n），设置 → 通用 中即时切换，管理后台保持中文
 
 ### 账户与安全
 - **登录系统**：用户注册/登录认证，单 IP 每日注册上限，内置 admin 管理员账户
-- **Token 持久化**：登录态存储于数据库，服务重启不掉线；7 天有效期 + 滑动续期
+- **HttpOnly Cookie 认证**：登录 Token 通过 HttpOnly + SameSite=Lax Cookie 下发，前端 JS 不可读，降低 XSS 窃取风险；Token 持久化于数据库，服务重启不掉线，7 天有效期 + 滑动续期
 - **BCrypt 密码哈希**：新密码一律 BCrypt 存储，旧 SHA-256 存量数据登录时透明升级
 - **登录防爆破**：连续失败锁定，防止暴力破解
 - **API Key 加密存储**：厂商 API Key 使用 AES-256-GCM 加密落盘（密钥文件 `data/apikey.secret`），后台展示自动脱敏，存量明文启动时自动升级为密文
@@ -27,11 +28,15 @@
 - **模型管理**：动态增删改模型、批量快速接入、设置默认模型、**一键连通性测试**（验证 Key/URL 可用性与延迟）
 - **用户管理**：查看用户、重置密码、**禁用/启用账号**（禁用即时踢下线）、删除用户
 - **权限控制**：模型可设为全员可见或限制访问，可为特定用户开放特定模型
-- **用量统计**：按用户/模型/日期统计 Token 用量与调用明细
+- **用量统计**：按用户/模型/日期统计 Token 用量与调用明细（聚合统计 SQL 分页）
+- **审计日志**：登录、模型/用户/分享等关键管理操作全程留痕，支持按用户/操作类型/日期筛选分页查询，自动按保留期清理
+- **列表分页**：用户列表、分享列表服务端分页 + 筛选
 - **厂商定制**：厂商显示名/图标可自定义
 
 ### 其他
-- **双存储引擎**：SQLite（默认，WAL 模式）与 JSON 文件两种存储实现，后台可切换
+- **SQLite 存储**：WAL 模式 + HikariCP 连接池调优，settings/模型/公告内存缓存减少热点读库
+- **统一异常处理**：`@RestControllerAdvice` 全局异常处理器，接口错误统一返回 `{ success: false, message }`
+- **滚动日志**：logback 按天 + 大小滚动（单文件 20MB，gzip 归档，保留 30 天 / 总量 1GB 封顶），日志目录 `logs/` 可用 `-DLOG_PATH` 覆盖
 - **响应式设计**：桌面端侧边栏 + 移动端抽屉式导航，明暗主题切换
 - **CI/CD**：GitHub Actions 自动构建部署（见 `chatai-with-newbot/docs/`）
 
@@ -41,12 +46,14 @@
 |------|------|
 | 后端框架 | Spring Boot 3.3.5 (Java 21) |
 | 响应式 | Spring WebFlux WebClient（SSE 流式输出） |
-| 数据存储 | SQLite (JdbcTemplate, WAL) / JSON 文件双实现，数据目录 `./data/` |
-| 认证 | Token 认证（持久化 + 滑动续期）+ BCrypt 密码哈希 |
+| 数据存储 | SQLite (JdbcTemplate + HikariCP, WAL 模式)，数据目录 `./data/` |
+| 认证 | HttpOnly Cookie Token（持久化 + 滑动续期）+ BCrypt 密码哈希 |
+| 日志 | logback 滚动日志（按天 + 大小，gzip 归档） |
 | 前端框架 | Vue 3 + Vite |
 | UI 组件 | Element Plus |
 | 状态管理 | Pinia |
 | 路由 | Vue Router |
+| 国际化 | vue-i18n（用户端中英双语） |
 | Markdown | marked + highlight.js + mermaid |
 
 ## 项目结构
@@ -57,16 +64,18 @@ chatai-newbot/
 │   ├── src/main/java/com/chatai/newbot/
 │   │   ├── config/                      # 认证拦截器、IP 工具、Web 配置
 │   │   ├── controller/                  # Auth / Chat / Admin / Usage / SPA 转发
+│   │   ├── exception/                   # 全局异常处理器 + 业务异常
 │   │   ├── model/                       # User / ModelConfig / Provider / ChatRequest ...
 │   │   └── service/
-│   │       ├── StorageManager.java      # 存储门面（SQLite/JSON 切换）
-│   │       ├── SqliteStorageService.java
-│   │       ├── JsonFileStorageService.java
+│   │       ├── StorageManager.java      # 存储门面（直连 SQLite）
+│   │       ├── SqliteStorageService.java # SQLite 存储实现（含内存缓存）
+│   │       ├── AuditLogService.java     # 审计日志记录与查询
 │   │       ├── UnifiedChatService.java  # 统一聊天服务（多协议适配 + 连通性测试）
 │   │       ├── ChatHistoryService.java  # 服务端会话持久化
 │   │       └── ApiKeyCrypto.java        # API Key AES-256-GCM 加解密
 │   ├── src/main/resources/
 │   │   ├── application.yml
+│   │   ├── logback-spring.xml           # 滚动日志配置
 │   │   ├── providers.json               # 内置厂商 & 模型定义
 │   │   └── static/                      # 前端构建产物（由 web/dist 复制）
 │   └── pom.xml
@@ -75,11 +84,12 @@ chatai-newbot/
 │   │   ├── api/                         # axios 接口封装
 │   │   ├── components/chat/             # 聊天组件（消息/输入/侧边栏/设置...）
 │   │   ├── composables/                 # 流式聊天 / Markdown / 主题 / 滚动跟随
+│   │   ├── i18n/                        # vue-i18n 中英文案字典
 │   │   ├── stores/                      # Pinia (auth / chat / models)
 │   │   ├── views/                       # ChatView / LoginView / admin 后台页面
 │   │   └── layout/                      # 管理后台布局
 │   └── vite.config.js
-└── data/                                # 运行时数据目录（SQLite 库 / JSON / 密钥文件）
+└── data/                                # 运行时数据目录（SQLite 库 / 密钥文件）
 ```
 
 ## 快速开始
@@ -157,23 +167,27 @@ npm run dev
 | POST | `/api/admin/models/{id}/test` | 模型连通性测试 |
 | DELETE | `/api/admin/models/{id}` | 删除模型 |
 | PUT | `/api/admin/models/default` | 设置默认模型 |
-| GET | `/api/admin/users` | 获取用户列表 |
+| GET | `/api/admin/users` | 获取用户列表（分页） |
 | PUT | `/api/admin/users/{id}` | 编辑用户（重置密码/禁用启用/配额） |
 | DELETE | `/api/admin/users/{id}` | 删除用户 |
 | PUT | `/api/admin/users/{id}/permissions` | 更新用户模型权限 |
 | GET | `/api/admin/usage` | 获取使用记录 |
+| GET | `/api/admin/shares` | 获取分享列表（分页 + 筛选） |
+| GET | `/api/admin/audit-logs` | 分页查询审计日志（用户/操作/日期筛选） |
+| GET | `/api/admin/audit-logs/actions` | 已出现过的审计操作类型列表 |
 
 ## 数据存储
 
-默认使用 SQLite（`data/chatai.db`，WAL 模式），可在后台切换为 JSON 文件存储：
+统一使用 SQLite（`data/chatai.db`，WAL 模式 + HikariCP 连接池），settings/模型/公告读多写少数据带内存缓存：
 
-| 数据 | SQLite | JSON |
-|------|--------|------|
-| 用户（BCrypt 哈希） | `t_user` | `users.json` |
-| 模型配置（Key 加密） | `t_model_config` | `models.json` |
-| 登录 Token | `t_token` | `t_token`（恒走 SQLite） |
-| 会话记录 | `t_chat_history` | `chat_history/*.json` |
-| 用量日志 | `t_usage_log` | `usage_logs_日期.json` |
+| 数据 | 表 |
+|------|------|
+| 用户（BCrypt 哈希） | `t_user` |
+| 模型配置（Key 加密） | `t_model_config` |
+| 登录 Token | `t_token` |
+| 会话记录 | `t_chat_history` |
+| 用量日志 | `t_usage_log` |
+| 审计日志 | `t_audit_log`（自动按保留期清理） |
 
 > ⚠️ `data/apikey.secret` 为 API Key 加密密钥文件，请与数据文件**一同备份**，丢失后已存 Key 无法解密。
 

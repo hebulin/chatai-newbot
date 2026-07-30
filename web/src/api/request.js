@@ -7,14 +7,7 @@ const request = axios.create({
   timeout: 30000
 })
 
-// 请求拦截器：注入 token
-request.interceptors.request.use(config => {
-  const token = localStorage.getItem('token')
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
-  return config
-})
+// 认证凭证存于 HttpOnly Cookie（同域请求自动携带），无需注入 Authorization 头
 
 // 响应拦截器：处理 401/403
 // - 401：登录失效（未登录/过期/账号禁用/IP变更）→ 清除登录态并跳转登录页
@@ -32,7 +25,6 @@ request.interceptors.response.use(
         const msg = reason === 'ip_changed' ? '登录IP已变更，请重新登录'
           : reason === 'account_disabled' ? '账号已被禁用，请联系管理员'
           : '登录已过期，请重新登录'
-        localStorage.removeItem('token')
         localStorage.removeItem('username')
         localStorage.removeItem('role')
         ElMessage.error(msg)

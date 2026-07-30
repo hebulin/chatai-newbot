@@ -38,6 +38,14 @@ public class SqliteStorageService implements StorageService {
     // IP 注册计数（内存缓存，持久化到 t_setting）
     private Map<String, Map<String, Integer>> ipRegisterMap = new ConcurrentHashMap<>();
 
+    // ========== 内存缓存（读多写少的小数据，减少高频 SQL 查询） ==========
+    // t_setting 全量写穿缓存：启动时全量加载，读走缓存、写同步更新库+缓存（值为 NULL 的键不入缓存，读取同样返回 null）
+    private final Map<String, String> settingsCache = new ConcurrentHashMap<>();
+    // 模型配置列表失效式缓存：任何模型写操作后置空，下次读取重建（volatile 保证多线程可见性）
+    private volatile List<ModelConfig> modelConfigsCache;
+    // 当前启用公告缓存：null=未加载，Optional.empty=确认无启用公告；公告写操作后置空
+    private volatile Optional<Announcement> enabledAnnouncementCache;
+
     private static final String ADMIN_USERNAME = "admin";
     private static final String ADMIN_DEFAULT_PASSWORD = "admin123";
 
@@ -51,12 +59,15 @@ public class SqliteStorageService implements StorageService {
     @PostConstruct
     public void init() {
         try {
-            // 设置 WAL 模式和忙碌超时
+            // WAL 模式/busy_timeout/synchronous 由数据源连接参数统一下发（application.yml 的 hikari.data-source-properties），
+            // 此处再执行一次 journal_mode=WAL 作为兜底（数据库级持久属性，幂等）
             jdbcTemplate.execute("PRAGMA journal_mode=WAL");
-            jdbcTemplate.execute("PRAGMA busy_timeout=5000");
 
             // 建表（IF NOT EXISTS，幂等）
             createTables();
+
+            // 全量加载 t_setting 到内存缓存（后续 getSetting 纯内存读取）
+            loadSettingsCache();
 
             // 存量明文 API Key 一次性加密升级
             encryptLegacyApiKeys();
@@ -406,28 +417,42 @@ public class SqliteStorageService implements StorageService {
         }
     }
 
-    // ========== t_setting 键值操作 ==========
+    // ========== t_setting 键值操作（写穿内存缓存） ==========
+
+    /** 启动时全量加载 t_setting 到内存缓存（值为 NULL 的行跳过，读取时同样返回 null） */
+    private void loadSettingsCache() {
+        settingsCache.clear();
+        for (Map<String, Object> row : jdbcTemplate.queryForList("SELECT key, value FROM t_setting")) {
+            Object value = row.get("value");
+            if (value != null) {
+                settingsCache.put(String.valueOf(row.get("key")), String.valueOf(value));
+            }
+        }
+    }
 
     /**
-     * 读取配置值
+     * 读取配置值（纯内存缓存读取，所有 t_setting 读写均经过本类，缓存与库始终一致）
      * @param key 配置键
      * @return 配置值，不存在返回 null
      */
     public String getSetting(String key) {
-        List<String> values = jdbcTemplate.queryForList(
-                "SELECT value FROM t_setting WHERE key = ?", String.class, key);
-        return values.isEmpty() ? null : values.get(0);
+        return settingsCache.get(key);
     }
 
     /**
-     * 写入配置值（存在则更新，不存在则插入）
+     * 写入配置值（存在则更新，不存在则插入；同步更新内存缓存）
      * @param key 配置键
      * @param value 配置值
      */
-    public void setSetting(String key, String value) {
+    public synchronized void setSetting(String key, String value) {
         int updated = jdbcTemplate.update("UPDATE t_setting SET value = ? WHERE key = ?", value, key);
         if (updated == 0) {
             jdbcTemplate.update("INSERT INTO t_setting (key, value) VALUES (?, ?)", key, value);
+        }
+        if (value == null) {
+            settingsCache.remove(key);
+        } else {
+            settingsCache.put(key, value);
         }
     }
 
@@ -473,8 +498,7 @@ public class SqliteStorageService implements StorageService {
      * 预置模型播种（项目重置/全新部署时的默认数据加载）：
      * 模型表为空且从未播种过时，为每个内置厂商写入首个（旗舰）模型的待启用条目，
      * API Key 留空、默认禁用，管理员补填 Key 后启用即可使用。
-     * 播种完成后写入 default_models_seeded 标记，删除播种模型不会重复播种；
-     * 存在待迁移的旧版 JSON 模型数据时跳过，避免与迁移结果重复。
+     * 播种完成后写入 default_models_seeded 标记，删除播种模型不会重复播种。
      */
     private void seedDefaultModelConfigs() {
         try {
@@ -482,15 +506,9 @@ public class SqliteStorageService implements StorageService {
             Integer count = jdbcTemplate.queryForObject(
                     "SELECT COUNT(*) FROM t_model_config", Integer.class);
             if (count != null && count > 0) {
-                // 已有模型数据（老库/已迁移），仅补标记不播种
+                // 已有模型数据（老库），仅补标记不播种
                 setSetting("default_models_seeded", "true");
                 return;
-            }
-            // 旧版 JSON 模型数据尚未迁移时不播种，由自动迁移导入后再走上面的补标记分支
-            if (!"true".equals(getSetting("migration_done"))) {
-                java.io.File legacyModels = java.nio.file.Paths
-                        .get(System.getProperty("user.dir"), "data", "models.json").toFile();
-                if (legacyModels.exists() && legacyModels.length() > 2) return;
             }
             int seeded = 0;
             for (Provider p : providers) {
@@ -591,6 +609,36 @@ public class SqliteStorageService implements StorageService {
         return jdbcTemplate.query("SELECT * FROM t_user", userRowMapper);
     }
 
+    /**
+     * 拼接用户查询的 WHERE 子句（用户名模糊匹配），参数追加到 args
+     * @return WHERE 子句（含前导空格），无条件返回空字符串
+     */
+    private String buildUserWhere(String keyword, List<Object> args) {
+        if (keyword == null || keyword.isEmpty()) return "";
+        args.add("%" + keyword + "%");
+        return " WHERE username LIKE ?";
+    }
+
+    @Override
+    public List<User> queryUsers(String keyword, int offset, int limit) {
+        List<Object> args = new ArrayList<>();
+        String where = buildUserWhere(keyword, args);
+        args.add(limit);
+        args.add(offset);
+        return jdbcTemplate.query(
+                "SELECT * FROM t_user" + where + " ORDER BY created_at ASC LIMIT ? OFFSET ?",
+                userRowMapper, args.toArray());
+    }
+
+    @Override
+    public int countUsers(String keyword) {
+        List<Object> args = new ArrayList<>();
+        String where = buildUserWhere(keyword, args);
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_user" + where, Integer.class, args.toArray());
+        return count == null ? 0 : count;
+    }
+
     @Override
     public User getUserById(String id) {
         List<User> users = jdbcTemplate.query(
@@ -661,7 +709,13 @@ public class SqliteStorageService implements StorageService {
 
     @Override
     public List<ModelConfig> getAllModelConfigs() {
-        return jdbcTemplate.query("SELECT * FROM t_model_config", modelConfigRowMapper);
+        // 失效式缓存：写操作后置空，此处按需重建；返回浅拷贝列表，避免调用方增删元素污染缓存
+        List<ModelConfig> cached = modelConfigsCache;
+        if (cached == null) {
+            cached = jdbcTemplate.query("SELECT * FROM t_model_config", modelConfigRowMapper);
+            modelConfigsCache = cached;
+        }
+        return new ArrayList<>(cached);
     }
 
     @Override
@@ -703,6 +757,7 @@ public class SqliteStorageService implements StorageService {
         }
         fillProviderInfo(config);
         insertModelConfig(config);
+        modelConfigsCache = null;
         return config;
     }
 
@@ -734,11 +789,13 @@ public class SqliteStorageService implements StorageService {
                 config.isBuiltIn() ? 1 : 0, config.getCreatedAt(),
                 config.getTestLatencyMs(), config.getTestSpeed(), config.getTestedAt(),
                 config.getId());
+        modelConfigsCache = null;
     }
 
     @Override
     public boolean deleteModelConfig(String id) {
         int deleted = jdbcTemplate.update("DELETE FROM t_model_config WHERE id = ?", id);
+        modelConfigsCache = null;
         if (deleted > 0) {
             // 删除的是默认模型则清空默认设置
             String defId = getDefaultModelId();
@@ -1137,29 +1194,75 @@ public class SqliteStorageService implements StorageService {
         return result;
     }
 
-    @Override
-    public List<Map<String, Object>> aggregateUsageStats(List<String> usernames, String modelName,
-                                                         String startDate, String endDate) {
-        List<Object> args = new ArrayList<>();
+    /**
+     * 拼接聚合统计的 WHERE 子句（modelName/日期范围 + username IN），参数追加到 args
+     * @return WHERE 子句（含前导空格），无条件返回空字符串
+     */
+    private String buildStatsWhere(List<String> usernames, String modelName,
+                                   String startDate, String endDate, List<Object> args) {
         String where = buildUsageWhere(null, modelName, startDate, endDate, args);
         if (usernames != null && !usernames.isEmpty()) {
             String in = usernames.stream().map(u -> "?").collect(Collectors.joining(","));
             where += (where.isEmpty() ? " WHERE " : " AND ") + "username IN (" + in + ")";
             args.addAll(usernames);
         }
+        return where;
+    }
+
+    /** 聚合统计的 SELECT + GROUP BY 主体（复用于全量与分页查询） */
+    private static final String USAGE_STATS_SELECT =
+            "SELECT COALESCE(username,'未知') AS username, " +
+            "COALESCE(SUBSTR(timestamp,1,10),'未知') AS date, " +
+            "COALESCE(model_name,'未知') AS model_name, " +
+            "COUNT(*) AS count, " +
+            "COALESCE(SUM(prompt_tokens),0) AS prompt_tokens, " +
+            "COALESCE(SUM(completion_tokens),0) AS completion_tokens, " +
+            "COALESCE(SUM(cached_tokens),0) AS cached_tokens, " +
+            "COALESCE(SUM(reasoning_tokens),0) AS reasoning_tokens, " +
+            "COALESCE(SUM(deep_thinking),0) AS thinking_count " +
+            "FROM t_usage_log";
+
+    private static final String USAGE_STATS_GROUP_ORDER =
+            " GROUP BY 1, 2, 3 ORDER BY date DESC, username ASC, model_name ASC";
+
+    @Override
+    public List<Map<String, Object>> aggregateUsageStats(List<String> usernames, String modelName,
+                                                         String startDate, String endDate) {
+        List<Object> args = new ArrayList<>();
+        String where = buildStatsWhere(usernames, modelName, startDate, endDate, args);
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                "SELECT COALESCE(username,'未知') AS username, " +
-                "COALESCE(SUBSTR(timestamp,1,10),'未知') AS date, " +
-                "COALESCE(model_name,'未知') AS model_name, " +
-                "COUNT(*) AS count, " +
-                "COALESCE(SUM(prompt_tokens),0) AS prompt_tokens, " +
-                "COALESCE(SUM(completion_tokens),0) AS completion_tokens, " +
-                "COALESCE(SUM(cached_tokens),0) AS cached_tokens, " +
-                "COALESCE(SUM(reasoning_tokens),0) AS reasoning_tokens, " +
-                "COALESCE(SUM(deep_thinking),0) AS thinking_count " +
-                "FROM t_usage_log" + where + " " +
-                "GROUP BY 1, 2, 3 ORDER BY date DESC, username ASC, model_name ASC",
+                USAGE_STATS_SELECT + where + USAGE_STATS_GROUP_ORDER, args.toArray());
+        return mapUsageStatRows(rows);
+    }
+
+    @Override
+    public List<Map<String, Object>> aggregateUsageStats(List<String> usernames, String modelName,
+                                                         String startDate, String endDate,
+                                                         int offset, int limit) {
+        List<Object> args = new ArrayList<>();
+        String where = buildStatsWhere(usernames, modelName, startDate, endDate, args);
+        args.add(limit);
+        args.add(offset);
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                USAGE_STATS_SELECT + where + USAGE_STATS_GROUP_ORDER + " LIMIT ? OFFSET ?",
                 args.toArray());
+        return mapUsageStatRows(rows);
+    }
+
+    @Override
+    public int countUsageStatGroups(List<String> usernames, String modelName,
+                                    String startDate, String endDate) {
+        List<Object> args = new ArrayList<>();
+        String where = buildStatsWhere(usernames, modelName, startDate, endDate, args);
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM (SELECT 1 FROM t_usage_log" + where + " GROUP BY " +
+                "COALESCE(username,'未知'), COALESCE(SUBSTR(timestamp,1,10),'未知'), COALESCE(model_name,'未知'))",
+                Integer.class, args.toArray());
+        return count == null ? 0 : count;
+    }
+
+    /** 聚合统计行 → 驼峰字段 Map 列表 */
+    private List<Map<String, Object>> mapUsageStatRows(List<Map<String, Object>> rows) {
         List<Map<String, Object>> statsList = new ArrayList<>();
         for (Map<String, Object> row : rows) {
             Map<String, Object> item = new HashMap<>();
@@ -1176,6 +1279,7 @@ public class SqliteStorageService implements StorageService {
         }
         return statsList;
     }
+
 
     @Override
     public List<String> getUsageUsernames() {
@@ -1207,28 +1311,6 @@ public class SqliteStorageService implements StorageService {
         List<String> list = jdbcTemplate.queryForList(
                 "SELECT chat_data FROM t_chat_history WHERE user_id = ?", String.class, userId);
         return list.isEmpty() ? null : list.get(0);
-    }
-
-    /**
-     * 保存用户聊天记录 JSON 文档（存在则更新，不存在则插入）。
-     * 现仅用于 JSON → SQLite 一键迁移写入整文档；同时重置该用户的按会话行数据，
-     * 使下次访问时从新写入的整文档重新拆分迁移，避免新旧数据不一致。
-     * @param userId 用户ID
-     * @param chatData JSON 字符串
-     * @param updatedAt 更新时间字符串
-     * @param updatedAtTs 更新时间戳
-     */
-    public void saveChatData(String userId, String chatData, String updatedAt, long updatedAtTs) {
-        int updated = jdbcTemplate.update(
-                "UPDATE t_chat_history SET chat_data=?, updated_at=?, updated_at_ts=? WHERE user_id=?",
-                chatData, updatedAt, updatedAtTs, userId);
-        if (updated == 0) {
-            jdbcTemplate.update(
-                    "INSERT INTO t_chat_history (user_id, chat_data, updated_at, updated_at_ts) VALUES (?,?,?,?)",
-                    userId, chatData, updatedAt, updatedAtTs);
-        }
-        jdbcTemplate.update("DELETE FROM t_chat_session WHERE user_id = ?", userId);
-        jdbcTemplate.update("DELETE FROM t_chat_user_state WHERE user_id = ?", userId);
     }
 
     /**
@@ -1591,6 +1673,7 @@ public class SqliteStorageService implements StorageService {
         jdbcTemplate.update(
                 "INSERT INTO t_announcement (id, title, content, start_at, end_at, enabled, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
                 a.getId(), a.getTitle(), a.getContent(), a.getStartAt(), a.getEndAt(), a.isEnabled() ? 1 : 0, a.getCreatedAt(), a.getUpdatedAt());
+        enabledAnnouncementCache = null;
         return a;
     }
 
@@ -1615,13 +1698,18 @@ public class SqliteStorageService implements StorageService {
     }
 
     /**
-     * 获取当前启用的公告（最多一条）
+     * 获取当前启用的公告（最多一条；失效式缓存，登录/聊天页高频拉取不再每次查库）
      * @return 启用中的公告，无则返回 null
      */
     public Announcement getEnabledAnnouncement() {
-        List<Announcement> list = jdbcTemplate.query(
-                "SELECT * FROM t_announcement WHERE enabled = 1 ORDER BY updated_at DESC LIMIT 1", announcementRowMapper);
-        return list.isEmpty() ? null : list.get(0);
+        Optional<Announcement> cached = enabledAnnouncementCache;
+        if (cached == null) {
+            List<Announcement> list = jdbcTemplate.query(
+                    "SELECT * FROM t_announcement WHERE enabled = 1 ORDER BY updated_at DESC LIMIT 1", announcementRowMapper);
+            cached = list.isEmpty() ? Optional.empty() : Optional.of(list.get(0));
+            enabledAnnouncementCache = cached;
+        }
+        return cached.orElse(null);
     }
 
     /**
@@ -1632,6 +1720,7 @@ public class SqliteStorageService implements StorageService {
         jdbcTemplate.update(
                 "UPDATE t_announcement SET title = ?, content = ?, start_at = ?, end_at = ?, enabled = ?, updated_at = ? WHERE id = ?",
                 a.getTitle(), a.getContent(), a.getStartAt(), a.getEndAt(), a.isEnabled() ? 1 : 0, a.getUpdatedAt(), a.getId());
+        enabledAnnouncementCache = null;
     }
 
     /**
@@ -1640,6 +1729,7 @@ public class SqliteStorageService implements StorageService {
      */
     public void disableOtherAnnouncements(String exceptId) {
         jdbcTemplate.update("UPDATE t_announcement SET enabled = 0 WHERE id <> ?", exceptId);
+        enabledAnnouncementCache = null;
     }
 
     /**
@@ -1648,52 +1738,9 @@ public class SqliteStorageService implements StorageService {
      * @return true=删除成功
      */
     public boolean deleteAnnouncement(String id) {
-        return jdbcTemplate.update("DELETE FROM t_announcement WHERE id = ?", id) > 0;
-    }
-
-    // ========== 数据迁移辅助方法（供 StorageManager 调用） ==========
-
-    /**
-     * 批量插入用户（迁移用）
-     * @param userList 用户列表
-     */
-    public void batchInsertUsers(List<User> userList) {
-        for (User u : userList) {
-            // 跳过已存在的（同时检查 id 和 username，避免 UNIQUE 约束冲突）
-            Integer count = jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM t_user WHERE id = ? OR username = ?",
-                    Integer.class, u.getId(), u.getUsername());
-            if (count != null && count > 0) continue;
-            insertUser(u);
-        }
-    }
-
-    /**
-     * 批量插入模型配置（迁移用）
-     * @param configList 模型配置列表
-     */
-    public void batchInsertModelConfigs(List<ModelConfig> configList) {
-        for (ModelConfig m : configList) {
-            Integer count = jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM t_model_config WHERE id = ?", Integer.class, m.getId());
-            if (count != null && count > 0) continue;
-            insertModelConfig(m);
-        }
-    }
-
-    /**
-     * 批量插入使用记录（迁移用，幂等：按 user_id+timestamp+model_id 去重）
-     * @param logList 使用记录列表
-     */
-    public void batchInsertUsageLogs(List<UsageLog> logList) {
-        for (UsageLog l : logList) {
-            // 跳过已存在的记录（避免重复迁移时产生重复数据）
-            Integer count = jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM t_usage_log WHERE user_id = ? AND timestamp = ? AND model_id = ?",
-                    Integer.class, l.getUserId(), l.getTimestamp(), l.getModelId());
-            if (count != null && count > 0) continue;
-            addUsageLog(l);
-        }
+        boolean deleted = jdbcTemplate.update("DELETE FROM t_announcement WHERE id = ?", id) > 0;
+        enabledAnnouncementCache = null;
+        return deleted;
     }
 
     // ========== JSON 序列化工具 ==========

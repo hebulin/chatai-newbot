@@ -3,7 +3,7 @@
     <template v-for="(msg, idx) in messages" :key="idx">
       <!-- 上下文清除分隔线：后续对话不再携带此线之前的历史 -->
       <div v-if="msg.role === 'divider'" class="context-divider">
-        <span class="context-divider-label">以上上下文已清除</span>
+        <span class="context-divider-label">{{ t('messages.contextCleared') }}</span>
       </div>
       <div v-else class="msg-wrapper" :class="msg.role">
         <div v-if="msg.time" class="msg-time-top">{{ msg.time }}</div>
@@ -14,7 +14,7 @@
           <div class="msg-bubble" :data-raw="msg.content">
             <template v-if="msg.role === 'user'">
               <div v-if="msg.images && msg.images.length" class="user-msg-images">
-                <img v-for="(img, i) in msg.images" :key="i" class="user-msg-img" :src="img" alt="发送的图片" @click="$emit('lightbox', img)" />
+                <img v-for="(img, i) in msg.images" :key="i" class="user-msg-img" :src="img" :alt="t('messages.sentImage')" @click="$emit('lightbox', img)" />
               </div>
               <div v-if="msg.attachments && msg.attachments.length" class="user-msg-files">
                 <span v-for="(att, i) in msg.attachments" :key="i" class="user-msg-file" :title="att.name">
@@ -36,7 +36,7 @@
                 <div v-if="msg.reasoning_content" class="thinking-block collapsed">
                   <div class="thinking-header" @click="toggleThinking($event)">
                     <span class="arrow">▼</span>
-                    {{ msg.interrupted ? '思考被中断' : (msg.thinkingTime ? '已思考（用时 ' + msg.thinkingTime + ' 秒）' : '已思考') }}
+                    {{ msg.interrupted ? t('messages.thinkingInterrupted') : (msg.thinkingTime ? t('messages.thoughtFor', { s: msg.thinkingTime }) : t('messages.thought')) }}
                   </div>
                   <div class="thinking-body" v-html="renderMd(msg.reasoning_content)"></div>
                 </div>
@@ -54,15 +54,15 @@
           <template v-else>
             <span v-if="msg.promptTokens" class="msg-token-info">Token≈{{ fmtToken(msg.promptTokens) }}</span>
           </template>
-          <button class="footer-copy-btn" @click="$emit('copy', msg.content)" title="复制">
+          <button class="footer-copy-btn" @click="$emit('copy', msg.content)" :title="t('messages.copy')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
           </button>
           <!-- 用户消息：编辑重发 -->
-          <button v-if="msg.role === 'user' && !isStreaming" class="footer-copy-btn" @click="$emit('edit-resend', idx)" title="编辑重发">
+          <button v-if="msg.role === 'user' && !isStreaming" class="footer-copy-btn" @click="$emit('edit-resend', idx)" :title="t('messages.editResend')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
           <!-- AI 消息：重新生成（仅最后一条） -->
-          <button v-if="msg.role === 'assistant' && idx === messages.length - 1 && !isStreaming" class="footer-copy-btn" @click="$emit('regenerate', idx)" title="重新生成">
+          <button v-if="msg.role === 'assistant' && idx === messages.length - 1 && !isStreaming" class="footer-copy-btn" @click="$emit('regenerate', idx)" :title="t('messages.regenerate')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
           </button>
         </div>
@@ -79,7 +79,7 @@
           <div v-if="streamingMsg.reasoning_content" class="thinking-block" :class="{ collapsed: streamingMsg.thinkingTime }">
             <div class="thinking-header" @click="toggleThinking($event)">
               <span class="arrow">▼</span>
-              {{ streamingMsg.thinkingTime ? '已思考（用时 ' + streamingMsg.thinkingTime + ' 秒）' : '正在思考...' }}
+              {{ streamingMsg.thinkingTime ? t('messages.thoughtFor', { s: streamingMsg.thinkingTime }) : t('messages.thinking') }}
             </div>
             <div class="thinking-body" ref="streamThinkingRef" @scroll="onThinkingScroll" v-html="renderMd(streamingMsg.reasoning_content)"></div>
           </div>
@@ -89,7 +89,7 @@
       </div>
       <div class="msg-footer">
         <span v-if="streamingMsg.modelName" class="msg-model-name">{{ streamingMsg.modelName }}</span>
-        <span class="msg-token-info msg-token-loading">Token计算中<span class="token-wave"><span></span><span></span><span></span></span></span>
+        <span class="msg-token-info msg-token-loading">{{ t('messages.tokenCalc') }}<span class="token-wave"><span></span><span></span><span></span></span></span>
       </div>
     </div>
   </div>
@@ -97,6 +97,7 @@
 
 <script setup>
 import { computed, onUpdated, onMounted, onUnmounted, ref, watch, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { renderMarkdown, escapeHtml, renderMermaidBlocks, processSpecialContent, handleMermaidToolbarClick } from '@/composables/useMarkdown'
 import { useTheme } from '@/composables/useTheme'
 
@@ -107,6 +108,8 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['copy', 'lightbox', 'regenerate', 'edit-resend'])
+
+const { t } = useI18n()
 
 const { getTheme } = useTheme()
 const containerRef = ref(null)

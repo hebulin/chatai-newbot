@@ -5,7 +5,7 @@
     <!-- 顶栏 -->
     <header class="atelier-top">
       <div class="top-left">
-        <button class="icon-btn toggle-sidebar-btn" @click="toggleSidebar" aria-label="侧栏">
+        <button class="icon-btn toggle-sidebar-btn" @click="toggleSidebar" :aria-label="t('chat.sidebarAria')">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="3" y1="7" x2="21" y2="7"/><line x1="3" y1="13" x2="21" y2="13"/><line x1="3" y1="19" x2="14" y2="19"/></svg>
         </button>
         <div class="brand">
@@ -17,10 +17,10 @@
         </div>
       </div>
       <div class="top-right">
-        <button class="icon-btn share-chat-btn" @click="handleShareChat" title="分享当前会话" aria-label="分享">
+        <button class="icon-btn share-chat-btn" @click="handleShareChat" :title="t('chat.shareChat')" :aria-label="t('sidebar.share')">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
         </button>
-        <button class="theme-toggle-btn" @click="toggleTheme" title="切换主题" aria-label="主题">
+        <button class="theme-toggle-btn" @click="toggleTheme" :title="t('chat.toggleTheme')" :aria-label="t('chat.toggleTheme')">
           <span class="toggle-track"><span class="toggle-knob"></span></span>
         </button>
       </div>
@@ -49,7 +49,7 @@
         <div class="chat-container" ref="chatContainerRef">
           <!-- 长会话性能：默认只渲染最近一窗口消息，更早的按需展开 -->
           <div v-if="hiddenCount > 0" class="load-earlier">
-            <button class="load-earlier-btn" @click="loadEarlier">加载更早消息（还有 {{ hiddenCount }} 条）</button>
+            <button class="load-earlier-btn" @click="loadEarlier">{{ t('chat.loadEarlier', { n: hiddenCount }) }}</button>
           </div>
           <ChatMessages
             :messages="displayMessages"
@@ -64,7 +64,7 @@
 
         <!-- 滚动导航（对话区域右下角，不遮挡输入框） -->
         <div class="scroll-nav" v-show="scrollFollow.showScrollToBottom.value">
-          <button class="scroll-nav-btn" @click="scrollFollow.userScrollToBottom()" title="回到底部">
+          <button class="scroll-nav-btn" @click="scrollFollow.userScrollToBottom()" :title="t('chat.backToBottom')">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="6 9 12 15 18 9"/></svg>
           </button>
         </div>
@@ -72,12 +72,12 @@
         <!-- 切换会话加载缓冲：懒加载拉取正文/长会话首屏渲染期间的视觉过渡 -->
         <div v-if="chatSwitchLoading" class="chat-switch-loading">
           <span class="chat-switch-spinner"></span>
-          <span>会话加载中…</span>
+          <span>{{ t('chat.chatLoading') }}</span>
         </div>
       </div>
 
       <!-- 当前会话同步提示（同步超过 3 秒才显示） -->
-      <div v-if="syncTipVisible" class="chat-sync-tip">当前会话记录同步中…</div>
+      <div v-if="syncTipVisible" class="chat-sync-tip">{{ t('chat.syncTip') }}</div>
 
       <!-- 输入区 -->
       <ChatInput
@@ -109,6 +109,7 @@ import '@/styles/chat.css'
 import { ref, computed, onMounted, onUnmounted, nextTick, watch, h } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, ElCheckbox } from 'element-plus'
+import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chat'
 import { useModelsStore } from '@/stores/models'
 import { useAuthStore } from '@/stores/auth'
@@ -132,6 +133,7 @@ const modelsStore = useModelsStore()
 const authStore = useAuthStore()
 const streamChat = useStreamChat()
 const { toggleTheme, getTheme } = useTheme()
+const { t } = useI18n()
 
 const chatContainerRef = ref(null)
 const scrollFollow = useScrollFollow(chatContainerRef)
@@ -189,7 +191,7 @@ const chatTitle = computed(() => {
   if (firstUser) {
     return firstUser.content.substring(0, 30) + (firstUser.content.length > 30 ? '...' : '')
   }
-  return '新会话 · NEW'
+  return t('chat.newChatTitle')
 })
 
 onMounted(async () => {
@@ -234,17 +236,17 @@ async function checkAnnouncement() {
     if (sessionStorage.getItem('announcement_shown') === key) return
     const dontRemind = ref(false)
     await ElMessageBox({
-      title: '📢 ' + (((res && res.title) || '').trim() || '系统公告'),
+      title: '📢 ' + (((res && res.title) || '').trim() || t('chat.announcementTitle')),
       message: () => h('div', null, [
         h('div', { style: 'white-space:pre-wrap;max-height:50vh;overflow:auto;' }, content),
         h(ElCheckbox, {
           modelValue: dontRemind.value,
           'onUpdate:modelValue': v => { dontRemind.value = v },
-          label: '以后不再提示',
+          label: t('chat.dontRemind'),
           style: 'margin-top:12px;'
         })
       ]),
-      confirmButtonText: '我知道了',
+      confirmButtonText: t('chat.iKnow'),
       showCancelButton: false,
       customStyle: { maxWidth: '520px' }
     }).catch(() => {})
@@ -286,18 +288,18 @@ async function doShare(chatId) {
   } catch { return }
   const msgs = chatStore.chats[chatId] || []
   if (!msgs.some(m => m.role === 'user')) {
-    ElMessage.info('该会话还没有内容，无法分享')
+    ElMessage.info(t('chat.emptyNoShare'))
     return
   }
   let expireDays = 0
   try {
-    const { value } = await ElMessageBox.prompt('设置分享链接有效期（天）。0 或留空表示永久有效', '分享会话', {
-      confirmButtonText: '生成链接',
-      cancelButtonText: '取消',
+    const { value } = await ElMessageBox.prompt(t('chat.sharePrompt'), t('chat.shareTitle'), {
+      confirmButtonText: t('chat.genLink'),
+      cancelButtonText: t('common.cancel'),
       inputValue: '0',
       inputValidator: (v) => {
         if (v === '' || v == null) return true
-        return /^\d+$/.test(String(v).trim()) || '请输入非负整数'
+        return /^\d+$/.test(String(v).trim()) || t('chat.nonNegInt')
       }
     })
     const n = parseInt(String(value || '0').trim(), 10)
@@ -319,13 +321,13 @@ async function doShare(chatId) {
         await navigator.clipboard.writeText(url)
         copied = true
       } catch (e) { /* 非 https 环境剪贴板可能不可用 */ }
-      const expiryTip = res.data.expiresAt ? ('\n有效期至：' + res.data.expiresAt) : '\n永久有效'
-      ElMessageBox.alert(url + expiryTip, '分享链接已生成' + (copied ? '（已复制到剪贴板）' : ''), {
-        confirmButtonText: '知道了',
+      const expiryTip = res.data.expiresAt ? ('\n' + t('chat.expiryTip', { date: res.data.expiresAt })) : ('\n' + t('chat.permanent'))
+      ElMessageBox.alert(url + expiryTip, t('chat.shareCreatedTitle') + (copied ? t('chat.copiedSuffix') : ''), {
+        confirmButtonText: t('common.gotIt'),
         dangerouslyUseHTMLString: false
       })
     } else {
-      ElMessage.error((res && res.message) || '分享失败')
+      ElMessage.error((res && res.message) || t('chat.shareFailed'))
     }
   } catch (e) {
     // 异常提示已由 request 拦截器统一处理
@@ -334,7 +336,7 @@ async function doShare(chatId) {
 
 function handleNewChat() {
   if (streamChat.isStreaming.value) {
-    ElMessage.warning('请等待回答完成')
+    ElMessage.warning(t('chat.waitAnswer'))
     return
   }
   // 如果当前会话为空，不再新建
@@ -345,13 +347,13 @@ function handleNewChat() {
     isDeepThinking.value = false
     nextTick(() => scrollFollow.scrollToBottomImmediate())
   } else {
-    ElMessage.info('当前已是新会话')
+    ElMessage.info(t('chat.alreadyNew'))
   }
 }
 
 async function handleSwitchChat(id) {
   if (streamChat.isStreaming.value) {
-    ElMessage.warning('请等待回答完成')
+    ElMessage.warning(t('chat.waitAnswer'))
     return
   }
   if (id === chatStore.currentChatId) {
@@ -371,16 +373,16 @@ async function handleSwitchChat(id) {
     await nextTick()
     scrollFollow.scrollToBottomImmediate()
   } catch {
-    ElMessage.error('会话内容加载失败，请重试')
+    ElMessage.error(t('chat.switchFailed'))
   } finally {
     chatSwitchLoading.value = false
   }
 }
 
 function handleDeleteChat(id) {
-  ElMessageBox.confirm('确定删除该会话？', '删除会话', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
+  ElMessageBox.confirm(t('chat.deleteConfirm'), t('chat.deleteTitle'), {
+    confirmButtonText: t('common.confirm'),
+    cancelButtonText: t('common.cancel'),
     type: 'warning'
   }).then(() => {
     chatStore.deleteChat(id)
@@ -390,9 +392,9 @@ function handleDeleteChat(id) {
 
 async function handleLogout() {
   try {
-    await ElMessageBox.confirm('确定要退出当前账号吗？', '退出登录', {
-      confirmButtonText: '退出',
-      cancelButtonText: '取消',
+    await ElMessageBox.confirm(t('chat.logoutConfirm'), t('chat.logoutTitle'), {
+      confirmButtonText: t('chat.logoutBtn'),
+      cancelButtonText: t('common.cancel'),
       type: 'warning'
     })
     apiLogout().catch(() => {})
@@ -403,12 +405,12 @@ async function handleLogout() {
 
 async function handleSend({ text, images, attachments, deepThinking, webSearch }) {
   if (streamChat.isStreaming.value) {
-    ElMessage.warning('当前还有内容没回答完，请点击右侧停止按钮中断')
+    ElMessage.warning(t('chat.stillStreaming'))
     return
   }
   if (!text && (!images || images.length === 0) && (!attachments || attachments.length === 0)) return
   if (!modelsStore.currentModelId) {
-    ElMessage.warning('请先选择模型')
+    ElMessage.warning(t('chat.pickModel'))
     return
   }
 
@@ -420,7 +422,7 @@ async function handleSend({ text, images, attachments, deepThinking, webSearch }
   chatStore.suspendSync()
   try {
     // 添加用户消息（本地先渲染）
-    const userMsg = { role: 'user', content: text || (images && images.length ? '(图片)' : '(附件)'), time: nowStr() }
+    const userMsg = { role: 'user', content: text || (images && images.length ? t('chat.imgPlaceholder') : t('chat.attachPlaceholder')), time: nowStr() }
     if (images && images.length > 0) {
       userMsg.images = images.slice()
     }
@@ -514,7 +516,7 @@ async function startStream(chatId, deepThinking) {
         })
         return
       }
-      const content = data.content || (data.interrupted ? '（回答已中断）' : '（无正式回答）')
+      const content = data.content || (data.interrupted ? t('chat.answerInterrupted') : t('chat.noAnswer'))
       const msg = {
         role: 'assistant',
         content,
@@ -573,7 +575,7 @@ async function startStream(chatId, deepThinking) {
 function makeErrorMsg(text) {
   return {
     role: 'assistant',
-    content: text || '未知错误',
+    content: text || t('chat.unknownError'),
     isError: true,
     time: nowStr(),
     modelName: modelsStore.currentModelName
@@ -587,24 +589,24 @@ function handleStop() {
 // 清除上下文：二次确认后向当前会话插入一条分隔线，后续对话不再携带此前历史
 async function handleClearContext() {
   if (streamChat.isStreaming.value) {
-    ElMessage.warning('请等待回答完成')
+    ElMessage.warning(t('chat.waitAnswer'))
     return
   }
   const chatId = chatStore.currentChatId
   const msgs = chatStore.chats[chatId] || []
   if (msgs.length === 0) {
-    ElMessage.info('当前会话为空，无需清除')
+    ElMessage.info(t('chat.clearCtxEmpty'))
     return
   }
   // 避免连续插入多条分隔线
   if (msgs[msgs.length - 1].role === 'divider') {
-    ElMessage.info('上下文已清除')
+    ElMessage.info(t('chat.ctxCleared'))
     return
   }
   try {
-    await ElMessageBox.confirm('清除后，后续对话将不再携带以上历史消息，确定清除上下文？', '清除上下文', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
+    await ElMessageBox.confirm(t('chat.clearCtxConfirm'), t('chat.clearCtxTitle'), {
+      confirmButtonText: t('common.confirm'),
+      cancelButtonText: t('common.cancel'),
       type: 'warning'
     })
   } catch { return }
@@ -633,11 +635,11 @@ async function handleRegenerate(idx) {
   // 渲染窗口裁剪后，子组件回传的是展示列表下标，需换算回完整列表下标
   idx += hiddenCount.value
   if (streamChat.isStreaming.value) {
-    ElMessage.warning('请等待回答完成')
+    ElMessage.warning(t('chat.waitAnswer'))
     return
   }
   if (!modelsStore.currentModelId) {
-    ElMessage.warning('请先选择模型')
+    ElMessage.warning(t('chat.pickModel'))
     return
   }
   const chatId = chatStore.currentChatId
@@ -657,11 +659,11 @@ async function handleEditResend(idx) {
   // 同样需将展示列表下标换算回完整列表下标
   idx += hiddenCount.value
   if (streamChat.isStreaming.value) {
-    ElMessage.warning('请等待回答完成')
+    ElMessage.warning(t('chat.waitAnswer'))
     return
   }
   if (!modelsStore.currentModelId) {
-    ElMessage.warning('请先选择模型')
+    ElMessage.warning(t('chat.pickModel'))
     return
   }
   const chatId = chatStore.currentChatId
@@ -670,12 +672,12 @@ async function handleEditResend(idx) {
 
   let newText
   try {
-    const res = await ElMessageBox.prompt('确认后将删除该消息及其后的所有回复，并重新发送', '编辑重发', {
+    const res = await ElMessageBox.prompt(t('chat.editResendPrompt'), t('chat.editResendTitle'), {
       inputType: 'textarea',
       inputValue: msg.content,
-      confirmButtonText: '重新发送',
-      cancelButtonText: '取消',
-      inputValidator: (v) => (v && v.trim()) ? true : '内容不能为空'
+      confirmButtonText: t('chat.resend'),
+      cancelButtonText: t('common.cancel'),
+      inputValidator: (v) => (v && v.trim()) ? true : t('chat.notEmpty')
     })
     newText = (res.value || '').trim()
   } catch { return }
@@ -700,9 +702,9 @@ async function handleEditResend(idx) {
 
 function copyMsgContent(content) {
   navigator.clipboard.writeText(content).then(() => {
-    ElMessage.success('已复制')
+    ElMessage.success(t('chat.copied'))
   }).catch(() => {
-    ElMessage.error('复制失败')
+    ElMessage.error(t('chat.copyFailed'))
   })
 }
 

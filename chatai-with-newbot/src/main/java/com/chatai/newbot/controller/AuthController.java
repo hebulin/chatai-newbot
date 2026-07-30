@@ -1,13 +1,17 @@
 package com.chatai.newbot.controller;
 
 import com.chatai.newbot.model.User;
+import com.chatai.newbot.service.AuditLogService;
 import com.chatai.newbot.service.LoginAttemptService;
 import com.chatai.newbot.service.StorageManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseCookie;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -15,16 +19,22 @@ import java.util.Map;
 @RequestMapping("/api/auth")
 public class AuthController {
     private static final Logger log = LoggerFactory.getLogger(AuthController.class);
+    // Cookie 有效期与服务端 token TTL 一致（7 天，服务端过半自动续期）
+    private static final long TOKEN_COOKIE_MAX_AGE_SECONDS = 7L * 24 * 60 * 60;
     private final StorageManager storageService;
     private final LoginAttemptService loginAttemptService;
+    private final AuditLogService auditLogService;
 
-    public AuthController(StorageManager storageService, LoginAttemptService loginAttemptService) {
+    public AuthController(StorageManager storageService, LoginAttemptService loginAttemptService,
+                          AuditLogService auditLogService) {
         this.storageService = storageService;
         this.loginAttemptService = loginAttemptService;
+        this.auditLogService = auditLogService;
     }
 
     @PostMapping("/login")
-    public Map<String, Object> login(@RequestBody Map<String, String> body, HttpServletRequest request) {
+    public Map<String, Object> login(@RequestBody Map<String, String> body, HttpServletRequest request,
+                                     HttpServletResponse response) {
         Map<String, Object> result = new HashMap<>();
         String username = body.get("username");
         String password = body.get("password");
@@ -48,12 +58,14 @@ public class AuthController {
         User user = storageService.authenticate(username.trim(), password);
         if (user == null) {
             loginAttemptService.onFailure(username.trim(), ip);
+            auditLogService.record(null, username.trim(), "login.fail", "用户名或密码错误", ip);
             result.put("success", false);
             result.put("message", "用户名或密码错误");
             return result;
         }
         // 被禁用账号拒绝登录（不计入爆破失败次数，避免误锁）
         if (user.isDisabled()) {
+            auditLogService.record(user.getId(), user.getUsername(), "login.fail", "账号已被禁用", ip);
             result.put("success", false);
             result.put("message", "账号已被禁用，请联系管理员");
             return result;
@@ -63,16 +75,19 @@ public class AuthController {
         String browser = getClientBrowser(request);
         storageService.updateLoginInfo(user.getId(), ip, browser);
         String token = storageService.createToken(user.getId(), ip, browser);
+        auditLogService.record(user.getId(), user.getUsername(), "login", "登录成功（" + browser + "）", ip);
 
+        // token 仅通过 HttpOnly Cookie 下发，不回写响应体，前端 JS 无法读取，降低 XSS 窃取风险
+        setTokenCookie(response, token, TOKEN_COOKIE_MAX_AGE_SECONDS, isSecureRequest(request));
         result.put("success", true);
-        result.put("token", token);
         result.put("username", user.getUsername());
         result.put("role", user.getRole());
         return result;
     }
 
     @PostMapping("/register")
-    public Map<String, Object> register(@RequestBody Map<String, String> body, HttpServletRequest request) {
+    public Map<String, Object> register(@RequestBody Map<String, String> body, HttpServletRequest request,
+                                        HttpServletResponse response) {
         Map<String, Object> result = new HashMap<>();
         String username = body.get("username");
         String password = body.get("password");
@@ -116,21 +131,24 @@ public class AuthController {
         }
 
         String token = storageService.createToken(user.getId(), ip, getClientBrowser(request));
+        auditLogService.record(user.getId(), user.getUsername(), "register", "注册新账号", ip);
+        setTokenCookie(response, token, TOKEN_COOKIE_MAX_AGE_SECONDS, isSecureRequest(request));
         result.put("success", true);
-        result.put("token", token);
         result.put("username", user.getUsername());
         result.put("role", user.getRole());
         return result;
     }
 
     @PostMapping("/logout")
-    public Map<String, Object> logout(HttpServletRequest request) {
+    public Map<String, Object> logout(HttpServletRequest request, HttpServletResponse response) {
         Map<String, Object> result = new HashMap<>();
-        String token = request.getHeader("Authorization");
-        if (token != null && token.startsWith("Bearer ")) {
-            token = token.substring(7);
+        storageService.removeToken(extractToken(request));
+        User user = (User) request.getAttribute("currentUser");
+        if (user != null) {
+            auditLogService.record(user.getId(), user.getUsername(), "logout", "退出登录", getClientIp(request));
         }
-        storageService.removeToken(token);
+        // 清除登录 Cookie（Max-Age=0 立即失效）
+        setTokenCookie(response, "", 0, isSecureRequest(request));
         result.put("success", true);
         return result;
     }
@@ -234,6 +252,7 @@ public class AuthController {
 
         int code = storageService.changePassword(user.getId(), oldPassword, newPassword);
         if (code == 0) {
+            auditLogService.record(user.getId(), user.getUsername(), "password.change", "修改本人密码", getClientIp(request));
             result.put("success", true);
             result.put("message", "密码修改成功，请重新登录");
         } else if (code == 2) {
@@ -248,6 +267,34 @@ public class AuthController {
 
     private String getClientIp(HttpServletRequest request) {
         return com.chatai.newbot.config.IpUtils.getClientIp(request);
+    }
+
+    /**
+     * 将登录 token 写入 HttpOnly Cookie：JS 不可读（防 XSS 窃取），SameSite=Lax 缓解 CSRF；
+     * secure 根据当前请求是否走 HTTPS 动态设置：HTTPS 下附加 Secure 防止明文传输被窃听，
+     * 纯 HTTP 部署时不加 Secure 以免 Cookie 无法下发。
+     */
+    private void setTokenCookie(HttpServletResponse response, String token, long maxAgeSeconds, boolean secure) {
+        ResponseCookie cookie = ResponseCookie.from("token", token == null ? "" : token)
+                .httpOnly(true)
+                .secure(secure)
+                .sameSite("Lax")
+                .path("/")
+                .maxAge(maxAgeSeconds)
+                .build();
+        response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
+    }
+
+    /**
+     * 判断当前请求是否为 HTTPS：直连 HTTPS（request.isSecure）或反向代理终结 TLS 后
+     * 通过 X-Forwarded-Proto 传递的 https。据此决定是否为登录 Cookie 附加 Secure 标志。
+     */
+    private boolean isSecureRequest(HttpServletRequest request) {
+        if (request.isSecure()) {
+            return true;
+        }
+        String proto = request.getHeader("X-Forwarded-Proto");
+        return proto != null && proto.toLowerCase().contains("https");
     }
 
     /**

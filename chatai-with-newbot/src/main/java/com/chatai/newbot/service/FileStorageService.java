@@ -66,6 +66,11 @@ public class FileStorageService {
         if (contentType == null || !contentType.startsWith("image/")) {
             throw new IllegalArgumentException("仅支持上传图片文件");
         }
+        // SVG 可内嵌 <script>/事件处理器，以 image/svg+xml 顶级导航打开时浏览器会当作
+        // HTML 文档执行脚本（存储型 XSS）；聊天/分享页并不需要 SVG，直接拒绝上传
+        if (contentType.toLowerCase().contains("svg")) {
+            throw new IllegalArgumentException("出于安全考虑，不支持上传 SVG 图片");
+        }
         if (file.getSize() > MAX_IMAGE_SIZE) {
             throw new IllegalArgumentException("图片超过5MB限制");
         }
@@ -187,9 +192,15 @@ public class FileStorageService {
             case "image/gif" -> "gif";
             case "image/webp" -> "webp";
             case "image/bmp" -> "bmp";
-            case "image/svg+xml" -> "svg";
             default -> "png";
         };
+    }
+
+    /**
+     * 是否为 SVG 文件：读取侧据此对存量 svg 强制以附件下载，避免内嵌脚本被当作 HTML 执行。
+     */
+    public boolean isSvg(String filename) {
+        return filename != null && filename.toLowerCase().endsWith(".svg");
     }
 
     /**

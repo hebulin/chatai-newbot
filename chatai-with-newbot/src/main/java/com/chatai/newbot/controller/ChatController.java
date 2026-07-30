@@ -126,10 +126,7 @@ public class ChatController {
         User user = (User) request.getAttribute("currentUser");
         List<ModelConfig> models = storageService.getVisibleModels(user);
 
-        // 自动同步多模态/思考支持状态（从 providers.json 更新旧数据）
-        syncModelCapabilities(models);
-
-        // 构建返回数据 - 不暴露apiKey
+        // 构建返回数据 - 不暴露apiKey（厂商名/图标同步已改为启动时执行，读接口不再写库）
         List<Map<String, Object>> modelList = new ArrayList<>();
         for (ModelConfig m : models) {
             Map<String, Object> item = new HashMap<>();
@@ -168,42 +165,6 @@ public class ChatController {
         result.put("content", a == null ? "" : a.getContent());
         result.put("updatedAt", a == null || a.getUpdatedAt() == null ? "" : a.getUpdatedAt());
         return result;
-    }
-
-    /**
-     * 同步已存储模型的厂商显示名/图标（预置厂商）。
-     * 注意：supportsThinking / supportsMultimodal 不再自动覆盖，由管理员在"模型管理"中手动维护。
-     */
-    private void syncModelCapabilities(List<ModelConfig> models) {
-        List<Provider> providers = storageService.getAllProviders();
-        boolean updated = false;
-        for (ModelConfig model : models) {
-            Provider provider = providers.stream()
-                    .filter(p -> p.getId().equals(model.getProviderId()))
-                    .findFirst().orElse(null);
-            if (provider == null) continue;
-            ProviderModel pm = (provider.getModels() == null) ? null :
-                    provider.getModels().stream().filter(m -> m.getId().equals(model.getModelId())).findFirst().orElse(null);
-            if (pm == null) continue;
-            boolean needUpdate = false;
-            // 同步显示名覆盖
-            String displayName = storageService.getProviderDisplayName(model.getProviderId());
-            if (displayName != null && !displayName.equals(model.getProviderName())) {
-                model.setProviderName(displayName);
-                needUpdate = true;
-            }
-            // 同步厂商图标（来自 providers.json）
-            Provider rawProvider = storageService.getProvider(model.getProviderId());
-            if (rawProvider != null && rawProvider.getIcon() != null && !rawProvider.getIcon().equals(model.getProviderIcon())) {
-                model.setProviderIcon(rawProvider.getIcon());
-                needUpdate = true;
-            }
-            if (needUpdate) {
-                storageService.updateModelConfig(model);
-                updated = true;
-            }
-        }
-        if (updated) log.info("已自动同步模型厂商名/图标");
     }
 
     // ========== 会话历史同步（多端统一） ==========

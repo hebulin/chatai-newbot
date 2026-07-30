@@ -3,7 +3,14 @@ spring:
     url: jdbc:sqlite:data/chatai.db
     driver-class-name: org.sqlite.JDBC
     hikari:
-      maximum-pool-size: 1
+      # SQLite WAL 模式支持多读单写：小池提升读并发，写冲突由 busy_timeout 自动等待重试
+      maximum-pool-size: 4
+      minimum-idle: 1
+      # 每个连接建立时下发的 SQLite PRAGMA（sqlite-jdbc 支持的连接属性）
+      data-source-properties:
+        journal_mode: WAL
+        busy_timeout: 5000
+        synchronous: NORMAL
   servlet:
     multipart:
       # 聊天图片/附件文档上传限制（业务层另有图片 5MB、文档 3MB 校验）

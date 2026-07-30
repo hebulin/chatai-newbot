@@ -9,8 +9,6 @@ import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PostConstruct;
 import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
@@ -20,57 +18,43 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 会话历史持久化服务 - 实现多端会话同步
- * 支持两种存储模式（由 StorageManager.isUseSqlite() 控制）：
- * - JSON 模式：数据存储在 data/chat_history/ 目录下，单用户单文件
- * - SQLite 模式：按会话行存储在 t_chat_session 表（保存时仅重写变更会话，避免写放大），
- *   全局状态（lastChatId/deletedChatIds）存 t_chat_user_state 表；
- *   首次访问时从旧 t_chat_history 整文档懒迁移，旧文档保留作备份
+ * 数据按会话行存储在 SQLite t_chat_session 表（保存时仅重写变更会话，避免写放大），
+ * 全局状态（lastChatId/deletedChatIds）存 t_chat_user_state 表；
+ * 首次访问时从旧 t_chat_history 整文档懒迁移，旧文档保留作备份
  */
 @Service
 public class ChatHistoryService {
     private static final Logger log = LoggerFactory.getLogger(ChatHistoryService.class);
-    private static final long MAX_FILE_SIZE = 20L * 1024 * 1024; // 20MB
     private final ObjectMapper objectMapper;
     private Path chatHistoryDir;
 
-    private final StorageManager storageManager;
     private final SqliteStorageService sqliteStorage;
 
-    // 每个用户独立的锁，保证文件操作的线程安全
+    // 每个用户独立的锁，保证并发读写的线程安全
     private final ConcurrentHashMap<String, Object> userLocks = new ConcurrentHashMap<>();
 
-    public ChatHistoryService(StorageManager storageManager, SqliteStorageService sqliteStorage) {
-        this.storageManager = storageManager;
+    public ChatHistoryService(SqliteStorageService sqliteStorage) {
         this.sqliteStorage = sqliteStorage;
         this.objectMapper = new ObjectMapper();
         this.objectMapper.enable(SerializationFeature.INDENT_OUTPUT);
     }
 
     /**
-     * 初始化：确保 JSON 存储目录存在（SQLite 模式下也需要，作为回退）
+     * 初始化：定位旧版 JSON 存储目录（仅用于删除用户时清理残留文件）
      */
     @PostConstruct
     public void init() {
-        try {
-            String userDir = System.getProperty("user.dir");
-            this.chatHistoryDir = Paths.get(userDir, "data", "chat_history");
-            Files.createDirectories(chatHistoryDir);
-            log.info("会话历史存储目录: {}", chatHistoryDir.toAbsolutePath());
-        } catch (Exception e) {
-            log.error("初始化会话历史存储目录失败", e);
-        }
+        String userDir = System.getProperty("user.dir");
+        this.chatHistoryDir = Paths.get(userDir, "data", "chat_history");
     }
 
     /**
-     * 加载用户的会话历史（合并所有文件/数据库记录）
+     * 加载用户的会话历史（全量装配，导出/全文搜索等场景用）
      * @param userId 用户ID
      * @return 会话数据 Map，包含 lastChatId 和 chats
      */
     public Map<String, Object> loadChatHistory(String userId) {
-        if (storageManager.isUseSqlite()) {
-            return loadChatHistoryFromSqlite(userId);
-        }
-        return loadChatHistoryFromFiles(userId);
+        return loadChatHistoryFromSqlite(userId);
     }
 
     /**
@@ -84,20 +68,10 @@ public class ChatHistoryService {
         Set<String> existing = new HashSet<>();
         if (chatIds == null || chatIds.isEmpty()) return existing;
         try {
-            if (storageManager.isUseSqlite()) {
-                ensureSessionMigrated(userId);
-                Set<String> all = new HashSet<>(sqliteStorage.listChatSessionIds(userId));
-                for (String id : chatIds) {
-                    if (all.contains(id)) existing.add(id);
-                }
-            } else {
-                Map<String, Object> history = loadChatHistoryFromFiles(userId);
-                Object chats = history.get("chats");
-                if (chats instanceof Map<?, ?> map) {
-                    for (String id : chatIds) {
-                        if (map.get(id) instanceof List) existing.add(id);
-                    }
-                }
+            ensureSessionMigrated(userId);
+            Set<String> all = new HashSet<>(sqliteStorage.listChatSessionIds(userId));
+            for (String id : chatIds) {
+                if (all.contains(id)) existing.add(id);
             }
         } catch (Exception e) {
             log.error("检查会话存在性失败: userId={}", userId, e);
@@ -216,73 +190,6 @@ public class ChatHistoryService {
     }
 
     /**
-     * 从 JSON 文件加载用户会话历史（原有逻辑）
-     * @param userId 用户ID
-     * @return 会话数据 Map
-     */
-    private Map<String, Object> loadChatHistoryFromFiles(String userId) {
-        Map<String, Object> mergedChats = new LinkedHashMap<>();
-        Map<String, Object> mergedChatMeta = new LinkedHashMap<>();
-        Set<String> mergedDeletedIds = new LinkedHashSet<>();
-        String lastChatId = null;
-        long latestUpdateTime = 0;
-
-        File dir = chatHistoryDir.toFile();
-        File[] files = dir.listFiles((d, name) ->
-                name.equals(userId + ".json") ||
-                (name.startsWith(userId + "_") && name.endsWith(".json")));
-
-        if (files != null && files.length > 0) {
-            Arrays.sort(files, Comparator.comparingLong(File::lastModified));
-            for (File file : files) {
-                try {
-                    Map<String, Object> data = objectMapper.readValue(file,
-                            new TypeReference<Map<String, Object>>() {});
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> fileChats = (Map<String, Object>) data.get("chats");
-                    if (fileChats != null) {
-                        mergedChats.putAll(fileChats);
-                    }
-                    @SuppressWarnings("unchecked")
-                    List<String> deletedIds = (List<String>) data.get("deletedChatIds");
-                    if (deletedIds != null) {
-                        for (String deletedId : deletedIds) {
-                            mergedChats.remove(deletedId);
-                            mergedChatMeta.remove(deletedId);
-                            mergedDeletedIds.add(deletedId);
-                        }
-                    }
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> fileChatMeta = (Map<String, Object>) data.get("chatMeta");
-                    if (fileChatMeta != null) {
-                        mergedChatMeta.putAll(fileChatMeta);
-                    }
-                    String fileLastChatId = (String) data.get("lastChatId");
-                    Object updatedAtObj = data.get("updatedAtTs");
-                    long fileUpdateTime = 0;
-                    if (updatedAtObj instanceof Number) {
-                        fileUpdateTime = ((Number) updatedAtObj).longValue();
-                    }
-                    if (fileUpdateTime >= latestUpdateTime) {
-                        latestUpdateTime = fileUpdateTime;
-                        lastChatId = fileLastChatId;
-                    }
-                } catch (Exception e) {
-                    log.error("加载会话历史文件失败: {}", file.getName(), e);
-                }
-            }
-        }
-
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("userId", userId);
-        result.put("lastChatId", lastChatId);
-        result.put("chats", mergedChats);
-        result.put("chatMeta", mergedChatMeta);
-        result.put("deletedChatIds", new ArrayList<>(mergedDeletedIds));
-        return result;
-    }
-
-    /**
      * 加载用户会话摘要列表（懒加载模式下的首屏拉取）
      * 仅返回每个会话的标题/预览/最后时间/条数，不含消息内容，
      * 会话正文由前端切换会话时通过 loadSingleChat 按需加载
@@ -290,43 +197,7 @@ public class ChatHistoryService {
      * @return 包含 lastChatId、chatMeta、deletedChatIds 与 summaries 列表
      */
     public Map<String, Object> loadChatSummaries(String userId) {
-        if (storageManager.isUseSqlite()) {
-            return loadChatSummariesFromSqlite(userId);
-        }
-        Map<String, Object> history = loadChatHistory(userId);
-        List<Map<String, Object>> summaries = new ArrayList<>();
-        if (history.get("chats") instanceof Map<?, ?> chats) {
-            for (Map.Entry<?, ?> entry : chats.entrySet()) {
-                if (!(entry.getValue() instanceof List)) continue;
-                @SuppressWarnings("unchecked")
-                List<Map<String, Object>> msgs = (List<Map<String, Object>>) entry.getValue();
-                String preview = "";
-                String lastTime = null;
-                for (Map<String, Object> m : msgs) {
-                    if (preview.isEmpty() && "user".equals(m.get("role"))
-                            && m.get("content") instanceof String c && !c.isEmpty()) {
-                        // 首条用户消息前 300 字，供侧边栏标题回退与模糊搜索
-                        preview = c.length() > 300 ? c.substring(0, 300) : c;
-                    }
-                    if (m.get("time") instanceof String t && !t.isEmpty()) {
-                        lastTime = t;
-                    }
-                }
-                Map<String, Object> summary = new LinkedHashMap<>();
-                summary.put("id", String.valueOf(entry.getKey()));
-                summary.put("title", buildChatTitle(msgs));
-                summary.put("preview", preview);
-                summary.put("lastTime", lastTime);
-                summary.put("count", msgs.size());
-                summaries.add(summary);
-            }
-        }
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("lastChatId", history.get("lastChatId"));
-        result.put("chatMeta", history.get("chatMeta") != null ? history.get("chatMeta") : new LinkedHashMap<>());
-        result.put("deletedChatIds", history.get("deletedChatIds") != null ? history.get("deletedChatIds") : new ArrayList<>());
-        result.put("summaries", summaries);
-        return result;
+        return loadChatSummariesFromSqlite(userId);
     }
 
     /**
@@ -379,37 +250,23 @@ public class ChatHistoryService {
      */
     public Map<String, Object> loadSingleChat(String userId, String chatId) {
         Map<String, Object> result = new LinkedHashMap<>();
-        if (storageManager.isUseSqlite()) {
-            Object messages = null;
-            Object meta = null;
-            try {
-                ensureSessionMigrated(userId);
-                Map<String, Object> row = sqliteStorage.getChatSession(userId, chatId);
-                if (row != null) {
-                    if (row.get("messages") instanceof String s && !s.isEmpty()) {
-                        messages = objectMapper.readValue(s,
-                                new TypeReference<List<Map<String, Object>>>() {});
-                    }
-                    if (row.get("meta") instanceof String s && !s.isEmpty()) {
-                        meta = objectMapper.readValue(s,
-                                new TypeReference<Map<String, Object>>() {});
-                    }
-                }
-            } catch (Exception e) {
-                log.error("从SQLite加载单个会话失败: userId={}, chatId={}", userId, chatId, e);
-            }
-            result.put("messages", messages != null ? messages : new ArrayList<>());
-            result.put("meta", meta);
-            return result;
-        }
-        Map<String, Object> history = loadChatHistory(userId);
         Object messages = null;
-        if (history.get("chats") instanceof Map<?, ?> chats) {
-            messages = chats.get(chatId);
-        }
         Object meta = null;
-        if (history.get("chatMeta") instanceof Map<?, ?> chatMeta) {
-            meta = chatMeta.get(chatId);
+        try {
+            ensureSessionMigrated(userId);
+            Map<String, Object> row = sqliteStorage.getChatSession(userId, chatId);
+            if (row != null) {
+                if (row.get("messages") instanceof String s && !s.isEmpty()) {
+                    messages = objectMapper.readValue(s,
+                            new TypeReference<List<Map<String, Object>>>() {});
+                }
+                if (row.get("meta") instanceof String s && !s.isEmpty()) {
+                    meta = objectMapper.readValue(s,
+                            new TypeReference<Map<String, Object>>() {});
+                }
+            }
+        } catch (Exception e) {
+            log.error("从SQLite加载单个会话失败: userId={}, chatId={}", userId, chatId, e);
         }
         result.put("messages", messages != null ? messages : new ArrayList<>());
         result.put("meta", meta);
@@ -419,8 +276,7 @@ public class ChatHistoryService {
     /**
      * 保存用户的会话历史（增量合并语义）
      * 客户端可能只上传已加载的部分会话（懒加载模式），因此不做整体覆盖：
-     * - SQLite 模式：仅 upsert 上传的会话行 + 删除 deletedChatIds 行，免整文档重写
-     * - JSON 模式：以服务端已存数据为底，按会话 ID 覆盖上传的会话，再按 deletedChatIds 删除
+     * 仅 upsert 上传的会话行 + 删除 deletedChatIds 行，免整文档重写
      * @param userId 用户ID
      * @param chatData 会话数据，包含 lastChatId、chats、chatMeta、deletedChatIds
      */
@@ -430,62 +286,8 @@ public class ChatHistoryService {
             String updatedAt = LocalDateTime.now().format(
                     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
             long updatedAtTs = System.currentTimeMillis();
-
-            if (storageManager.isUseSqlite()) {
-                saveChatHistoryToSqlite(userId, chatData, updatedAt, updatedAtTs);
-            } else {
-                mergeWithStored(userId, chatData);
-                chatData.put("userId", userId);
-                chatData.put("updatedAt", updatedAt);
-                chatData.put("updatedAtTs", updatedAtTs);
-                saveChatHistoryToFiles(userId, chatData);
-            }
+            saveChatHistoryToSqlite(userId, chatData, updatedAt, updatedAtTs);
         }
-    }
-
-    /**
-     * 将上传数据与服务端已存数据按会话合并（合并结果写回 chatData）：
-     * - chats/chatMeta：已存数据为底，按会话 ID 用上传数据覆盖
-     * - deletedChatIds：已存与上传累积合并后从 chats/chatMeta 中删除；
-     *   若上传的 chats 中重新出现某已删 ID（JSON 备份导入恢复），则不再视为已删除
-     * @param userId 用户ID
-     * @param chatData 本次上传的会话数据（原地改写为合并结果）
-     */
-    @SuppressWarnings("unchecked")
-    private void mergeWithStored(String userId, Map<String, Object> chatData) {
-        Map<String, Object> stored = loadChatHistory(userId);
-
-        Map<String, Object> incomingChats = chatData.get("chats") instanceof Map
-                ? (Map<String, Object>) chatData.get("chats") : new LinkedHashMap<>();
-        Map<String, Object> mergedChats = new LinkedHashMap<>();
-        if (stored.get("chats") instanceof Map) {
-            mergedChats.putAll((Map<String, Object>) stored.get("chats"));
-        }
-        mergedChats.putAll(incomingChats);
-
-        Map<String, Object> mergedMeta = new LinkedHashMap<>();
-        if (stored.get("chatMeta") instanceof Map) {
-            mergedMeta.putAll((Map<String, Object>) stored.get("chatMeta"));
-        }
-        if (chatData.get("chatMeta") instanceof Map) {
-            mergedMeta.putAll((Map<String, Object>) chatData.get("chatMeta"));
-        }
-
-        Set<String> deletedIds = new LinkedHashSet<>();
-        if (stored.get("deletedChatIds") instanceof List<?> list) {
-            for (Object id : list) if (id instanceof String s) deletedIds.add(s);
-        }
-        if (chatData.get("deletedChatIds") instanceof List<?> list) {
-            for (Object id : list) if (id instanceof String s) deletedIds.add(s);
-        }
-        // 备份导入等场景会重新上传已删 ID 的会话，视为恢复
-        deletedIds.removeAll(incomingChats.keySet());
-        mergedChats.keySet().removeAll(deletedIds);
-        mergedMeta.keySet().removeAll(deletedIds);
-
-        chatData.put("chats", mergedChats);
-        chatData.put("chatMeta", mergedMeta);
-        chatData.put("deletedChatIds", new ArrayList<>(deletedIds));
     }
 
     /**
@@ -539,35 +341,6 @@ public class ChatHistoryService {
                     objectMapper.writeValueAsString(new ArrayList<>(deletedIds)), updatedAt, updatedAtTs);
         } catch (Exception e) {
             log.error("保存会话历史到SQLite失败: userId={}", userId, e);
-        }
-    }
-
-    /**
-     * 保存会话历史到 JSON 文件（原有逻辑，含20MB归档）
-     * @param userId 用户ID
-     * @param chatData 会话数据
-     */
-    private void saveChatHistoryToFiles(String userId, Map<String, Object> chatData) {
-        File activeFile = chatHistoryDir.resolve(userId + ".json").toFile();
-
-        // 检查当前文件是否超过20MB
-        if (activeFile.exists() && activeFile.length() > MAX_FILE_SIZE) {
-            String timestamp = LocalDateTime.now().format(
-                    DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
-            File archiveFile = chatHistoryDir.resolve(
-                    userId + "_" + timestamp + ".json").toFile();
-            if (activeFile.renameTo(archiveFile)) {
-                log.info("会话历史文件超过20MB，已归档: {} -> {}",
-                        activeFile.getName(), archiveFile.getName());
-            } else {
-                log.warn("归档会话历史文件失败: {}", activeFile.getName());
-            }
-        }
-
-        try {
-            objectMapper.writeValue(activeFile, chatData);
-        } catch (IOException e) {
-            log.error("保存会话历史失败: userId={}", userId, e);
         }
     }
 
@@ -668,11 +441,9 @@ public class ChatHistoryService {
     public void deleteChatHistory(String userId) {
         Object lock = userLocks.computeIfAbsent(userId, k -> new Object());
         synchronized (lock) {
-            if (storageManager.isUseSqlite()) {
-                sqliteStorage.deleteChatData(userId);
-                log.info("已从SQLite删除会话历史: userId={}", userId);
-            }
-            // 无论哪种模式，都清理 JSON 文件（确保切换后无残留）
+            sqliteStorage.deleteChatData(userId);
+            log.info("已从SQLite删除会话历史: userId={}", userId);
+            // 清理旧版 JSON 存储时代的残留文件（如有）
             File dir = chatHistoryDir.toFile();
             File[] files = dir.listFiles((d, name) ->
                     name.equals(userId + ".json") ||

@@ -3,8 +3,8 @@
     <!-- 图片预览区 -->
     <div v-if="pendingImages.length" class="image-preview-area">
       <div v-for="(img, idx) in pendingImages" :key="idx" class="image-preview-item">
-        <img :src="img" alt="粘贴图片">
-        <button class="image-preview-remove" @click="removeImage(idx)" title="删除">
+        <img :src="img" :alt="t('messages.sentImage')">
+        <button class="image-preview-remove" @click="removeImage(idx)" :title="t('input.delete')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
@@ -14,8 +14,8 @@
       <div v-for="(f, idx) in pendingFiles" :key="idx" class="file-preview-item" :class="{ uploading: f.uploading }">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
         <span class="file-preview-name" :title="f.name">{{ f.name }}</span>
-        <span class="file-preview-meta">{{ f.uploading ? '解析中...' : f.chars + ' 字' }}</span>
-        <button class="file-preview-remove" @click="removeFile(idx)" title="删除">
+        <span class="file-preview-meta">{{ f.uploading ? t('input.parsing') : t('input.chars', { n: f.chars }) }}</span>
+        <button class="file-preview-remove" @click="removeFile(idx)" :title="t('input.delete')">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
@@ -30,7 +30,7 @@
         <textarea
           ref="textareaRef"
           v-model="inputText"
-          placeholder="写下你正在想的事 · Press Enter to send"
+          :placeholder="t('input.placeholder')"
           rows="1"
           @input="autoResize"
           @keydown="handleKeydown"
@@ -39,40 +39,40 @@
 
         <!-- 输入框内工具栏 -->
         <div class="input-inner-toolbar">
-          <div v-if="supportsThinking" class="think-icon-btn" :class="{ active: deepThinking }" @click="deepThinking = !deepThinking" title="深度思考">
+          <div v-if="supportsThinking" class="think-icon-btn" :class="{ active: deepThinking }" @click="deepThinking = !deepThinking" :title="t('input.deepThinking')">
             <img :src="thinkIconSrc" style="width:14px;height:14px;" />
           </div>
           <span v-if="supportsThinking" class="toolbar-divider"></span>
-          <div v-if="modelsStore.webSearchEnabled" class="think-icon-btn" :class="{ active: webSearch }" @click="webSearch = !webSearch" :title="webSearch ? '联网搜索：已开启（回答前先检索实时网络信息）' : '联网搜索：已关闭'">
+          <div v-if="modelsStore.webSearchEnabled" class="think-icon-btn" :class="{ active: webSearch }" @click="webSearch = !webSearch" :title="webSearch ? t('input.webSearchOn') : t('input.webSearchOff')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
           </div>
           <span v-if="modelsStore.webSearchEnabled" class="toolbar-divider"></span>
           <el-dropdown v-if="allRolePresets.length" trigger="click" placement="top-start" @command="selectRolePreset">
-            <div class="think-icon-btn" :class="{ active: !!boundPresetId }" :title="boundPresetTitle ? '角色：' + boundPresetTitle + '（仅对当前会话生效）' : '选择智能体/角色（仅对当前会话生效）'">
+            <div class="think-icon-btn" :class="{ active: !!boundPresetId }" :title="boundPresetTitle ? t('input.roleBoundTitle', { title: boundPresetTitle }) : t('input.rolePickTitle')">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V5"/><circle cx="12" cy="4" r="1"/><circle cx="9" cy="13" r="1"/><circle cx="15" cy="13" r="1"/><path d="M9 17h6"/></svg>
             </div>
             <template #dropdown>
               <el-dropdown-menu class="role-preset-menu">
-                <el-dropdown-item command="" :disabled="!boundPresetId">默认（跟随全局提示词）</el-dropdown-item>
+                <el-dropdown-item command="" :disabled="!boundPresetId">{{ t('input.roleDefault') }}</el-dropdown-item>
                 <template v-if="builtinAgents.length">
-                  <li class="role-preset-group-title">内置智能体</li>
+                  <li class="role-preset-group-title">{{ t('input.builtinAgents') }}</li>
                   <el-dropdown-item v-for="p in builtinAgents" :key="p.id" :command="p.id" :disabled="p.id === boundPresetId">{{ p.title }}</el-dropdown-item>
                 </template>
                 <template v-if="rolePresets.length">
-                  <li class="role-preset-group-title">我的提示词</li>
+                  <li class="role-preset-group-title">{{ t('input.myPrompts') }}</li>
                   <el-dropdown-item v-for="p in rolePresets" :key="p.id" :command="p.id" :disabled="p.id === boundPresetId">{{ p.title }}</el-dropdown-item>
                 </template>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
           <span v-if="allRolePresets.length" class="toolbar-divider"></span>
-          <div class="upload-image-btn" title="上传图片" @click="triggerUpload">
+          <div class="upload-image-btn" :title="t('input.uploadImage')" @click="triggerUpload">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
           </div>
-          <div class="upload-image-btn" title="上传附件（txt/doc/docx/xls/xlsx/csv/md/log 等文本文档）" @click="triggerDocUpload">
+          <div class="upload-image-btn" :title="t('input.uploadDoc')" @click="triggerDocUpload">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
           </div>
-          <div class="upload-image-btn" title="清除上下文（后续对话不再携带以上历史）" @click="emit('clear-context')">
+          <div class="upload-image-btn" :title="t('input.clearContext')" @click="emit('clear-context')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m13 11 9-9"/><path d="M14.6 12.6c.8.8.9 2.1.2 3L10 22l-8-8 6.4-4.8c.9-.7 2.2-.6 3 .2Z"/><path d="m6.8 10.4 6.8 6.8"/><path d="m5 17 1.4-1.4"/></svg>
           </div>
           <input type="file" ref="fileInputRef" accept="image/*" multiple style="display:none" @change="handleFileUpload">
@@ -117,7 +117,7 @@
               </el-option-group>
             </el-select>
           </div>
-          <button class="send-btn" :class="{ stop: isStreaming }" @click="handleSendClick" :title="isStreaming ? '停止' : '发送'">
+          <button class="send-btn" :class="{ stop: isStreaming }" @click="handleSendClick" :title="isStreaming ? t('input.stop') : t('input.send')">
             <svg v-if="!isStreaming" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
             <svg v-else width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
           </button>
@@ -125,8 +125,8 @@
       </div>
     </div>
     <div class="input-footer">
-      <span class="foot-l">⌘/Ctrl+Enter · 新行</span>
-      <span class="foot-c">内容由 AI 生成 · 请仔细甄别</span>
+      <span class="foot-l">{{ t('input.footShortcut') }}</span>
+      <span class="foot-c">{{ t('input.footDisclaimer') }}</span>
       <span class="foot-r">v{{ APP_VERSION }}</span>
     </div>
   </div>
@@ -134,6 +134,7 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useModelsStore } from '@/stores/models'
 import { useChatStore } from '@/stores/chat'
 import { useTheme } from '@/composables/useTheme'
@@ -149,6 +150,8 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['send', 'stop', 'clear-context'])
+
+const { t } = useI18n()
 
 const modelsStore = useModelsStore()
 const chatStore = useChatStore()
@@ -228,9 +231,9 @@ function selectRolePreset(presetId) {
   chatStore.setChatPromptPreset(chatStore.currentChatId, presetId)
   if (presetId) {
     const p = allRolePresets.value.find(p => p.id === presetId)
-    ElMessage.success('当前会话已绑定角色：' + (p ? p.title : ''))
+    ElMessage.success(t('input.roleBound', { title: p ? p.title : '' }))
   } else {
-    ElMessage.success('已恢复默认提示词')
+    ElMessage.success(t('input.roleReset'))
   }
 }
 
@@ -292,7 +295,7 @@ const currentIconIsImg = computed(() => currentIcon.value.startsWith('/'))
 
 // 根据模型名长度动态计算输入框宽度，避免长名称被截断
 const modelInputWidth = computed(() => {
-  const name = String(modelsStore.currentModelName || '选择模型')
+  const name = String(modelsStore.currentModelName || t('input.selectModel'))
   let w = 0
   for (const ch of name) {
     w += /[\u2e80-\u9fff\uf900-\ufaff\uff00-\uffef]/.test(ch) ? 12.5 : 7
@@ -340,8 +343,8 @@ function handleMobileModelChange(modelId) {
 // 右上角通知比顶部居中的 ElMessage 更醒目，避免被对话内容掩盖忽略
 function notifyStreamingBlocked() {
   ElNotification.warning({
-    title: '暂不可切换模型',
-    message: '回复生成中，请等待当前回答完成后再切换',
+    title: t('input.streamBlockTitle'),
+    message: t('input.streamBlockMsg'),
     position: 'top-right',
     duration: 3000
   })
@@ -413,11 +416,11 @@ function doSend() {
   const hasImages = pendingImages.value.length > 0
   const hasFiles = pendingFiles.value.length > 0
   if (hasImages && !props.supportsMultimodal) {
-    ElMessage.warning('当前模型不支持图像理解，请删除图片后再发送')
+    ElMessage.warning(t('input.noMultimodal'))
     return
   }
   if (pendingFiles.value.some(f => f.uploading)) {
-    ElMessage.warning('附件还在解析中，请稍候再发送')
+    ElMessage.warning(t('input.attachParsing'))
     return
   }
   if (!text && !hasImages && !hasFiles) return
@@ -454,14 +457,14 @@ function handlePaste(e) {
     } else if (DOC_EXTS.includes(extOf(file.name))) {
       docFiles.push(file)
     } else {
-      unsupported.push(file.name || '未知文件')
+      unsupported.push(file.name || t('common.unknown'))
     }
   }
   // 未粘贴任何文件（纯文本粘贴）时不拦截默认行为
   if (imageFiles.length === 0 && docFiles.length === 0 && unsupported.length === 0) return
   e.preventDefault()
   if (unsupported.length > 0) {
-    ElMessage.warning(`暂不支持该类型附件：${unsupported.join('、')}`)
+    ElMessage.warning(t('input.unsupportedAttach', { names: unsupported.join('、') }))
   }
   imageFiles.forEach(file => addImageFile(file))
   docFiles.forEach(file => addDocFile(file))
@@ -488,18 +491,18 @@ async function addImageFile(file) {
   // 先尝试前端压缩，降低上传体积与模型多模态 token 消耗
   const compressed = await compressImage(file)
   if (compressed.size > MAX_IMAGE_SIZE) {
-    ElMessage.warning('图片超过5MB限制')
+    ElMessage.warning(t('input.imageTooLarge'))
     return
   }
   try {
     const res = await uploadChatImage(compressed)
     if (res && res.success) {
       if (!props.supportsMultimodal) {
-        pasteWarning.value = '当前模型不支持图像理解，请切换支持多模态的模型或删除图片'
+        pasteWarning.value = t('input.noMultimodalWarn')
       }
       pendingImages.value.push(res.url)
     } else {
-      ElMessage.error((res && res.message) || '图片上传失败')
+      ElMessage.error((res && res.message) || t('input.imageUploadFailed'))
     }
   } catch (e) {
     // 错误提示已由 request 拦截器统一处理
@@ -560,7 +563,7 @@ function handleDocUpload(e) {
 // 上传并解析附件：先占位展示“解析中”，成功后回填引用 URL 与字数，失败则移除占位
 async function addDocFile(file) {
   if (file.size > MAX_DOC_SIZE) {
-    ElMessage.warning(`附件「${file.name}」超过3MB限制`)
+    ElMessage.warning(t('input.docTooLarge', { name: file.name }))
     return
   }
   const item = { name: file.name, url: '', chars: 0, uploading: true }
@@ -573,7 +576,7 @@ async function addDocFile(file) {
       item.uploading = false
     } else {
       pendingFiles.value.splice(pendingFiles.value.indexOf(item), 1)
-      ElMessage.error((res && res.message) || '附件上传失败')
+      ElMessage.error((res && res.message) || t('input.docUploadFailed'))
     }
   } catch (e) {
     pendingFiles.value.splice(pendingFiles.value.indexOf(item), 1)

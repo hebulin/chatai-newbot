@@ -21,7 +21,7 @@
                 <span class="mark-vol">VOL. II</span>
               </div>
             </div>
-            <button class="theme-toggle" type="button" @click="toggleTheme" aria-label="切换主题">
+            <button class="theme-toggle" type="button" @click="toggleTheme" :aria-label="t('login.toggleTheme')">
               <span class="toggle-track"><span class="toggle-knob"></span></span>
             </button>
           </header>
@@ -34,7 +34,7 @@
               <span class="display-line">alongside you.</span>
             </h1>
             <p class="brand-lede">
-              Atelier 是一座安静的工坊。它把多家大语言模型收拢在同一张工作台上，让你用最少的仪式感，写下最值得说出口的话。
+              {{ t('login.lede') }}
             </p>
             <div class="brand-foot">
               <div class="foot-stat">
@@ -54,7 +54,7 @@
 
           <div class="brand-cta-row">
             <button class="brand-cta" type="button" @click="enterFormView">
-              <span class="cta-text">立刻体验 · TRY NOW</span>
+              <span class="cta-text">{{ t('login.tryNow') }}</span>
               <span class="cta-arrow">
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
               </span>
@@ -69,12 +69,12 @@
       <div class="view-inner form-inner">
         <article class="panel form-panel">
           <header class="panel-top form-top">
-            <button class="back-to-brand" type="button" @click="backToBrand" aria-label="返回介绍页">
+            <button class="back-to-brand" type="button" @click="backToBrand" :aria-label="t('login.back')">
               <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
-              <span class="back-label">返回</span>
+              <span class="back-label">{{ t('login.back') }}</span>
             </button>
             <div class="top-date">{{ currentDate }}</div>
-            <button class="theme-toggle" type="button" @click="toggleTheme" aria-label="切换主题">
+            <button class="theme-toggle" type="button" @click="toggleTheme" :aria-label="t('login.toggleTheme')">
               <span class="toggle-track"><span class="toggle-knob"></span></span>
             </button>
           </header>
@@ -82,10 +82,10 @@
           <section class="form-stage" :class="{ reveal: showForm }">
             <div class="stage-head">
               <span class="stage-no">{{ isRegister ? 'B.' : 'A.' }}</span>
-              <span class="stage-eyebrow">{{ isRegister ? 'SIGN UP · 注册' : 'SIGN IN · 登录' }}</span>
+              <span class="stage-eyebrow">{{ isRegister ? t('login.signUp') : t('login.signIn') }}</span>
             </div>
             <h2 class="stage-title">
-              <span class="stage-title-1">{{ isRegister ? '欢迎加入' : '欢迎回来' }}</span>
+              <span class="stage-title-1">{{ isRegister ? t('login.welcomeJoin') : t('login.welcomeBack') }}</span>
               <span class="stage-title-2 stage-italic">{{ isRegister ? 'Join the workshop' : 'Welcome back' }}</span>
             </h2>
 
@@ -93,7 +93,7 @@
               <!-- 登录表单 -->
               <form class="atelier-form" :class="{ 'form-pane-active': !isRegister }" @submit.prevent="handleLogin" autocomplete="off">
                 <div class="field">
-                  <label class="field-label"><span class="field-num">01</span><span class="field-name">用户名 · USERNAME</span></label>
+                  <label class="field-label"><span class="field-num">01</span><span class="field-name">{{ t('login.username') }}</span></label>
                   <div class="field-input-wrap">
                     <input type="text" v-model="loginForm.username" placeholder="your.name" autocomplete="username" class="field-input" @blur="validateField('loginUsername')" @input="errors.loginUsername = ''">
                     <span class="field-bar"></span>
@@ -101,7 +101,7 @@
                   <span class="field-error" v-if="errors.loginUsername">{{ errors.loginUsername }}</span>
                 </div>
                 <div class="field">
-                  <label class="field-label"><span class="field-num">02</span><span class="field-name">密码 · PASSWORD</span></label>
+                  <label class="field-label"><span class="field-num">02</span><span class="field-name">{{ t('login.password') }}</span></label>
                   <div class="field-input-wrap">
                     <input :type="showPassword ? 'text' : 'password'" v-model="loginForm.password" placeholder="••••••••" autocomplete="current-password" class="field-input" @blur="validateField('loginPassword')" @input="errors.loginPassword = ''">
                     <button type="button" class="field-eye" :class="{ on: showPassword }" @click="showPassword = !showPassword" tabindex="-1">
@@ -114,13 +114,13 @@
                 <div class="form-row">
                   <label class="check-rail" :class="{ on: rememberMe }" @click.prevent="rememberMe = !rememberMe" @keydown="onCheckKeydown" role="checkbox" tabindex="0" aria-checked="rememberMe">
                     <span class="check-box"><span class="check-tick"></span></span>
-                    <span class="check-label">记住我 · REMEMBER</span>
+                    <span class="check-label">{{ t('login.rememberMe') }}</span>
                   </label>
-                  <a href="javascript:;" class="link-quiet" @click="isRegister = true">创建账号 -></a>
+                  <a href="javascript:;" class="link-quiet" @click="isRegister = true">{{ t('login.createAccountLink') }}</a>
                 </div>
                 <button class="submit-cta" type="submit" :disabled="loginLoading">
-                  <span class="cta-text" v-if="!loginLoading">进入工坊 · ENTER</span>
-                  <span class="cta-text" v-else>登录中...</span>
+                  <span class="cta-text" v-if="!loginLoading">{{ t('login.enterCta') }}</span>
+                  <span class="cta-text" v-else>{{ t('login.loggingIn') }}</span>
                   <span class="cta-arrow" v-if="!loginLoading">
                     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
                   </span>
@@ -130,38 +130,38 @@
               <!-- 注册表单 -->
               <form class="atelier-form" :class="{ 'form-pane-active': isRegister }" @submit.prevent="handleRegister" autocomplete="off">
                 <div class="field">
-                  <label class="field-label"><span class="field-num">01</span><span class="field-name">用户名 · USERNAME</span></label>
+                  <label class="field-label"><span class="field-num">01</span><span class="field-name">{{ t('login.username') }}</span></label>
                   <div class="field-input-wrap">
-                    <input type="text" v-model="regForm.username" placeholder="2-20个字符" autocomplete="username" class="field-input" @blur="validateField('regUsername')" @input="errors.regUsername = ''">
+                    <input type="text" v-model="regForm.username" :placeholder="t('login.regUsernamePlaceholder')" autocomplete="username" class="field-input" @blur="validateField('regUsername')" @input="errors.regUsername = ''">
                     <span class="field-bar"></span>
                   </div>
                   <span class="field-error" v-if="errors.regUsername">{{ errors.regUsername }}</span>
                 </div>
                 <div class="field">
-                  <label class="field-label"><span class="field-num">02</span><span class="field-name">密码 · PASSWORD</span></label>
+                  <label class="field-label"><span class="field-num">02</span><span class="field-name">{{ t('login.password') }}</span></label>
                   <div class="field-input-wrap">
-                    <input type="password" v-model="regForm.password" placeholder="至少4个字符" autocomplete="new-password" class="field-input" @blur="validateField('regPassword')" @input="errors.regPassword = ''">
+                    <input type="password" v-model="regForm.password" :placeholder="t('login.regPasswordPlaceholder')" autocomplete="new-password" class="field-input" @blur="validateField('regPassword')" @input="errors.regPassword = ''">
                     <span class="field-bar"></span>
                   </div>
                   <span class="field-error" v-if="errors.regPassword">{{ errors.regPassword }}</span>
                 </div>
                 <div class="field">
-                  <label class="field-label"><span class="field-num">03</span><span class="field-name">确认 · CONFIRM</span></label>
+                  <label class="field-label"><span class="field-num">03</span><span class="field-name">{{ t('login.confirm') }}</span></label>
                   <div class="field-input-wrap">
-                    <input type="password" v-model="regForm.password2" placeholder="再次输入" autocomplete="new-password" class="field-input" @blur="validateField('regPassword2')" @input="errors.regPassword2 = ''">
+                    <input type="password" v-model="regForm.password2" :placeholder="t('login.regPassword2Placeholder')" autocomplete="new-password" class="field-input" @blur="validateField('regPassword2')" @input="errors.regPassword2 = ''">
                     <span class="field-bar"></span>
                   </div>
                   <span class="field-error" v-if="errors.regPassword2">{{ errors.regPassword2 }}</span>
                 </div>
                 <button class="submit-cta" type="submit" :disabled="regLoading">
-                  <span class="cta-text" v-if="!regLoading">创建账号 · CREATE</span>
-                  <span class="cta-text" v-else>注册中...</span>
+                  <span class="cta-text" v-if="!regLoading">{{ t('login.createCta') }}</span>
+                  <span class="cta-text" v-else>{{ t('login.registering') }}</span>
                   <span class="cta-arrow" v-if="!regLoading">
                     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
                   </span>
                 </button>
                 <div class="form-row form-row-end">
-                  <a href="javascript:;" class="link-quiet" @click="isRegister = false">← 返回登录</a>
+                  <a href="javascript:;" class="link-quiet" @click="isRegister = false">{{ t('login.backToLogin') }}</a>
                 </div>
               </form>
             </div>
@@ -186,6 +186,7 @@ import '@/styles/login.css'
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { useI18n } from 'vue-i18n'
 import { login, register, getMe } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
 import { useTheme } from '@/composables/useTheme'
@@ -194,6 +195,7 @@ import { APP_VERSION } from '@/config/version'
 const router = useRouter()
 const authStore = useAuthStore()
 const { toggleTheme } = useTheme()
+const { t } = useI18n()
 
 const showForm = ref(false)
 const isRegister = ref(false)
@@ -220,10 +222,9 @@ const currentDate = computed(() => {
   return days[d.getDay()] + ' · ' + d.getFullYear() + '.' + pad(d.getMonth() + 1) + '.' + pad(d.getDate())
 })
 
-// 已登录自动跳转
+// 已登录自动跳转（token 存于 HttpOnly Cookie，以 username 本地标记预判，再请求后端确认）
 onMounted(async () => {
-  const token = safeGet('token')
-  if (token) {
+  if (safeGet('username')) {
     try {
       const data = await getMe()
       if (data && data.success) {
@@ -345,23 +346,23 @@ if (typeof window !== 'undefined') {
 function validateField(field) {
   const e = errors.value
   if (field === 'loginUsername') {
-    e.loginUsername = loginForm.value.username.trim() ? '' : '请输入用户名'
+    e.loginUsername = loginForm.value.username.trim() ? '' : t('login.errUsernameRequired')
   } else if (field === 'loginPassword') {
-    e.loginPassword = loginForm.value.password ? '' : '请输入密码'
+    e.loginPassword = loginForm.value.password ? '' : t('login.errPasswordRequired')
   } else if (field === 'regUsername') {
     const v = regForm.value.username.trim()
-    if (!v) e.regUsername = '请输入用户名'
-    else if (v.length < 2 || v.length > 20) e.regUsername = '用户名需 2-20 个字符'
+    if (!v) e.regUsername = t('login.errUsernameRequired')
+    else if (v.length < 2 || v.length > 20) e.regUsername = t('login.errUsernameLen')
     else e.regUsername = ''
   } else if (field === 'regPassword') {
     const v = regForm.value.password
-    if (!v) e.regPassword = '请输入密码'
-    else if (v.length < 4) e.regPassword = '密码至少 4 个字符'
+    if (!v) e.regPassword = t('login.errPasswordRequired')
+    else if (v.length < 4) e.regPassword = t('login.errPasswordLen')
     else e.regPassword = ''
   } else if (field === 'regPassword2') {
     const v = regForm.value.password2
-    if (!v) e.regPassword2 = '请再次输入密码'
-    else if (v !== regForm.value.password) e.regPassword2 = '两次输入的密码不一致'
+    if (!v) e.regPassword2 = t('login.errPassword2Required')
+    else if (v !== regForm.value.password) e.regPassword2 = t('login.errPasswordMismatch')
     else e.regPassword2 = ''
   }
 }
@@ -398,10 +399,10 @@ async function handleLogin() {
       authStore.setAuth(data)
       router.push('/')
     } else {
-      ElMessage.error(data.message || '登录失败')
+      ElMessage.error(data.message || t('login.loginFailed'))
     }
   } catch (e) {
-    ElMessage.error('网络错误，请稍后重试')
+    ElMessage.error(t('login.networkError'))
   } finally {
     loginLoading.value = false
   }
@@ -416,10 +417,10 @@ async function handleRegister() {
       authStore.setAuth(data)
       router.push('/')
     } else {
-      ElMessage.error(data.message || '注册失败')
+      ElMessage.error(data.message || t('login.registerFailed'))
     }
   } catch (e) {
-    ElMessage.error('网络错误，请稍后重试')
+    ElMessage.error(t('login.networkError'))
   } finally {
     regLoading.value = false
   }
