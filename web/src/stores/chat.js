@@ -160,14 +160,14 @@ export const useChatStore = defineStore('chat', () => {
 
   // 按需加载会话正文：未加载时从服务端拉取单会话消息；加载失败时抛出异常，
   // 绝不能置空数组占位，否则后续同步会把服务端该会话内容覆盖为空
-  async function ensureChatLoaded(id) {
+  async function ensureChatLoaded(id, config) {
     if (!id || chats.value[id] !== undefined) return
     // 摘要中不存在的 ID 视为本地新会话，直接初始化
     if (!chatSummaries.value[id]) {
       chats.value[id] = []
       return
     }
-    const res = await loadSingleChatHistory(id)
+    const res = await loadSingleChatHistory(id, config)
     if (!res || !res.success) {
       throw new Error((res && res.message) || '加载会话内容失败')
     }
@@ -262,8 +262,8 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   // 切换会话（懒加载）：先确保目标会话正文已加载再切换，加载失败时保持当前会话不变
-  async function switchChatLazy(id) {
-    await ensureChatLoaded(id)
+  async function switchChatLazy(id, config) {
+    await ensureChatLoaded(id, config)
     switchChat(id)
   }
 

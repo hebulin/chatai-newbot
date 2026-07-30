@@ -18,6 +18,7 @@
                         range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期"
                         style="width:260px" @change="reload" />
         <el-button @click="handleReset">重置</el-button>
+        <el-button type="danger" plain :loading="resetting" style="margin-left:auto" @click="handleResetAudit">重置审计日志</el-button>
       </div>
 
       <!-- 日志表格（服务端分页） -->
@@ -54,10 +55,11 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
-import { getAuditLogs, getAuditActions } from '@/api/audit'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { getAuditLogs, getAuditActions, resetAuditLogs } from '@/api/audit'
 
 const loading = ref(false)
+const resetting = ref(false)
 const logs = ref([])
 const actions = ref([])
 const filterUser = ref('')
@@ -95,7 +97,11 @@ const ACTION_TEXT = {
   'announcement.update': '更新公告',
   'announcement.offline': '下线公告',
   'announcement.delete': '删除公告',
-  'share.batchDelete': '批量删除分享'
+  'share.batchDelete': '批量删除分享',
+  'provider.rename': '修改厂商',
+  'model.test': '模型连通测试',
+  'settings.websearch.test': '联网连通测试',
+  'audit.reset': '重置审计日志'
 }
 function actionText(a) {
   return ACTION_TEXT[a] || a
@@ -142,6 +148,49 @@ function handleReset() {
   filterAction.value = ''
   dateRange.value = null
   reload()
+}
+
+// 重置审计日志：二次确认 + 管理员密码校验，重置后仅保留一条重置记录
+async function handleResetAudit() {
+  try {
+    await ElMessageBox.confirm(
+      '重置将永久清空全部审计日志且不可恢复，清空后仅保留本次重置的一条记录。确定继续吗？',
+      '重置审计日志',
+      { type: 'warning', confirmButtonText: '继续', cancelButtonText: '取消' }
+    )
+  } catch { return }
+
+  let password
+  try {
+    const { value } = await ElMessageBox.prompt(
+      '请输入当前管理员账号密码以确认重置：',
+      '验证管理员密码',
+      {
+        inputType: 'password',
+        confirmButtonText: '确认重置',
+        cancelButtonText: '取消',
+        inputPlaceholder: '管理员密码',
+        inputValidator: v => (v && v.trim()) ? true : '密码不能为空'
+      }
+    )
+    password = value
+  } catch { return }
+
+  resetting.value = true
+  try {
+    const res = await resetAuditLogs(password)
+    if (res?.success) {
+      ElMessage.success(res.message || '审计日志已重置')
+      reload()
+      loadActions()
+    } else {
+      ElMessage.error(res?.message || '重置失败')
+    }
+  } catch {
+    ElMessage.error('重置审计日志失败')
+  } finally {
+    resetting.value = false
+  }
 }
 
 async function loadActions() {

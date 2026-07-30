@@ -16,6 +16,10 @@ let authRedirecting = false
 request.interceptors.response.use(
   response => response.data,
   error => {
+    // 请求被主动取消（如快速切换会话时中断上一会话的正文加载）：静默丢弃，不弹错误提示
+    if (axios.isCancel(error)) {
+      return Promise.reject(error)
+    }
     const status = error.response?.status
     const reason = error.response?.headers?.['x-auth-reason']
     // 仅 401、或带鉴权原因头的响应视为会话失效，触发登出跳转

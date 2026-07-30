@@ -141,4 +141,13 @@ public class AuditLogService {
                 .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
         return jdbcTemplate.update("DELETE FROM t_audit_log WHERE timestamp < ?", cutoff);
     }
+
+    /**
+     * 清空全部审计日志（重置功能调用，需由调用方先完成管理员密码校验）。
+     * 调用方应在清空后立即补记一条重置审计，以保留操作痕迹。
+     * @return 删除条数
+     */
+    public int deleteAll() {
+        return jdbcTemplate.update("DELETE FROM t_audit_log");
+    }
 }
