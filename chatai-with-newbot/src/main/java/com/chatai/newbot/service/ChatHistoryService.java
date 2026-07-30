@@ -190,6 +190,21 @@ public class ChatHistoryService {
     }
 
     /**
+     * 查询用户会话数据的当前版本号（多端自动同步的轻量变更检测）
+     * @param userId 用户ID
+     * @return 版本号（会话行与状态行 updated_at_ts 最大值）
+     */
+    public long getChatHistoryVersion(String userId) {
+        try {
+            ensureSessionMigrated(userId);
+            return sqliteStorage.getChatHistoryVersion(userId);
+        } catch (Exception e) {
+            log.error("查询会话版本号失败: userId={}", userId, e);
+            return 0L;
+        }
+    }
+
+    /**
      * 加载用户会话摘要列表（懒加载模式下的首屏拉取）
      * 仅返回每个会话的标题/预览/最后时间/条数，不含消息内容，
      * 会话正文由前端切换会话时通过 loadSingleChat 按需加载
@@ -210,8 +225,11 @@ public class ChatHistoryService {
         List<Map<String, Object>> summaries = new ArrayList<>();
         Map<String, Object> chatMeta = new LinkedHashMap<>();
         Map<String, Object> state = null;
+        long version = 0L;
         try {
             ensureSessionMigrated(userId);
+            // 版本号先于摘要读取：若读取期间有并发写入，下次变更检测仍能发现新版本
+            version = sqliteStorage.getChatHistoryVersion(userId);
             for (Map<String, Object> row : sqliteStorage.listChatSessionSummaries(userId)) {
                 String chatId = (String) row.get("chat_id");
                 Map<String, Object> summary = new LinkedHashMap<>();
@@ -238,6 +256,8 @@ public class ChatHistoryService {
         result.put("chatMeta", chatMeta);
         result.put("deletedChatIds", parseDeletedIds(state));
         result.put("summaries", summaries);
+        // 随摘要一并返回当前版本号，前端以此作为后续变更检测的基准
+        result.put("version", version);
         return result;
     }
 
@@ -279,14 +299,16 @@ public class ChatHistoryService {
      * 仅 upsert 上传的会话行 + 删除 deletedChatIds 行，免整文档重写
      * @param userId 用户ID
      * @param chatData 会话数据，包含 lastChatId、chats、chatMeta、deletedChatIds
+     * @return 本次保存后的版本号（前端据此更新本地基准，避免自己的写入触发重拉）
      */
-    public void saveChatHistory(String userId, Map<String, Object> chatData) {
+    public long saveChatHistory(String userId, Map<String, Object> chatData) {
         Object lock = userLocks.computeIfAbsent(userId, k -> new Object());
         synchronized (lock) {
             String updatedAt = LocalDateTime.now().format(
                     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
             long updatedAtTs = System.currentTimeMillis();
             saveChatHistoryToSqlite(userId, chatData, updatedAt, updatedAtTs);
+            return updatedAtTs;
         }
     }
 

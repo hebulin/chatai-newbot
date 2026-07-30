@@ -193,8 +193,23 @@ public class ChatController {
     }
 
     /**
+     * 获取当前用户会话数据的版本号（多端自动同步的轻量变更检测）
+     * 前端轮询/聊天页重新聚焦时先调此接口，版本未变化则不重拉摘要列表
+     * 返回: { "success": true, "version": 1722300000000 }
+     */
+    @GetMapping("/chat/history/version")
+    public Map<String, Object> getChatHistoryVersion(HttpServletRequest request) {
+        User user = (User) request.getAttribute("currentUser");
+        Map<String, Object> result = new HashMap<>();
+        result.put("success", true);
+        result.put("version", chatHistoryService.getChatHistoryVersion(user.getId()));
+        return result;
+    }
+
+    /**
      * 保存当前用户的会话历史（增量合并：可只上传已加载的部分会话）
      * 请求体格式: { "lastChatId": "xxx", "chats": {...}, "chatMeta": {...}, "deletedChatIds": [...] }
+     * 返回体携带保存后的 version，前端据此更新本地基准，避免自己的写入触发重拉
      */
     @PostMapping("/chat/history")
     public Map<String, Object> saveChatHistory(@RequestBody Map<String, Object> body,
@@ -202,8 +217,9 @@ public class ChatController {
         User user = (User) request.getAttribute("currentUser");
         Map<String, Object> result = new HashMap<>();
         try {
-            chatHistoryService.saveChatHistory(user.getId(), body);
+            long version = chatHistoryService.saveChatHistory(user.getId(), body);
             result.put("success", true);
+            result.put("version", version);
         } catch (Exception e) {
             log.error("保存会话历史失败: userId={}", user.getId(), e);
             result.put("success", false);

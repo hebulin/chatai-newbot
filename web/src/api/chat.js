@@ -15,6 +15,11 @@ export function loadChatSummaries() {
   return request.get('/chat/history/summary')
 }
 
+// 获取会话数据版本号（多端自动同步的轻量变更检测，版本未变则不重拉摘要）
+export function loadChatVersion() {
+  return request.get('/chat/history/version')
+}
+
 // 保存会话历史
 export function saveChatHistory(data) {
   return request.post('/chat/history', data)

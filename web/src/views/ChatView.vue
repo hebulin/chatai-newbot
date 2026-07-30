@@ -216,14 +216,38 @@ onMounted(async () => {
 
   window.addEventListener('resize', handleResize)
 
+  // 侧边栏多端自动同步：切回标签页/窗口聚焦时立即检测一次，前台期间低频轮询；
+  // 页面隐藏时轮询自然跳过，版本未变化时仅一次轻量版本查询，开销可忽略
+  window.addEventListener('focus', handleAutoSync)
+  document.addEventListener('visibilitychange', handleAutoSync)
+  autoSyncTimer = setInterval(handleAutoSync, AUTO_SYNC_INTERVAL_MS)
+
   // 拉取系统公告（异步不阻塞首屏）
   checkAnnouncement()
 })
 
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
+  window.removeEventListener('focus', handleAutoSync)
+  document.removeEventListener('visibilitychange', handleAutoSync)
+  if (autoSyncTimer) clearInterval(autoSyncTimer)
   scrollFollow.unbindEvents()
 })
+
+// 侧边栏自动同步轮询间隔（仅前台生效）
+const AUTO_SYNC_INTERVAL_MS = 30000
+let autoSyncTimer = null
+
+// 检测并合并其他端的会话变更：bot 输出中不刷新（store 内部还有待上传/上传中守卫）；
+// 当前会话被合并进其他端新消息时请求贴底（尊重用户已主动上滑的状态）
+async function handleAutoSync() {
+  if (document.hidden || streamChat.isStreaming.value || chatSwitchLoading.value) return
+  const currentMerged = await chatStore.refreshFromServer()
+  if (currentMerged) {
+    await nextTick()
+    scrollFollow.requestScrollToBottom()
+  }
+}
 
 // 拉取公告并弹窗展示：勾选“以后不再提示”后该公告不再弹出（localStorage 永久记录）；
 // 未勾选则每次登录都会提示（登录时清除 sessionStorage 标记，见 stores/auth.js），直到公告失效；

@@ -1366,6 +1366,22 @@ public class SqliteStorageService implements StorageService {
     }
 
     /**
+     * 查询用户会话数据的版本号（会话行与全局状态行 updated_at_ts 的最大值），
+     * 供多端轻量变更检测：版本未变化时前端无需重拉摘要列表
+     * @param userId 用户ID
+     * @return 版本号（毫秒时间戳），无任何数据时返回 0
+     */
+    public long getChatHistoryVersion(String userId) {
+        Long v = jdbcTemplate.queryForObject(
+                "SELECT MAX(ts) FROM (" +
+                "SELECT MAX(updated_at_ts) AS ts FROM t_chat_session WHERE user_id = ? " +
+                "UNION ALL " +
+                "SELECT MAX(updated_at_ts) AS ts FROM t_chat_user_state WHERE user_id = ?)",
+                Long.class, userId, userId);
+        return v != null ? v : 0L;
+    }
+
+    /**
      * 加载用户全部会话行（含消息正文，导出/全文搜索等全量场景用）
      * @param userId 用户ID
      * @return 每条记录含 chat_id/messages/meta，按插入顺序返回
