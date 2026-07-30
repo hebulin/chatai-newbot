@@ -21,8 +21,9 @@ export function saveChatHistory(data) {
 }
 
 // 获取单个会话的最新记录（发送前同步当前会话，避免拉全量）
-export function loadSingleChatHistory(chatId) {
-  return request.get('/chat/history/single', { params: { chatId } })
+// config 可传入 axios 配置（如 signal），用于快速切换会话时中断陈旧请求
+export function loadSingleChatHistory(chatId, config) {
+  return request.get('/chat/history/single', { params: { chatId }, ...config })
 }
 
 // 跨会话全文搜索

@@ -157,7 +157,10 @@ public class AdminController {
     public Map<String, Object> testModel(@PathVariable String id,
                                           HttpServletRequest request) {
         requireAdmin(request);
-        return unifiedChatService.testConnection(id);
+        Map<String, Object> res = unifiedChatService.testConnection(id);
+        ModelConfig m = storageService.getModelConfigById(id);
+        audit(request, "model.test", "测试模型连通性 " + (m != null && m.getDisplayName() != null ? m.getDisplayName() : id));
+        return res;
     }
 
     /**
@@ -289,6 +292,8 @@ public class AdminController {
             int updated = storageService.renameProvider(decodedId, newName.trim(), newIcon, oldName);
             log.info("管理员修改厂商: providerId={}, oldName={}, newName={}, newIcon={}, 同步模型数={}",
                     decodedId, oldName, newName.trim(), newIcon, updated);
+            audit(request, "provider.rename", "修改厂商 " + (oldName != null && !oldName.trim().isEmpty() ? oldName + " → " : "") + newName.trim()
+                    + "（同步 " + updated + " 个模型）");
             result.put("success", true);
             result.put("message", "已更新，影响 " + updated + " 个模型");
             result.put("updatedModels", updated);
@@ -696,6 +701,24 @@ public class AdminController {
         return result;
     }
 
+    // ========== 系统设置（存储信息） ==========
+
+    /**
+     * 获取存储信息（当前架构为 SQLite 单通道，JSON 存储通道已移除，故 useSqlite 恒为 true）
+     * 返回: { "success": true, "data": { "useSqlite": true, "dbFileSize": "2.3MB" } }
+     */
+    @GetMapping("/settings/storage")
+    public Map<String, Object> getStorageSettings(HttpServletRequest request) {
+        requireAdmin(request);
+        Map<String, Object> result = new HashMap<>();
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("useSqlite", true);
+        data.put("dbFileSize", storageService.getDbFileSize());
+        result.put("success", true);
+        result.put("data", data);
+        return result;
+    }
+
     // ========== 系统设置（每日配额） ==========
 
     /**
@@ -845,7 +868,9 @@ public class AdminController {
         } else {
             apiKey = storageService.getTavilyApiKey();
         }
-        return webSearchService.testConnection(apiKey);
+        Map<String, Object> res = webSearchService.testConnection(apiKey);
+        audit(request, "settings.websearch.test", "测试联网搜索连通性");
+        return res;
     }
 
     /** API Key 掩码：保留前 5 后 3 位，中间用 * 代替 */
@@ -1148,6 +1173,39 @@ public class AdminController {
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
         result.put("data", auditLogService.listActions());
+        return result;
+    }
+
+    /**
+     * 重置（清空）全部审计日志：需二次确认并校验当前管理员密码。
+     * 清空后立即补记一条重置审计，因此重置后日志中仅保留这一条记录。
+     * 请求体: { "password": "管理员当前登录密码" }
+     */
+    @PostMapping("/audit-logs/reset")
+    public Map<String, Object> resetAuditLogs(@RequestBody(required = false) Map<String, String> body,
+                                              HttpServletRequest request) {
+        requireAdmin(request);
+        Map<String, Object> result = new HashMap<>();
+        User current = (User) request.getAttribute("currentUser");
+        String password = body == null ? null : body.get("password");
+        if (password == null || password.trim().isEmpty()) {
+            result.put("success", false);
+            result.put("message", "请输入管理员密码");
+            return result;
+        }
+        // 校验当前登录管理员的密码，验证通过才允许清空
+        if (current == null || storageService.authenticate(current.getUsername(), password) == null) {
+            result.put("success", false);
+            result.put("message", "管理员密码错误");
+            return result;
+        }
+        int deleted = auditLogService.deleteAll();
+        // 清空后补记一条重置记录，确保重置后日志中仅此一条
+        audit(request, "audit.reset", "重置审计日志（清空历史 " + deleted + " 条）");
+        log.info("管理员 {} 重置审计日志，清空 {} 条", current.getUsername(), deleted);
+        result.put("success", true);
+        result.put("message", "审计日志已重置");
+        result.put("deleted", deleted);
         return result;
     }
 

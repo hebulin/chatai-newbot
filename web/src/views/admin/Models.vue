@@ -119,8 +119,8 @@
                 </el-icon>
               </el-button>
               <!-- 测试中用旋转图标原位替换（不用 :loading，避免按钮变宽导致操作列换行） -->
-              <el-button size="small" text title="测试连接" :disabled="testingId === row.id" @click="handleTest(row)">
-                <el-icon v-if="testingId === row.id" class="is-loading"><Loading /></el-icon>
+              <el-button size="small" text title="测试连接" :disabled="testingIds.has(row.id)" @click="handleTest(row)">
+                <el-icon v-if="testingIds.has(row.id)" class="is-loading"><Loading /></el-icon>
                 <el-icon v-else><Connection /></el-icon>
               </el-button>
               <el-button size="small" text @click="editModel(row)">
@@ -289,7 +289,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Edit, Delete, Star, StarFilled, Connection, Loading, ArrowUp, ArrowDown } from '@element-plus/icons-vue'
@@ -472,10 +472,11 @@ async function handleDeleteSelected() {
 }
 
 // 连通性测试：仅用户手动触发，测试完成后刷新列表展示最新延迟/速度
-const testingId = ref('')
+// 支持连点不同模型的测试按钮：用 Set 记录正在测试的模型 id，多个模型可并发测试，各行独立展示测试中状态
+const testingIds = reactive(new Set())
 async function handleTest(row) {
-  if (testingId.value) return
-  testingId.value = row.id
+  if (testingIds.has(row.id)) return
+  testingIds.add(row.id)
   try {
     const res = await testModel(row.id)
     if (res?.success) {
@@ -486,7 +487,7 @@ async function handleTest(row) {
     // 后端已持久化最新测试指标（失败时清空），刷新列表同步展示
     await loadData()
   } catch { /* 拦截器已提示 */ } finally {
-    testingId.value = ''
+    testingIds.delete(row.id)
   }
 }
 

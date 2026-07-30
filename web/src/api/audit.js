@@ -9,3 +9,8 @@ export function getAuditLogs(params) {
 export function getAuditActions() {
   return request.get('/admin/audit-logs/actions')
 }
+
+// 重置（清空）全部审计日志，需管理员密码；重置后仅保留一条重置记录
+export function resetAuditLogs(password) {
+  return request.post('/admin/audit-logs/reset', { password })
+}

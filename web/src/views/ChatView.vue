@@ -154,6 +154,10 @@ const streamingMsg = ref(null)
 const syncTipVisible = ref(false)
 // 切换会话加载缓冲层（懒加载拉取正文期间显示）
 const chatSwitchLoading = ref(false)
+// 快速切换会话竞态控制：仅最新一次切换生效，切换时中断上一会话尚未完成的正文加载，
+// 避免陈旧的 /chat/history/single 请求超时后堆积报错
+let switchSeq = 0
+let switchAbort = null
 
 // ===== 长会话渲染窗口：默认只渲染最近 50 条，点“加载更早消息”每次再展开 100 条 =====
 const RENDER_WINDOW = 50
@@ -360,22 +364,32 @@ async function handleSwitchChat(id) {
     if (isMobile.value) sidebarOpen.value = false
     return
   }
+  // 中断上一次尚未完成的会话正文加载，防止陈旧请求堆积并在超时后误报
+  if (switchAbort) switchAbort.abort()
+  const controller = new AbortController()
+  switchAbort = controller
+  const mySeq = ++switchSeq
   // 懒加载：未加载会话先拉取正文再切换，期间盖 loading 缓冲网络与首屏渲染；
   // 已在内存的会话直接切换不显示 loading，失败则保持当前会话
   const needLoad = chatStore.chats[id] === undefined
   if (needLoad) chatSwitchLoading.value = true
   try {
-    await chatStore.switchChatLazy(id)
+    await chatStore.switchChatLazy(id, { signal: controller.signal })
+    // 已被更晚的切换取代：放弃本次结果，避免覆盖最新会话
+    if (mySeq !== switchSeq) return
     if (isMobile.value) {
       sidebarOpen.value = false
     }
     // 等新会话消息渲染上屏后再撤 loading，渲染较慢时也有视觉缓冲
     await nextTick()
     scrollFollow.scrollToBottomImmediate()
-  } catch {
+  } catch (e) {
+    // 被主动中断（快速切走）或已被更晚切换取代：静默忽略，仅当前目标真正失败才提示
+    if (e?.name === 'CanceledError' || mySeq !== switchSeq) return
     ElMessage.error(t('chat.switchFailed'))
   } finally {
-    chatSwitchLoading.value = false
+    // 仅最新一次切换负责收起 loading，防止旧切换提前撤销缓冲层
+    if (mySeq === switchSeq) chatSwitchLoading.value = false
   }
 }
 
