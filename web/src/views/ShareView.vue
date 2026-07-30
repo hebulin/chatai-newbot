@@ -4,31 +4,31 @@
     <header class="share-top">
       <div class="share-brand">
         <img class="share-brand-icon" :src="aiAvatarSrc" alt="AI" />
-        <span class="share-brand-name">Atelier · 会话分享</span>
+        <span class="share-brand-name">{{ t('share.brand') }}</span>
       </div>
-      <a class="share-go-home" href="/">进入工作台</a>
+      <a class="share-go-home" href="/">{{ t('share.goHome') }}</a>
     </header>
 
     <!-- 加载中 -->
-    <div v-if="loading" class="share-status">加载中...</div>
+    <div v-if="loading" class="share-status">{{ t('common.loading') }}</div>
 
     <!-- 错误提示 -->
     <div v-else-if="errorMsg" class="share-status share-error">
       <p>{{ errorMsg }}</p>
-      <a href="/">返回首页</a>
+      <a href="/">{{ t('share.backHome') }}</a>
     </div>
 
     <!-- 分享内容 -->
     <template v-else>
       <div class="share-meta">
         <h1 class="share-title">{{ title }}</h1>
-        <p class="share-sub">由 {{ sharedBy }} 分享 · {{ sharedAt }} · 只读快照<span v-if="expiresAt"> · 有效期至 {{ expiresAt }}</span></p>
+        <p class="share-sub">{{ t('share.sharedBy', { name: sharedBy }) }} · {{ sharedAt }} · {{ t('share.readonly') }}<span v-if="expiresAt"> · {{ t('share.validUntil', { date: expiresAt }) }}</span></p>
       </div>
 
       <div class="chat-messages share-messages" ref="containerRef">
         <template v-for="(msg, idx) in messages" :key="idx">
           <div v-if="msg.role === 'divider'" class="context-divider">
-            <span class="context-divider-label">以上上下文已清除</span>
+            <span class="context-divider-label">{{ t('messages.contextCleared') }}</span>
           </div>
           <div v-else class="msg-wrapper" :class="msg.role">
           <div v-if="msg.time" class="msg-time-top">{{ msg.time }}</div>
@@ -39,7 +39,7 @@
             <div class="msg-bubble">
               <template v-if="msg.role === 'user'">
                 <div v-if="msg.images && msg.images.length" class="user-msg-images">
-                  <img v-for="(img, i) in msg.images" :key="i" class="user-msg-img" :src="img" alt="发送的图片" />
+                  <img v-for="(img, i) in msg.images" :key="i" class="user-msg-img" :src="img" :alt="t('messages.sentImage')" />
                 </div>
                 <div v-if="msg.attachments && msg.attachments.length" class="user-msg-files">
                   <span v-for="(att, i) in msg.attachments" :key="i" class="user-msg-file" :title="att.name">
@@ -53,7 +53,7 @@
                 <div v-if="msg.reasoning_content" class="thinking-block collapsed">
                   <div class="thinking-header" @click="toggleThinking($event)">
                     <span class="arrow">▼</span>
-                    {{ msg.thinkingTime ? '已思考（用时 ' + msg.thinkingTime + ' 秒）' : '已思考' }}
+                    {{ msg.thinkingTime ? t('messages.thoughtFor', { s: msg.thinkingTime }) : t('messages.thought') }}
                   </div>
                   <div class="thinking-body" v-html="renderMarkdown(msg.reasoning_content)"></div>
                 </div>
@@ -74,12 +74,14 @@
 <script setup>
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { getSharedChat } from '@/api/share'
 import { renderMarkdown, escapeHtml, processSpecialContent, renderMermaidBlocks, handleMermaidToolbarClick } from '@/composables/useMarkdown'
 import { useTheme } from '@/composables/useTheme'
 import '@/styles/chat.css'
 
 const route = useRoute()
+const { t } = useI18n()
 const { getTheme } = useTheme()
 
 const loading = ref(true)
@@ -106,12 +108,12 @@ onMounted(async () => {
   try {
     const res = await getSharedChat(route.params.id)
     if (res && res.success) {
-      title.value = res.title || '分享的会话'
+      title.value = res.title || t('share.defaultTitle')
       sharedBy.value = res.sharedBy || ''
       sharedAt.value = res.sharedAt || ''
       expiresAt.value = res.expiresAt || ''
       messages.value = res.messages || []
-      document.title = title.value + ' - 会话分享'
+      document.title = title.value + ' - ' + t('share.docTitleSuffix')
       // 先退出 loading 让 v-else 分支渲染出 containerRef，再处理代码高亮与 mermaid 图表；
       // 否则 containerRef 为 null，mermaid 渲染被整体跳过，图表永远停在“渲染中”占位
       loading.value = false
@@ -122,10 +124,10 @@ onMounted(async () => {
         containerRef.value.addEventListener('click', handleMermaidToolbarClick)
       }
     } else {
-      errorMsg.value = (res && res.message) || '分享内容加载失败'
+      errorMsg.value = (res && res.message) || t('share.loadFailed')
     }
   } catch (e) {
-    errorMsg.value = '分享内容加载失败，请稍后重试'
+    errorMsg.value = t('share.loadFailedRetry')
   } finally {
     loading.value = false
   }

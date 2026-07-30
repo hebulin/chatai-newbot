@@ -6,8 +6,8 @@
         <h2>分享管理</h2>
       </div>
       <div style="display:flex;gap:8px;">
-        <el-button type="danger" plain :disabled="invalidShares.length === 0" @click="handleClearInvalid">
-          <el-icon><Delete /></el-icon> 清除失效（{{ invalidShares.length }}）
+        <el-button type="danger" plain :disabled="invalidCount === 0" @click="handleClearInvalid">
+          <el-icon><Delete /></el-icon> 清除失效（{{ invalidCount }}）
         </el-button>
         <el-button type="danger" :disabled="selectedRows.length === 0" @click="handleDeleteSelected">
           <el-icon><Delete /></el-icon> 删除选中（{{ selectedRows.length }}）
@@ -16,19 +16,19 @@
     </div>
 
     <div class="admin-card">
-      <!-- 筛选栏 -->
+      <!-- 筛选栏（服务端筛选） -->
       <div class="filter-bar">
-        <el-input v-model="filterUser" placeholder="分享者模糊查询" clearable style="width:200px" @input="page = 1" />
-        <el-select v-model="filterStatus" placeholder="全部状态" clearable style="width:150px" @change="page = 1">
+        <el-input v-model="filterUser" placeholder="分享者模糊查询" clearable style="width:200px" @change="reloadShares" />
+        <el-select v-model="filterStatus" placeholder="全部状态" clearable style="width:150px" @change="reloadShares">
           <el-option label="有效" value="valid" />
           <el-option label="已过期" value="expired" />
           <el-option label="会话已删" value="orphaned" />
         </el-select>
-        <el-button @click="filterUser = ''; filterStatus = ''; page = 1">重置</el-button>
+        <el-button @click="filterUser = ''; filterStatus = ''; reloadShares()">重置</el-button>
       </div>
 
       <!-- 分享表格：列宽按内容自适应（上限 50 汉字），selection 列支持批量操作 -->
-      <el-table ref="tableRef" :data="pagedShares" v-loading="loading" stripe border style="width:100%"
+      <el-table ref="tableRef" :data="shares" v-loading="loading" stripe border style="width:100%"
                 @selection-change="onSelectionChange" row-key="id">
         <el-table-column type="selection" width="44" align="center" reserve-selection />
         <el-table-column prop="title" label="标题" :min-width="colW.title" show-overflow-tooltip />
@@ -68,14 +68,14 @@
         </el-table-column>
       </el-table>
       <div class="admin-pager">
-        <select v-model.number="pageSize" class="admin-pager-size" @change="page = 1">
+        <select v-model.number="pageSize" class="admin-pager-size" @change="reloadShares">
           <option :value="10">10条/页</option>
           <option :value="20">20条/页</option>
           <option :value="50">50条/页</option>
         </select>
-        <button class="admin-pager-btn" :disabled="page <= 1" @click="page--">上一页</button>
-        <span class="admin-pager-info">第 {{ page }} / {{ totalPages }} 页 · 共 {{ filteredShares.length }} 条</span>
-        <button class="admin-pager-btn" :disabled="page >= totalPages" @click="page++">下一页</button>
+        <button class="admin-pager-btn" :disabled="page <= 1" @click="page--; loadShares()">上一页</button>
+        <span class="admin-pager-info">第 {{ page }} / {{ totalPages }} 页 · 共 {{ total }} 条</span>
+        <button class="admin-pager-btn" :disabled="page >= totalPages" @click="page++; loadShares()">下一页</button>
       </div>
     </div>
   </div>
@@ -85,11 +85,11 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, CopyDocument, View } from '@element-plus/icons-vue'
-import { getAdminShares, batchDeleteShares, deleteShare } from '@/api/share'
+import { getAdminShares, batchDeleteShares, deleteShare, deleteInvalidShares } from '@/api/share'
 import { autoColWidth } from '@/composables/useTableAutoWidth'
 
 const loading = ref(false)
-const allShares = ref([])
+const shares = ref([])
 const filterUser = ref('')
 const filterStatus = ref('')
 const tableRef = ref(null)
@@ -97,36 +97,18 @@ const selectedRows = ref([])
 
 const page = ref(1)
 const pageSize = ref(10)
+const total = ref(0)
+const totalPages = ref(1)
+const invalidCount = ref(0)
 
 const STATUS_TEXT = { valid: '有效', expired: '已过期', orphaned: '会话已删' }
 function statusText(s) {
   return STATUS_TEXT[s] || s
 }
 
-// 失效分享 = 已过期 + 源会话已删
-const invalidShares = computed(() => allShares.value.filter(s => s.status !== 'valid'))
-
-const filteredShares = computed(() => {
-  let list = allShares.value
-  if (filterUser.value) {
-    const kw = filterUser.value.toLowerCase()
-    list = list.filter(s => (s.userName || '').toLowerCase().includes(kw))
-  }
-  if (filterStatus.value) {
-    list = list.filter(s => s.status === filterStatus.value)
-  }
-  return list
-})
-
-const pagedShares = computed(() => {
-  const start = (page.value - 1) * pageSize.value
-  return filteredShares.value.slice(start, start + pageSize.value)
-})
-const totalPages = computed(() => Math.max(1, Math.ceil(filteredShares.value.length / pageSize.value)))
-
-// 列宽自适应：按当前列最长内容计算，上限 50 个汉字
+// 列宽自适应：按当页列最长内容计算，上限 50 个汉字
 const colW = computed(() => {
-  const list = allShares.value
+  const list = shares.value
   return {
     title: autoColWidth(list.map(s => s.title), { header: '标题', min: 160 }),
     userName: autoColWidth(list.map(s => s.userName), { header: '分享者', min: 90 }),
@@ -183,16 +165,22 @@ async function handleDeleteSelected() {
   } catch { /* cancelled */ }
 }
 
-// 一键清除失效（已过期 + 源会话已删）
+// 一键清除失效（已过期 + 源会话已删），失效判定与删除均在服务端完成
 async function handleClearInvalid() {
-  const rows = invalidShares.value
-  if (rows.length === 0) return
+  if (invalidCount.value === 0) return
   try {
     await ElMessageBox.confirm(
-      `共 ${rows.length} 条失效分享（已过期或源会话已删除），确定全部清除吗？`,
+      `共 ${invalidCount.value} 条失效分享（已过期或源会话已删除），确定全部清除吗？`,
       '确认清除失效', { type: 'warning' }
     )
-    await doBatchDelete(rows.map(r => r.id))
+    const res = await deleteInvalidShares()
+    if (res?.success) {
+      ElMessage.success(`已清除 ${res.deleted ?? 0} 条失效分享`)
+      tableRef.value?.clearSelection()
+      await reloadShares()
+    } else {
+      ElMessage.error(res?.message || '清除失败')
+    }
   } catch { /* cancelled */ }
 }
 
@@ -210,11 +198,26 @@ async function doBatchDelete(ids) {
 async function loadShares() {
   loading.value = true
   try {
-    const res = await getAdminShares()
-    if (res?.success) allShares.value = res.data || []
+    const params = { page: page.value, size: pageSize.value }
+    if (filterUser.value) params.username = filterUser.value
+    if (filterStatus.value) params.status = filterStatus.value
+    const res = await getAdminShares(params)
+    if (res?.success) {
+      shares.value = res.data || []
+      total.value = res.total || 0
+      totalPages.value = res.totalPages || 1
+      page.value = res.page || 1
+      invalidCount.value = res.invalidCount || 0
+    }
   } finally {
     loading.value = false
   }
+}
+
+// 筛选/页大小变化：回到第一页重新加载
+function reloadShares() {
+  page.value = 1
+  loadShares()
 }
 
 onMounted(loadShares)

@@ -83,9 +83,15 @@ public class FileController {
         if (bytes == null) {
             return ResponseEntity.notFound().build();
         }
-        return ResponseEntity.ok()
+        ResponseEntity.BodyBuilder builder = ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(fileStorageService.mimeOf(filename)))
-                .cacheControl(CacheControl.maxAge(30, TimeUnit.DAYS).cachePublic())
-                .body(bytes);
+                .cacheControl(CacheControl.maxAge(30, TimeUnit.DAYS).cachePublic());
+        // 存量 svg 兜底：新上传已禁止 SVG，但历史文件仍可能存在。SVG 顶级导航打开会执行
+        // 内嵌脚本（存储型 XSS），故强制以附件下载而非内联渲染，并附加沙箱 CSP 双重防护
+        if (fileStorageService.isSvg(filename)) {
+            builder.header("Content-Disposition", "attachment; filename=\"" + filename + "\"")
+                    .header("Content-Security-Policy", "sandbox");
+        }
+        return builder.body(bytes);
     }
 }

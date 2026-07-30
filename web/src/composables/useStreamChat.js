@@ -37,14 +37,13 @@ export function useStreamChat() {
     isStreaming.value = true
     controller = new AbortController()
 
-    const token = localStorage.getItem('token')
     let hasResponse = false
 
     try {
+      // 认证凭证存于 HttpOnly Cookie，同域 fetch 自动携带
       const resp = await fetch('/api/chat', {
         method: 'POST',
         headers: {
-          'Authorization': 'Bearer ' + token,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(requestBody),
@@ -54,7 +53,6 @@ export function useStreamChat() {
       // 401 处理
       if (resp.status === 401) {
         isStreaming.value = false
-        localStorage.removeItem('token')
         localStorage.removeItem('username')
         localStorage.removeItem('role')
         router.push('/login')

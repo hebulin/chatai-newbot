@@ -8,17 +8,25 @@
           <input type="password" autocomplete="current-password" tabindex="-1" />
         </div>
         <div class="modal-header">
-          <span class="modal-title">设置</span>
+          <span class="modal-title">{{ t('settings.title') }}</span>
           <button class="modal-close" @click="$emit('close')">✕</button>
         </div>
         <div class="settings-modal">
           <!-- 导航：el-tabs 仅作菜单栏（内容区隐藏），桌面端左侧竖排、窄屏顶部横排可滑动 -->
           <el-tabs v-model="tab" :tab-position="isMobile ? 'top' : 'left'" class="settings-tabs-nav" @tab-change="onTabChange">
+            <el-tab-pane name="general">
+              <template #label>
+                <span class="settings-tab-label">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+                  <span>{{ t('settings.tabGeneral') }}</span>
+                </span>
+              </template>
+            </el-tab-pane>
             <el-tab-pane name="changePassword">
               <template #label>
                 <span class="settings-tab-label">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                  <span>修改密码</span>
+                  <span>{{ t('settings.tabPassword') }}</span>
                 </span>
               </template>
             </el-tab-pane>
@@ -26,7 +34,7 @@
               <template #label>
                 <span class="settings-tab-label">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>
-                  <span>提示词</span>
+                  <span>{{ t('settings.tabPrompt') }}</span>
                 </span>
               </template>
             </el-tab-pane>
@@ -34,7 +42,7 @@
               <template #label>
                 <span class="settings-tab-label">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-                  <span>登录管理</span>
+                  <span>{{ t('settings.tabDevices') }}</span>
                 </span>
               </template>
             </el-tab-pane>
@@ -42,7 +50,7 @@
               <template #label>
                 <span class="settings-tab-label">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-                  <span>分享管理</span>
+                  <span>{{ t('settings.tabShares') }}</span>
                 </span>
               </template>
             </el-tab-pane>
@@ -50,63 +58,76 @@
               <template #label>
                 <span class="settings-tab-label">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
-                  <span>数据管理</span>
+                  <span>{{ t('settings.tabData') }}</span>
                 </span>
               </template>
             </el-tab-pane>
           </el-tabs>
           <div class="settings-content">
+            <!-- 通用：界面语言切换（用户端中英双语，管理后台保持中文） -->
+            <div v-if="tab === 'general'" class="settings-panel">
+              <h3 class="settings-panel-title">{{ t('settings.tabGeneral') }}</h3>
+              <div class="settings-form-group">
+                <label>{{ t('settings.language') }}</label>
+                <select v-model="uiLocale" class="settings-select" @change="setLocale(uiLocale)">
+                  <option value="zh">中文</option>
+                  <option value="en">English</option>
+                </select>
+              </div>
+              <div class="settings-form-note">{{ t('settings.languageNote') }}</div>
+            </div>
+
             <!-- 修改密码 -->
             <div v-if="tab === 'changePassword'" class="settings-panel">
-              <h3 class="settings-panel-title">修改密码</h3>
+              <h3 class="settings-panel-title">{{ t('settings.tabPassword') }}</h3>
               <div class="settings-form-group">
-                <label>当前密码</label>
-                <input type="password" v-model="pwdForm.oldPwd" class="settings-input" placeholder="请输入当前密码" autocomplete="new-password" />
+                <label>{{ t('settings.oldPwd') }}</label>
+                <input type="password" v-model="pwdForm.oldPwd" class="settings-input" :placeholder="t('settings.oldPwdPlaceholder')" autocomplete="new-password" />
               </div>
               <div class="settings-form-group">
-                <label>新密码</label>
-                <input type="password" v-model="pwdForm.newPwd" class="settings-input" placeholder="请输入新密码（至少4位）" autocomplete="new-password" />
+                <label>{{ t('settings.newPwd') }}</label>
+                <input type="password" v-model="pwdForm.newPwd" class="settings-input" :placeholder="t('settings.newPwdPlaceholder')" autocomplete="new-password" />
               </div>
               <div class="settings-form-group">
-                <label>确认新密码</label>
-                <input type="password" v-model="pwdForm.confirmPwd" class="settings-input" placeholder="请再次输入新密码" autocomplete="new-password" />
+                <label>{{ t('settings.confirmPwd') }}</label>
+                <input type="password" v-model="pwdForm.confirmPwd" class="settings-input" :placeholder="t('settings.confirmPwdPlaceholder')" autocomplete="new-password" />
                 <div v-if="pwdTip" class="settings-form-tip" :class="{ error: pwdTipError }">{{ pwdTip }}</div>
               </div>
               <div class="settings-form-actions">
-                <button class="settings-btn settings-btn-primary" @click="submitChangePassword">提交</button>
+                <button class="settings-btn settings-btn-primary" @click="submitChangePassword">{{ t('settings.submit') }}</button>
               </div>
-              <div class="settings-form-note">提交成功后将自动退出登录，请使用新密码重新登录。</div>
+              <div class="settings-form-note">{{ t('settings.pwdNote') }}</div>
             </div>
 
             <!-- 提示词 -->
             <div v-if="tab === 'systemPrompt'" class="settings-panel">
-              <h3 class="settings-panel-title">提示词</h3>
+              <h3 class="settings-panel-title">{{ t('settings.tabPrompt') }}</h3>
               <div class="preset-list">
                 <div v-for="(p, idx) in presets" :key="p.id || idx" class="preset-item" :class="{ enabled: p.enabled }">
                   <div class="preset-item-head">
-                    <input v-model="p.title" class="settings-input preset-title-input" maxlength="50" placeholder="提示词名称（如：翻译、技术顾问）" />
-                    <span class="preset-enable" :class="{ active: p.enabled }" @click="toggleEnable(idx)" :title="p.enabled ? '点击取消启用' : '点击启用（最多启用 1 条）'">
+                    <input v-model="p.title" class="settings-input preset-title-input" maxlength="50" :placeholder="t('settings.presetTitlePlaceholder')" />
+                    <span class="preset-enable" :class="{ active: p.enabled }" @click="toggleEnable(idx)" :title="p.enabled ? t('settings.presetDisableTip') : t('settings.presetEnableTip')">
                       <span class="preset-enable-dot"></span>
-                      {{ p.enabled ? '已启用' : '启用' }}
+                      {{ p.enabled ? t('settings.presetEnabled') : t('settings.presetEnable') }}
                     </span>
-                    <button class="preset-del-btn" @click="removePreset(idx)" title="删除">✕</button>
+                    <button class="preset-del-btn" @click="removePreset(idx)" :title="t('common.delete')">✕</button>
                   </div>
-                  <textarea v-model="p.content" class="settings-input settings-textarea preset-content-input" rows="4" placeholder="提示词内容（启用后作为全局 System Prompt 注入）"></textarea>
+                  <textarea v-model="p.content" class="settings-input settings-textarea preset-content-input" rows="4" :placeholder="t('settings.presetContentPlaceholder')"></textarea>
                 </div>
-                <div v-if="presets.length === 0" class="preset-empty">暂无提示词，点击下方“添加提示词”按钮新建</div>
+                <div v-if="presets.length === 0" class="preset-empty">{{ t('settings.presetEmpty') }}</div>
               </div>
               <div v-if="promptTip" class="settings-form-tip" :class="{ error: promptTipError }">{{ promptTip }}</div>
               <div class="settings-form-actions preset-actions">
-                <button class="settings-btn settings-btn-ghost" @click="addPreset">+ 添加提示词</button>
-                <button class="settings-btn settings-btn-primary" @click="savePresets">保存</button>
+                <button class="settings-btn settings-btn-ghost" @click="addPreset">{{ t('settings.addPreset') }}</button>
+                <button class="settings-btn settings-btn-primary" @click="savePresets">{{ t('common.save') }}</button>
               </div>
-              <div class="settings-form-note">可保存多条提示词，但最多只能启用其中 1 条；启用的提示词会在每次对话时作为全局提示词生效。都不启用则使用系统默认提示词。</div>
+              <div class="settings-form-note">{{ t('settings.presetNote') }}</div>
             </div>
 
             <!-- 登录管理 -->
             <div v-if="tab === 'loginDevices'" class="settings-panel">
-              <h3 class="settings-panel-title">登录管理</h3>
-              <div v-if="sessionsLoading" class="session-empty">加载中...</div>
+              <h3 class="settings-panel-title">{{ t('settings.tabDevices') }}</h3>
+              <div v-if="sessionsLoading" class="session-empty">{{ t('common.loading') }}</div>
               <div v-else class="session-list">
                 <div v-for="s in sessions" :key="s.sessionId" class="session-item" :class="{ current: s.current }">
                   <div class="session-icon">
@@ -114,35 +135,35 @@
                   </div>
                   <div class="session-info">
                     <div class="session-title">
-                      {{ s.browser || '未知浏览器' }}
-                      <span v-if="s.current" class="session-current-badge">当前设备</span>
+                      {{ s.browser || t('settings.unknownBrowser') }}
+                      <span v-if="s.current" class="session-current-badge">{{ t('settings.currentDevice') }}</span>
                     </div>
                     <div class="session-meta">
-                      <span>IP：{{ s.ip || '未知' }}</span>
-                      <span>登录时间：{{ s.createdAt || '未知' }}</span>
+                      <span>{{ t('settings.ip', { ip: s.ip || t('common.unknown') }) }}</span>
+                      <span>{{ t('settings.loginTime', { time: s.createdAt || t('common.unknown') }) }}</span>
                     </div>
                   </div>
-                  <button v-if="!s.current" class="settings-btn settings-btn-danger session-kick-btn" @click="confirmKick(s)">踢下线</button>
+                  <button v-if="!s.current" class="settings-btn settings-btn-danger session-kick-btn" @click="confirmKick(s)">{{ t('settings.kick') }}</button>
                 </div>
-                <div v-if="sessions.length === 0" class="session-empty">暂无登录设备记录</div>
+                <div v-if="sessions.length === 0" class="session-empty">{{ t('settings.noSessions') }}</div>
               </div>
-              <div class="settings-form-note">展示当前账号在各设备终端的登录会话；踢下线后对应设备需重新登录。同一浏览器重复登录会产生多条会话记录。</div>
+              <div class="settings-form-note">{{ t('settings.sessionNote') }}</div>
             </div>
 
             <!-- 分享管理 -->
             <div v-if="tab === 'shareManage'" class="settings-panel">
-              <h3 class="settings-panel-title">分享管理</h3>
+              <h3 class="settings-panel-title">{{ t('settings.tabShares') }}</h3>
               <div class="share-toolbar">
                 <select v-model="shareFilterStatus" class="settings-select">
-                  <option value="">全部状态</option>
-                  <option value="valid">有效</option>
-                  <option value="expired">已过期</option>
-                  <option value="orphaned">会话已删</option>
+                  <option value="">{{ t('settings.allStatus') }}</option>
+                  <option value="valid">{{ t('settings.statusValid') }}</option>
+                  <option value="expired">{{ t('settings.statusExpired') }}</option>
+                  <option value="orphaned">{{ t('settings.statusOrphaned') }}</option>
                 </select>
-                <button class="settings-btn settings-btn-ghost" :disabled="invalidShares.length === 0" @click="handleClearInvalidShares">清除失效（{{ invalidShares.length }}）</button>
-                <button class="settings-btn settings-btn-danger" :disabled="selectedShareIds.length === 0" @click="handleDeleteSelectedShares">删除选中（{{ selectedShareIds.length }}）</button>
+                <button class="settings-btn settings-btn-ghost" :disabled="invalidShares.length === 0" @click="handleClearInvalidShares">{{ t('settings.clearInvalid', { n: invalidShares.length }) }}</button>
+                <button class="settings-btn settings-btn-danger" :disabled="selectedShareIds.length === 0" @click="handleDeleteSelectedShares">{{ t('settings.deleteSelected', { n: selectedShareIds.length }) }}</button>
               </div>
-              <div v-if="sharesLoading" class="session-empty">加载中...</div>
+              <div v-if="sharesLoading" class="session-empty">{{ t('common.loading') }}</div>
               <div v-else class="share-list">
                 <div v-for="s in filteredShares" :key="s.id" class="share-item" :class="{ invalid: s.status !== 'valid' }">
                   <input type="checkbox" class="share-check" :value="s.id" v-model="selectedShareIds" />
@@ -152,55 +173,55 @@
                       <span class="share-status" :class="s.status === 'valid' ? 'ok' : 'bad'">{{ shareStatusText(s.status) }}</span>
                     </div>
                     <div class="share-meta">
-                      <span>创建：{{ s.createdAt || '未知' }}</span>
-                      <span>有效期至：{{ s.expiresAt || '永久' }}</span>
+                      <span>{{ t('settings.createdAt', { date: s.createdAt || t('common.unknown') }) }}</span>
+                      <span>{{ t('settings.expiresAt', { date: s.expiresAt || t('settings.permanent') }) }}</span>
                     </div>
                     <div class="share-link">{{ shareUrl(s) }}</div>
                   </div>
                   <div class="share-actions">
-                    <button class="share-action-btn" title="复制链接" @click="copyShareLink(s)">复制</button>
-                    <button class="share-action-btn" title="新窗口打开" @click="openShareLink(s)">打开</button>
-                    <button class="share-action-btn danger" title="删除分享" @click="handleDeleteShare(s)">删除</button>
+                    <button class="share-action-btn" :title="t('settings.copyLink')" @click="copyShareLink(s)">{{ t('common.copy') }}</button>
+                    <button class="share-action-btn" :title="t('settings.openLink')" @click="openShareLink(s)">{{ t('common.open') }}</button>
+                    <button class="share-action-btn danger" :title="t('settings.deleteShare')" @click="handleDeleteShare(s)">{{ t('common.delete') }}</button>
                   </div>
                 </div>
-                <div v-if="filteredShares.length === 0" class="session-empty">暂无分享记录</div>
+                <div v-if="filteredShares.length === 0" class="session-empty">{{ t('settings.noShares') }}</div>
               </div>
-              <div class="settings-form-note">仅展示当前账号创建的分享链接；删除后对应链接立即失效。失效分享 = 已过期或源会话已被删除。</div>
+              <div class="settings-form-note">{{ t('settings.shareNote') }}</div>
             </div>
 
             <!-- 数据管理 -->
             <div v-if="tab === 'dataManagement'" class="settings-panel">
-              <h3 class="settings-panel-title">数据管理</h3>
+              <h3 class="settings-panel-title">{{ t('settings.tabData') }}</h3>
               <div class="data-mgmt-rows">
                 <div class="data-mgmt-row">
                   <div class="data-mgmt-info">
-                    <div class="data-mgmt-title">导出全部历史对话</div>
-                    <div class="data-mgmt-desc">将当前账号下的全部会话记录（{{ chatStore.countValidChats() }} 条）按所选格式导出；JSON 为含元信息的完整备份，可用于下方导入恢复</div>
+                    <div class="data-mgmt-title">{{ t('settings.exportAll') }}</div>
+                    <div class="data-mgmt-desc">{{ t('settings.exportAllDesc', { n: chatStore.countValidChats() }) }}</div>
                   </div>
                   <select v-model="exportFormat" class="settings-select">
-                    <option value="txt">TXT 文本</option>
-                    <option value="md">Markdown</option>
-                    <option value="json">JSON 备份</option>
+                    <option value="txt">{{ t('settings.fmtTxt') }}</option>
+                    <option value="md">{{ t('settings.fmtMd') }}</option>
+                    <option value="json">{{ t('settings.fmtJson') }}</option>
                   </select>
-                  <button class="settings-btn settings-btn-primary" @click="confirmExport">导出</button>
+                  <button class="settings-btn settings-btn-primary" @click="confirmExport">{{ t('settings.export') }}</button>
                 </div>
                 <div class="data-mgmt-row">
                   <div class="data-mgmt-info">
-                    <div class="data-mgmt-title">导入 JSON 备份</div>
-                    <div class="data-mgmt-desc">从备份文件恢复会话；按会话合并，已存在的会话不会被覆盖</div>
+                    <div class="data-mgmt-title">{{ t('settings.importJson') }}</div>
+                    <div class="data-mgmt-desc">{{ t('settings.importJsonDesc') }}</div>
                   </div>
-                  <button class="settings-btn settings-btn-primary" @click="importFileRef && importFileRef.click()">选择文件</button>
+                  <button class="settings-btn settings-btn-primary" @click="importFileRef && importFileRef.click()">{{ t('settings.chooseFile') }}</button>
                   <input ref="importFileRef" type="file" accept=".json,application/json" style="display:none" @change="handleImportJson" />
                 </div>
                 <div class="data-mgmt-row data-mgmt-row-danger">
                   <div class="data-mgmt-info">
-                    <div class="data-mgmt-title">删除全部对话</div>
-                    <div class="data-mgmt-desc">清空当前账号下的全部聊天记录，删除后无法恢复</div>
+                    <div class="data-mgmt-title">{{ t('settings.deleteAll') }}</div>
+                    <div class="data-mgmt-desc">{{ t('settings.deleteAllDesc') }}</div>
                   </div>
-                  <button class="settings-btn settings-btn-danger" @click="confirmDeleteAll">删除</button>
+                  <button class="settings-btn settings-btn-danger" @click="confirmDeleteAll">{{ t('common.delete') }}</button>
                 </div>
               </div>
-              <div class="settings-form-note">导出文件由浏览器保存到本地；删除操作会同步清除服务端数据。</div>
+              <div class="settings-form-note">{{ t('settings.dataNote') }}</div>
             </div>
           </div>
         </div>
@@ -212,6 +233,8 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
+import { useI18n } from 'vue-i18n'
+import { setLocale, getLocale } from '@/i18n'
 import { changePassword, getSessions, kickSession } from '@/api/auth'
 import { getPromptPresets, savePromptPresets } from '@/api/user'
 import { getMyShares, deleteShare, batchDeleteMyShares } from '@/api/share'
@@ -219,10 +242,14 @@ import { useChatStore } from '@/stores/chat'
 import { useAuthStore } from '@/stores/auth'
 
 const emit = defineEmits(['close', 'logout'])
+const { t } = useI18n()
 const chatStore = useChatStore()
 const authStore = useAuthStore()
 
 const tab = ref('changePassword')
+
+// 通用：界面语言下拉（切换即时生效并持久化，见 @/i18n 的 setLocale）
+const uiLocale = ref(getLocale())
 
 // 窄屏检测：≤480px 时导航改为顶部横排 Tab（与样式媒体查询断点一致）
 const mobileQuery = window.matchMedia('(max-width: 480px)')
@@ -266,39 +293,39 @@ async function submitChangePassword() {
   pwdTipError.value = false
   const { oldPwd, newPwd, confirmPwd } = pwdForm.value
   if (!oldPwd || !newPwd || !confirmPwd) {
-    pwdTip.value = '请完整填写所有密码字段'
+    pwdTip.value = t('settings.pwdIncomplete')
     pwdTipError.value = true
     return
   }
   if (newPwd.length < 4) {
-    pwdTip.value = '新密码长度不能少于4位'
+    pwdTip.value = t('settings.pwdTooShort')
     pwdTipError.value = true
     return
   }
   if (newPwd !== confirmPwd) {
-    pwdTip.value = '两次输入的新密码不一致'
+    pwdTip.value = t('settings.pwdMismatch')
     pwdTipError.value = true
     return
   }
   if (oldPwd === newPwd) {
-    pwdTip.value = '新密码不能与当前密码相同'
+    pwdTip.value = t('settings.pwdSameAsOld')
     pwdTipError.value = true
     return
   }
   try {
     const data = await changePassword({ oldPassword: oldPwd, newPassword: newPwd, confirmPassword: confirmPwd })
     if (data.success) {
-      ElMessage.success('密码修改成功，即将退出登录')
+      ElMessage.success(t('settings.pwdChanged'))
       setTimeout(() => {
         emit('close')
         emit('logout')
       }, 1200)
     } else {
-      pwdTip.value = data.message || '修改失败'
+      pwdTip.value = data.message || t('settings.changeFailed')
       pwdTipError.value = true
     }
   } catch (e) {
-    pwdTip.value = '请求失败'
+    pwdTip.value = t('settings.requestFailed')
     pwdTipError.value = true
   }
 }
@@ -335,12 +362,12 @@ async function savePresets() {
   promptTip.value = ''
   promptTipError.value = false
   if (presets.value.length > 20) {
-    promptTip.value = '提示词数量过多（最多 20 条）'
+    promptTip.value = t('settings.presetTooMany')
     promptTipError.value = true
     return
   }
   if (presets.value.some(p => (p.content || '').length > 20000)) {
-    promptTip.value = '单条提示词内容过长（最多 20000 字符）'
+    promptTip.value = t('settings.presetTooLong')
     promptTipError.value = true
     return
   }
@@ -353,43 +380,47 @@ async function savePresets() {
         content: p.content || '',
         enabled: !!p.enabled
       }))
-      promptTip.value = '已保存，立即对所有新对话生效。'
+      promptTip.value = t('settings.presetSavedTip')
       promptTipError.value = false
-      ElMessage.success('提示词已保存')
+      ElMessage.success(t('settings.presetSaved'))
     } else {
-      promptTip.value = data.message || '保存失败'
+      promptTip.value = data.message || t('settings.saveFailed')
       promptTipError.value = true
     }
   } catch (e) {
-    promptTip.value = '保存失败'
+    promptTip.value = t('settings.saveFailed')
     promptTipError.value = true
   }
 }
 
-const EXPORT_FORMAT_TEXT = { txt: 'TXT 文本', md: 'Markdown', json: 'JSON 备份' }
+// 导出格式展示名随语言切换，改为函数式取字典
+function exportFormatText(fmt) {
+  const map = { txt: t('settings.fmtTxt'), md: t('settings.fmtMd'), json: t('settings.fmtJson') }
+  return map[fmt] || map.txt
+}
 
 function confirmExport() {
   const count = chatStore.countValidChats()
   if (count === 0) {
-    ElMessage.info('当前没有可导出的会话')
+    ElMessage.info(t('settings.noExportable'))
     return
   }
-  const fmt = EXPORT_FORMAT_TEXT[exportFormat.value] || 'TXT 文本'
-  ElMessageBox.confirm(`确定将全部 ${count} 条历史对话导出为 ${fmt} 吗？`, '导出确认', {
-    confirmButtonText: '导出',
-    cancelButtonText: '取消'
+  const fmt = exportFormatText(exportFormat.value)
+  ElMessageBox.confirm(t('settings.exportConfirm', { n: count, fmt }), t('settings.exportConfirmTitle'), {
+    confirmButtonText: t('settings.export'),
+    cancelButtonText: t('common.cancel')
   }).then(async () => {
     // 懒加载模式下导出前需先补齐未加载的会话正文，会话多时耗时较长，全屏 loading 提示进度
     const loading = ElLoading.service({
       lock: true,
-      text: `正在导出 ${count} 条会话，请稍候…`,
+      text: t('settings.exporting', { n: count }),
       background: 'rgba(0, 0, 0, 0.5)'
     })
     try {
       await chatStore.exportChats(exportFormat.value)
-      ElMessage.success('已导出')
+      ElMessage.success(t('settings.exported'))
     } catch (e) {
-      ElMessage.error('导出失败：拉取全量会话内容失败，请重试')
+      ElMessage.error(t('settings.exportFailed'))
     } finally {
       loading.close()
     }
@@ -407,28 +438,28 @@ async function handleImportJson(e) {
     const data = JSON.parse(text)
     const { imported, skipped } = chatStore.importChatsJson(data)
     if (imported > 0) {
-      ElMessage.success(`导入完成：新增 ${imported} 条会话` + (skipped > 0 ? `，跳过 ${skipped} 条已存在/无效会话` : ''))
+      ElMessage.success(t('settings.importDone', { n: imported }) + (skipped > 0 ? t('settings.importSkipped', { n: skipped }) : ''))
     } else {
-      ElMessage.info(skipped > 0 ? `未导入新会话（${skipped} 条已存在或无效）` : '备份文件中没有会话')
+      ElMessage.info(skipped > 0 ? t('settings.importNone', { n: skipped }) : t('settings.importEmpty'))
     }
   } catch (err) {
-    ElMessage.error('导入失败：' + (err.message || '文件不是有效的备份 JSON'))
+    ElMessage.error(t('settings.importFailed', { msg: err.message || t('settings.invalidBackup') }))
   }
 }
 
 function confirmDeleteAll() {
   const count = chatStore.countValidChats()
   if (count === 0) {
-    ElMessage.info('当前没有可删除的会话')
+    ElMessage.info(t('settings.noDeletable'))
     return
   }
-  ElMessageBox.confirm(`此操作将删除全部 ${count} 条会话及其聊天记录，删除后无法恢复。确定继续？`, '删除全部对话', {
-    confirmButtonText: '删除',
-    cancelButtonText: '取消',
+  ElMessageBox.confirm(t('settings.deleteAllConfirm', { n: count }), t('settings.deleteAll'), {
+    confirmButtonText: t('common.delete'),
+    cancelButtonText: t('common.cancel'),
     type: 'warning'
   }).then(() => {
     chatStore.deleteAllChats()
-    ElMessage.success('已删除全部对话')
+    ElMessage.success(t('settings.allDeleted'))
   }).catch(() => {})
 }
 
@@ -446,17 +477,17 @@ async function loadSessions() {
 }
 
 function confirmKick(s) {
-  ElMessageBox.confirm(`确定踢掉该设备（${s.browser || '未知浏览器'} / ${s.ip || '未知IP'}）吗？踢下线后该设备需重新登录。`, '踢下线确认', {
-    confirmButtonText: '踢下线',
-    cancelButtonText: '取消',
+  ElMessageBox.confirm(t('settings.kickConfirm', { browser: s.browser || t('settings.unknownBrowser'), ip: s.ip || t('common.unknown') }), t('settings.kickTitle'), {
+    confirmButtonText: t('settings.kick'),
+    cancelButtonText: t('common.cancel'),
     type: 'warning'
   }).then(async () => {
     try {
       const data = await kickSession(s.sessionId)
       if (data.success) {
-        ElMessage.success('已踢下线')
+        ElMessage.success(t('settings.kicked'))
       } else {
-        ElMessage.error(data.message || '操作失败')
+        ElMessage.error(data.message || t('settings.opFailed'))
       }
     } catch (e) { /* 拦截器已提示 */ }
     loadSessions()
@@ -465,9 +496,10 @@ function confirmKick(s) {
 
 // ===== 分享管理（仅管理当前账号自己的分享，功能口径与后台分享管理一致） =====
 
-const SHARE_STATUS_TEXT = { valid: '有效', expired: '已过期', orphaned: '会话已删' }
+// 分享状态展示名随语言切换，改为函数式取字典
 function shareStatusText(s) {
-  return SHARE_STATUS_TEXT[s] || s
+  const map = { valid: t('settings.statusValid'), expired: t('settings.statusExpired'), orphaned: t('settings.statusOrphaned') }
+  return map[s] || s
 }
 
 // 失效分享 = 已过期 + 源会话已删
@@ -495,10 +527,10 @@ async function loadShares() {
 async function copyShareLink(s) {
   try {
     await navigator.clipboard.writeText(shareUrl(s))
-    ElMessage.success('链接已复制')
+    ElMessage.success(t('settings.linkCopied'))
   } catch (e) {
     // 非 https 环境剪贴板可能不可用，降级弹窗展示
-    ElMessageBox.alert(shareUrl(s), '分享链接（请手动复制）', { confirmButtonText: '知道了' })
+    ElMessageBox.alert(shareUrl(s), t('settings.copyManually'), { confirmButtonText: t('common.gotIt') })
   }
 }
 
@@ -509,13 +541,13 @@ function openShareLink(s) {
 // 单条删除（撤销分享）
 async function handleDeleteShare(s) {
   try {
-    await ElMessageBox.confirm(`确定删除分享 "${s.title}" 吗？删除后该链接立即失效。`, '确认删除', { type: 'warning' })
+    await ElMessageBox.confirm(t('settings.deleteShareConfirm', { title: s.title }), t('settings.deleteConfirmTitle'), { type: 'warning' })
     const res = await deleteShare(s.id)
     if (res?.success) {
-      ElMessage.success('已删除')
+      ElMessage.success(t('settings.deleted'))
       await loadShares()
     } else {
-      ElMessage.error(res?.message || '删除失败')
+      ElMessage.error(res?.message || t('settings.deleteFailed'))
     }
   } catch { /* cancelled */ }
 }
@@ -525,7 +557,7 @@ async function handleDeleteSelectedShares() {
   const ids = selectedShareIds.value
   if (ids.length === 0) return
   try {
-    await ElMessageBox.confirm(`确定删除选中的 ${ids.length} 条分享吗？删除后链接立即失效。`, '确认批量删除', { type: 'warning' })
+    await ElMessageBox.confirm(t('settings.batchDeleteConfirm', { n: ids.length }), t('settings.batchDeleteTitle'), { type: 'warning' })
     await doBatchDeleteShares(ids)
   } catch { /* cancelled */ }
 }
@@ -536,8 +568,8 @@ async function handleClearInvalidShares() {
   if (rows.length === 0) return
   try {
     await ElMessageBox.confirm(
-      `共 ${rows.length} 条失效分享（已过期或源会话已删除），确定全部清除吗？`,
-      '确认清除失效', { type: 'warning' }
+      t('settings.clearInvalidConfirm', { n: rows.length }),
+      t('settings.clearInvalidTitle'), { type: 'warning' }
     )
     await doBatchDeleteShares(rows.map(r => r.id))
   } catch { /* cancelled */ }
@@ -546,10 +578,10 @@ async function handleClearInvalidShares() {
 async function doBatchDeleteShares(ids) {
   const res = await batchDeleteMyShares(ids)
   if (res?.success) {
-    ElMessage.success(`已删除 ${res.deleted ?? ids.length} 条分享`)
+    ElMessage.success(t('settings.batchDeleted', { n: res.deleted ?? ids.length }))
     await loadShares()
   } else {
-    ElMessage.error(res?.message || '删除失败')
+    ElMessage.error(res?.message || t('settings.deleteFailed'))
   }
 }
 </script>

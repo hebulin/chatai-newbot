@@ -4,9 +4,9 @@
       <div class="us-modal-container" @click.stop>
         <div class="modal-header">
           <div class="us-header-top">
-            <span class="us-eyebrow"><b>ANALYTICS</b> · 数据统计</span>
+            <span class="us-eyebrow"><b>ANALYTICS</b> · {{ t('usage.eyebrow') }}</span>
             <span class="us-scope-badge" :class="isAdmin ? 'us-scope-admin' : 'us-scope-self'">
-              {{ isAdmin ? '全站视图 · ALL USERS' : '个人视图 · ONLY ME' }}
+              {{ isAdmin ? t('usage.scopeAdmin') : t('usage.scopeSelf') }}
             </span>
           </div>
           <button class="modal-close" @click="$emit('close')">✕</button>
@@ -15,33 +15,33 @@
         <!-- 子Tab -->
         <div class="us-body">
           <div class="us-subtab-nav">
-            <div class="us-subtab-item" :class="{ active: subTab === 'usage' }" @click="subTab = 'usage'">使用记录</div>
-            <div class="us-subtab-item" :class="{ active: subTab === 'stats' }" @click="switchToStats">用户统计</div>
+            <div class="us-subtab-item" :class="{ active: subTab === 'usage' }" @click="subTab = 'usage'">{{ t('usage.tabUsage') }}</div>
+            <div class="us-subtab-item" :class="{ active: subTab === 'stats' }" @click="switchToStats">{{ t('usage.tabStats') }}</div>
           </div>
 
           <!-- 使用记录 -->
           <div v-show="subTab === 'usage'" class="us-sub-content">
             <div class="us-search-bar">
               <div v-if="isAdmin" class="us-field">
-                <label class="us-label">用户</label>
-                <el-select v-model="usageFilter.username" class="us-el-select" placeholder="全部用户" clearable filterable size="small">
+                <label class="us-label">{{ t('usage.user') }}</label>
+                <el-select v-model="usageFilter.username" class="us-el-select" :placeholder="t('usage.allUsers')" clearable filterable size="small">
                   <el-option v-for="u in usernames" :key="u" :label="u" :value="u" />
                 </el-select>
               </div>
               <div class="us-field">
-                <label class="us-label">模型</label>
-                <el-select v-model="usageFilter.modelName" class="us-el-select us-el-select-wide" placeholder="全部模型" clearable filterable size="small">
+                <label class="us-label">{{ t('usage.model') }}</label>
+                <el-select v-model="usageFilter.modelName" class="us-el-select us-el-select-wide" :placeholder="t('usage.allModels')" clearable filterable size="small">
                   <el-option v-for="m in modelNames" :key="m" :label="m" :value="m" />
                 </el-select>
               </div>
               <div class="us-field">
-                <label class="us-label">日期范围</label>
+                <label class="us-label">{{ t('usage.dateRange') }}</label>
                 <el-date-picker
                   v-model="usageDateRange"
                   type="daterange"
-                  range-separator="至"
-                  start-placeholder="开始日期"
-                  end-placeholder="结束日期"
+                  :range-separator="t('usage.to')"
+                  :start-placeholder="t('usage.startDate')"
+                  :end-placeholder="t('usage.endDate')"
                   value-format="YYYY-MM-DD"
                   :shortcuts="dateShortcuts"
                   class="us-date-range"
@@ -49,42 +49,42 @@
                 />
               </div>
               <div class="us-actions">
-                <button class="us-btn us-btn-primary" @click="searchUsage">搜索</button>
-                <button class="us-btn" @click="resetUsageFilter">重置</button>
+                <button class="us-btn us-btn-primary" @click="searchUsage">{{ t('common.search') }}</button>
+                <button class="us-btn" @click="resetUsageFilter">{{ t('common.reset') }}</button>
               </div>
             </div>
             <!-- 使用记录列表：与后台管理统一使用 el-table（自适应列宽 + 拖拽调宽 + 横向滚动） -->
-            <el-table :data="usageLogs" class="us-el-table" stripe border empty-text="暂无数据" style="width: 100%">
-              <el-table-column prop="timestamp" label="时间" :width="usageColW.timestamp" show-overflow-tooltip />
-              <el-table-column v-if="isAdmin" prop="username" label="用户" :width="usageColW.username" show-overflow-tooltip />
-              <el-table-column prop="modelName" label="模型" :width="usageColW.modelName" show-overflow-tooltip />
-              <el-table-column label="输入Token" :width="usageColW.prompt">
+            <el-table :data="usageLogs" class="us-el-table" stripe border :empty-text="t('usage.noData')" style="width: 100%">
+              <el-table-column prop="timestamp" :label="t('usage.time')" :width="usageColW.timestamp" show-overflow-tooltip />
+              <el-table-column v-if="isAdmin" prop="username" :label="t('usage.user')" :width="usageColW.username" show-overflow-tooltip />
+              <el-table-column prop="modelName" :label="t('usage.model')" :width="usageColW.modelName" show-overflow-tooltip />
+              <el-table-column :label="t('usage.promptTokens')" :width="usageColW.prompt">
                 <template #default="{ row }">{{ fmt(row.promptTokens) }}</template>
               </el-table-column>
-              <el-table-column label="输出Token" :width="usageColW.completion">
+              <el-table-column :label="t('usage.completionTokens')" :width="usageColW.completion">
                 <template #default="{ row }">{{ fmt(row.completionTokens) }}</template>
               </el-table-column>
-              <el-table-column label="思考Token" :width="usageColW.reasoning">
+              <el-table-column :label="t('usage.reasoningTokens')" :width="usageColW.reasoning">
                 <template #default="{ row }">{{ fmt(row.reasoningTokens) }}</template>
               </el-table-column>
-              <el-table-column label="缓存Token" :width="usageColW.cached">
+              <el-table-column :label="t('usage.cachedTokens')" :width="usageColW.cached">
                 <template #default="{ row }">{{ fmt(row.cachedTokens) }}</template>
               </el-table-column>
-              <el-table-column label="思考模式" :width="usageColW.thinking">
+              <el-table-column :label="t('usage.thinkingMode')" :width="usageColW.thinking">
                 <template #default="{ row }">
-                  <span class="us-thinking-badge" :class="{ on: row.deepThinking }">{{ row.deepThinking ? '深度' : '标准' }}</span>
+                  <span class="us-thinking-badge" :class="{ on: row.deepThinking }">{{ row.deepThinking ? t('usage.deep') : t('usage.standard') }}</span>
                 </template>
               </el-table-column>
             </el-table>
             <div class="us-pagination">
               <select v-model.number="usageSize" class="us-page-size" @change="usagePage = 1; loadUsageLogs()">
-                <option :value="10">10条/页</option>
-                <option :value="20">20条/页</option>
-                <option :value="50">50条/页</option>
+                <option :value="10">{{ t('common.perPage', { n: 10 }) }}</option>
+                <option :value="20">{{ t('common.perPage', { n: 20 }) }}</option>
+                <option :value="50">{{ t('common.perPage', { n: 50 }) }}</option>
               </select>
-              <button class="us-btn" :disabled="usagePage <= 1" @click="usagePage--; loadUsageLogs()">上一页</button>
-              <span class="us-page-info">第 {{ usagePage }} / {{ usageTotalPages }} 页 · 共 {{ usageTotal }} 条</span>
-              <button class="us-btn" :disabled="usagePage >= usageTotalPages" @click="usagePage++; loadUsageLogs()">下一页</button>
+              <button class="us-btn" :disabled="usagePage <= 1" @click="usagePage--; loadUsageLogs()">{{ t('common.prevPage') }}</button>
+              <span class="us-page-info">{{ t('common.pageInfo', { page: usagePage, totalPages: usageTotalPages, total: usageTotal }) }}</span>
+              <button class="us-btn" :disabled="usagePage >= usageTotalPages" @click="usagePage++; loadUsageLogs()">{{ t('common.nextPage') }}</button>
             </div>
           </div>
 
@@ -92,11 +92,11 @@
           <div v-show="subTab === 'stats'" class="us-sub-content">
             <div class="us-search-bar">
               <div v-if="isAdmin" class="us-field">
-                <label class="us-label">用户（可多选对比）</label>
+                <label class="us-label">{{ t('usage.userMulti') }}</label>
                 <el-select
                   v-model="statsFilter.usernames"
                   class="us-el-select us-el-select-multi"
-                  placeholder="全部用户"
+                  :placeholder="t('usage.allUsers')"
                   multiple
                   clearable
                   filterable
@@ -109,13 +109,13 @@
                 </el-select>
               </div>
               <div class="us-field">
-                <label class="us-label">日期范围</label>
+                <label class="us-label">{{ t('usage.dateRange') }}</label>
                 <el-date-picker
                   v-model="statsDateRange"
                   type="daterange"
-                  range-separator="至"
-                  start-placeholder="开始日期"
-                  end-placeholder="结束日期"
+                  :range-separator="t('usage.to')"
+                  :start-placeholder="t('usage.startDate')"
+                  :end-placeholder="t('usage.endDate')"
                   value-format="YYYY-MM-DD"
                   :shortcuts="dateShortcuts"
                   class="us-date-range"
@@ -123,8 +123,8 @@
                 />
               </div>
               <div class="us-actions">
-                <button class="us-btn us-btn-primary" @click="searchStats">搜索</button>
-                <button class="us-btn" @click="resetStatsFilter">重置</button>
+                <button class="us-btn us-btn-primary" @click="searchStats">{{ t('common.search') }}</button>
+                <button class="us-btn" @click="resetStatsFilter">{{ t('common.reset') }}</button>
               </div>
             </div>
 
@@ -132,50 +132,50 @@
             <div class="us-stat-cards">
               <div class="us-stat-card" :class="{ tick: tickFlags.count }">
                 <div class="us-stat-num">{{ statsSummary.count }}</div>
-                <div class="us-stat-label">调用次数 · CALLS</div>
+                <div class="us-stat-label">{{ t('usage.cardCalls') }}</div>
               </div>
               <div class="us-stat-card" :class="{ tick: tickFlags.promptTokens }">
                 <div class="us-stat-num">{{ fmtShort(statsSummary.promptTokens) }}</div>
-                <div class="us-stat-label">输入Token · INPUT</div>
+                <div class="us-stat-label">{{ t('usage.cardInput') }}</div>
               </div>
               <div class="us-stat-card" :class="{ tick: tickFlags.completionTokens }">
                 <div class="us-stat-num">{{ fmtShort(statsSummary.completionTokens) }}</div>
-                <div class="us-stat-label">输出Token · OUTPUT</div>
+                <div class="us-stat-label">{{ t('usage.cardOutput') }}</div>
               </div>
               <div class="us-stat-card" :class="{ tick: tickFlags.reasoningTokens }">
                 <div class="us-stat-num">{{ fmtShort(statsSummary.reasoningTokens) }}</div>
-                <div class="us-stat-label">思考Token · REASONING</div>
+                <div class="us-stat-label">{{ t('usage.cardReasoning') }}</div>
               </div>
             </div>
 
             <!-- 迷你子Tab：列表 / 曲线图 / 柱状图 -->
             <div class="us-mini-tab-nav">
-              <div class="us-mini-tab-item" :class="{ active: miniTab === 'list' }" @click="miniTab = 'list'">结果列表</div>
-              <div class="us-mini-tab-item" :class="{ active: miniTab === 'line' }" @click="miniTab = 'line'">曲线图</div>
-              <div class="us-mini-tab-item" :class="{ active: miniTab === 'bar' }" @click="miniTab = 'bar'">柱状图</div>
+              <div class="us-mini-tab-item" :class="{ active: miniTab === 'list' }" @click="miniTab = 'list'">{{ t('usage.miniList') }}</div>
+              <div class="us-mini-tab-item" :class="{ active: miniTab === 'line' }" @click="miniTab = 'line'">{{ t('usage.miniLine') }}</div>
+              <div class="us-mini-tab-item" :class="{ active: miniTab === 'bar' }" @click="miniTab = 'bar'">{{ t('usage.miniBar') }}</div>
             </div>
 
             <!-- 列表 -->
             <div v-show="miniTab === 'list'">
               <!-- 统计结果列表：与后台管理统一使用 el-table（自适应列宽 + 拖拽调宽 + 横向滚动） -->
-              <el-table :data="userStats" class="us-el-table" stripe border empty-text="点击「搜索」查看统计结果" style="width: 100%">
-                <el-table-column v-if="isAdmin" prop="username" label="用户" :width="statsColW.username" show-overflow-tooltip />
-                <el-table-column prop="date" label="日期" :width="statsColW.date" show-overflow-tooltip />
-                <el-table-column prop="modelName" label="模型" :width="statsColW.modelName" show-overflow-tooltip />
-                <el-table-column prop="count" label="调用次数" :width="statsColW.count" />
-                <el-table-column label="输入Token" :width="statsColW.prompt">
+              <el-table :data="userStats" class="us-el-table" stripe border :empty-text="t('usage.statsEmptyText')" style="width: 100%">
+                <el-table-column v-if="isAdmin" prop="username" :label="t('usage.user')" :width="statsColW.username" show-overflow-tooltip />
+                <el-table-column prop="date" :label="t('usage.date')" :width="statsColW.date" show-overflow-tooltip />
+                <el-table-column prop="modelName" :label="t('usage.model')" :width="statsColW.modelName" show-overflow-tooltip />
+                <el-table-column prop="count" :label="t('usage.calls')" :width="statsColW.count" />
+                <el-table-column :label="t('usage.promptTokens')" :width="statsColW.prompt">
                   <template #default="{ row }">{{ fmt(row.promptTokens) }}</template>
                 </el-table-column>
-                <el-table-column label="输出Token" :width="statsColW.completion">
+                <el-table-column :label="t('usage.completionTokens')" :width="statsColW.completion">
                   <template #default="{ row }">{{ fmt(row.completionTokens) }}</template>
                 </el-table-column>
-                <el-table-column label="思考Token" :width="statsColW.reasoning">
+                <el-table-column :label="t('usage.reasoningTokens')" :width="statsColW.reasoning">
                   <template #default="{ row }">{{ fmt(row.reasoningTokens) }}</template>
                 </el-table-column>
-                <el-table-column label="缓存Token" :width="statsColW.cached">
+                <el-table-column :label="t('usage.cachedTokens')" :width="statsColW.cached">
                   <template #default="{ row }">{{ fmt(row.cachedTokens) }}</template>
                 </el-table-column>
-                <el-table-column label="思考模式次数" :width="statsColW.thinkingCount">
+                <el-table-column :label="t('usage.thinkingCount')" :width="statsColW.thinkingCount">
                   <template #default="{ row }">{{ row.thinkingCount || 0 }}</template>
                 </el-table-column>
               </el-table>
@@ -185,16 +185,16 @@
                   <option :value="20">20条/页</option>
                   <option :value="50">50条/页</option>
                 </select>
-                <button class="us-btn" :disabled="statsPage <= 1" @click="statsPage--; loadUserStats()">上一页</button>
-                <span class="us-page-info">第 {{ statsPage }} / {{ statsTotalPages }} 页 · 共 {{ statsTotal }} 条</span>
-                <button class="us-btn" :disabled="statsPage >= statsTotalPages" @click="statsPage++; loadUserStats()">下一页</button>
+                <button class="us-btn" :disabled="statsPage <= 1" @click="statsPage--; loadUserStats()">{{ t('common.prevPage') }}</button>
+                <span class="us-page-info">{{ t('common.pageInfo', { page: statsPage, totalPages: statsTotalPages, total: statsTotal }) }}</span>
+                <button class="us-btn" :disabled="statsPage >= statsTotalPages" @click="statsPage++; loadUserStats()">{{ t('common.nextPage') }}</button>
               </div>
             </div>
 
             <!-- 曲线图 -->
             <div v-show="miniTab === 'line'">
               <div class="us-chart-toolbar">
-                <span class="us-metric-label">指标</span>
+                <span class="us-metric-label">{{ t('usage.metric') }}</span>
                 <div class="us-metric-selector">
                   <button v-for="m in lineMetrics" :key="m.key" class="us-metric-btn" :class="{ active: lineMetric === m.key }" @click="lineMetric = m.key">{{ m.label }}</button>
                 </div>
@@ -205,7 +205,7 @@
             <!-- 柱状图 -->
             <div v-show="miniTab === 'bar'">
               <div class="us-chart-toolbar">
-                <span class="us-metric-label">指标</span>
+                <span class="us-metric-label">{{ t('usage.metric') }}</span>
                 <div class="us-metric-selector">
                   <button v-for="m in barMetrics" :key="m.key" class="us-metric-btn" :class="{ active: barMetric === m.key }" @click="barMetric = m.key">{{ m.label }}</button>
                 </div>
@@ -222,11 +222,14 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { getUsageLogs, getUserStats, getUsernames } from '@/api/usage'
 import { autoColWidth } from '@/composables/useTableAutoWidth'
 
 defineEmits(['close'])
+
+const { t } = useI18n()
 
 const authStore = useAuthStore()
 const isAdmin = ref(authStore.role === 'admin')
@@ -267,33 +270,33 @@ function getLast30Days() {
 const usageDateRange = ref(getLast30Days())
 const statsDateRange = ref(getLast30Days())
 
-// 日期快捷选项
-const dateShortcuts = [
-  { text: '今天', value: () => { const d = new Date(); return [d, d] } },
-  { text: '本周', value: () => { const end = new Date(); const start = new Date(); const day = start.getDay() || 7; start.setDate(start.getDate() - day + 1); return [start, end] } },
-  { text: '本月', value: () => { const end = new Date(); const start = new Date(end.getFullYear(), end.getMonth(), 1); return [start, end] } },
-  { text: '最近30天', value: () => { const end = new Date(); const start = new Date(); start.setDate(start.getDate() - 29); return [start, end] } }
-]
+// 日期快捷选项（文案随语言切换，改为 computed）
+const dateShortcuts = computed(() => [
+  { text: t('usage.today'), value: () => { const d = new Date(); return [d, d] } },
+  { text: t('usage.thisWeek'), value: () => { const end = new Date(); const start = new Date(); const day = start.getDay() || 7; start.setDate(start.getDate() - day + 1); return [start, end] } },
+  { text: t('usage.thisMonth'), value: () => { const end = new Date(); const start = new Date(end.getFullYear(), end.getMonth(), 1); return [start, end] } },
+  { text: t('usage.last30Days'), value: () => { const end = new Date(); const start = new Date(); start.setDate(start.getDate() - 29); return [start, end] } }
+])
 
-// 图表指标（与旧版对齐：曲线 6 指标、柱状 6 指标，含缓存Token/思考模式）
+// 图表指标（与旧版对齐：曲线 6 指标、柱状 6 指标，含缓存Token/思考模式；label 随语言切换，改为 computed）
 const lineMetric = ref('count')
 const barMetric = ref('totalTokens')
-const lineMetrics = [
-  { key: 'count', label: '调用次数' },
-  { key: 'promptTokens', label: '输入Token' },
-  { key: 'completionTokens', label: '输出Token' },
-  { key: 'reasoningTokens', label: '思考Token' },
-  { key: 'cachedTokens', label: '缓存Token' },
-  { key: 'thinkingCount', label: '思考模式' }
-]
-const barMetrics = [
-  { key: 'totalTokens', label: 'Token总量' },
-  { key: 'count', label: '调用次数' },
-  { key: 'promptTokens', label: '输入Token' },
-  { key: 'completionTokens', label: '输出Token' },
-  { key: 'reasoningTokens', label: '思考Token' },
-  { key: 'cachedTokens', label: '缓存Token' }
-]
+const lineMetrics = computed(() => [
+  { key: 'count', label: t('usage.calls') },
+  { key: 'promptTokens', label: t('usage.promptTokens') },
+  { key: 'completionTokens', label: t('usage.completionTokens') },
+  { key: 'reasoningTokens', label: t('usage.reasoningTokens') },
+  { key: 'cachedTokens', label: t('usage.cachedTokens') },
+  { key: 'thinkingCount', label: t('usage.thinkingMode') }
+])
+const barMetrics = computed(() => [
+  { key: 'totalTokens', label: t('usage.totalTokens') },
+  { key: 'count', label: t('usage.calls') },
+  { key: 'promptTokens', label: t('usage.promptTokens') },
+  { key: 'completionTokens', label: t('usage.completionTokens') },
+  { key: 'reasoningTokens', label: t('usage.reasoningTokens') },
+  { key: 'cachedTokens', label: t('usage.cachedTokens') }
+])
 
 // 汇总卡片数字刷新动效标记
 const tickFlags = ref({ count: false, promptTokens: false, completionTokens: false, reasoningTokens: false })
@@ -368,10 +371,10 @@ function validateDateRange(dateRange) {
   if (dateRange && dateRange.length === 2) {
     const s = new Date(dateRange[0])
     const e = new Date(dateRange[1])
-    if (isNaN(s.getTime()) || isNaN(e.getTime())) return '日期格式不合法'
-    if (s > e) return '结束日期不能早于开始日期'
+    if (isNaN(s.getTime()) || isNaN(e.getTime())) return t('usage.errDateFormat')
+    if (s > e) return t('usage.errDateOrder')
     const diffDays = (e - s) / 86400000
-    if (diffDays > 31) return '日期范围不能超过 31 天'
+    if (diffDays > 31) return t('usage.errDateSpan')
   }
   return null
 }
@@ -413,7 +416,7 @@ async function loadUsageLogs() {
       usageTotal.value = data.total || 0
       usageTotalPages.value = data.totalPages || 1
     }
-  } catch (e) { ElMessage.error('加载使用记录失败') }
+  } catch (e) { ElMessage.error(t('usage.loadUsageFailed')) }
 }
 
 // 使用记录搜索：重置页码后加载
@@ -436,7 +439,7 @@ async function loadUserStats() {
       statsTotal.value = data.total || 0
       statsTotalPages.value = data.totalPages || 1
     }
-  } catch (e) { ElMessage.error('加载用户统计失败') }
+  } catch (e) { ElMessage.error(t('usage.loadStatsFailed')) }
 }
 
 async function loadCharts() {
@@ -451,7 +454,7 @@ async function loadCharts() {
       // 记录本次搜索的用户维度，驱动图表多用户对比模式
       chartUserDim.value = [...statsFilter.value.usernames]
     }
-  } catch (e) { ElMessage.error('加载统计数据失败') }
+  } catch (e) { ElMessage.error(t('usage.loadChartsFailed')) }
 }
 
 // 用户统计搜索：校验日期 + 重置页码 + 加载列表与图表
@@ -480,28 +483,28 @@ function resetStatsFilter() {
 const usageColW = computed(() => {
   const list = usageLogs.value
   return {
-    timestamp: autoColWidth(list.map(l => l.timestamp), { header: '时间', min: 110 }),
-    username: autoColWidth(list.map(l => l.username), { header: '用户', min: 80 }),
-    modelName: autoColWidth(list.map(l => l.modelName), { header: '模型', min: 100 }),
-    prompt: autoColWidth(list.map(l => fmt(l.promptTokens)), { header: '输入Token' }),
-    completion: autoColWidth(list.map(l => fmt(l.completionTokens)), { header: '输出Token' }),
-    reasoning: autoColWidth(list.map(l => fmt(l.reasoningTokens)), { header: '思考Token' }),
-    cached: autoColWidth(list.map(l => fmt(l.cachedTokens)), { header: '缓存Token' }),
-    thinking: autoColWidth(['深度', '标准'], { header: '思考模式', extra: 12 })
+    timestamp: autoColWidth(list.map(l => l.timestamp), { header: t('usage.time'), min: 110 }),
+    username: autoColWidth(list.map(l => l.username), { header: t('usage.user'), min: 80 }),
+    modelName: autoColWidth(list.map(l => l.modelName), { header: t('usage.model'), min: 100 }),
+    prompt: autoColWidth(list.map(l => fmt(l.promptTokens)), { header: t('usage.promptTokens') }),
+    completion: autoColWidth(list.map(l => fmt(l.completionTokens)), { header: t('usage.completionTokens') }),
+    reasoning: autoColWidth(list.map(l => fmt(l.reasoningTokens)), { header: t('usage.reasoningTokens') }),
+    cached: autoColWidth(list.map(l => fmt(l.cachedTokens)), { header: t('usage.cachedTokens') }),
+    thinking: autoColWidth([t('usage.deep'), t('usage.standard')], { header: t('usage.thinkingMode'), extra: 12 })
   }
 })
 const statsColW = computed(() => {
   const list = userStats.value
   return {
-    username: autoColWidth(list.map(s => s.username), { header: '用户', min: 80 }),
-    date: autoColWidth(list.map(s => s.date), { header: '日期', min: 100 }),
-    modelName: autoColWidth(list.map(s => s.modelName), { header: '模型', min: 100 }),
-    count: autoColWidth(list.map(s => s.count), { header: '调用次数' }),
-    prompt: autoColWidth(list.map(s => fmt(s.promptTokens)), { header: '输入Token' }),
-    completion: autoColWidth(list.map(s => fmt(s.completionTokens)), { header: '输出Token' }),
-    reasoning: autoColWidth(list.map(s => fmt(s.reasoningTokens)), { header: '思考Token' }),
-    cached: autoColWidth(list.map(s => fmt(s.cachedTokens)), { header: '缓存Token' }),
-    thinkingCount: autoColWidth(list.map(s => s.thinkingCount || 0), { header: '思考模式次数' })
+    username: autoColWidth(list.map(s => s.username), { header: t('usage.user'), min: 80 }),
+    date: autoColWidth(list.map(s => s.date), { header: t('usage.date'), min: 100 }),
+    modelName: autoColWidth(list.map(s => s.modelName), { header: t('usage.model'), min: 100 }),
+    count: autoColWidth(list.map(s => s.count), { header: t('usage.calls') }),
+    prompt: autoColWidth(list.map(s => fmt(s.promptTokens)), { header: t('usage.promptTokens') }),
+    completion: autoColWidth(list.map(s => fmt(s.completionTokens)), { header: t('usage.completionTokens') }),
+    reasoning: autoColWidth(list.map(s => fmt(s.reasoningTokens)), { header: t('usage.reasoningTokens') }),
+    cached: autoColWidth(list.map(s => fmt(s.cachedTokens)), { header: t('usage.cachedTokens') }),
+    thinkingCount: autoColWidth(list.map(s => s.thinkingCount || 0), { header: t('usage.thinkingCount') })
   }
 })
 
@@ -523,7 +526,7 @@ function aggregateBy(data, keyFn, metric) {
 const CHART_PALETTE = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7', '#ec4899', '#84cc16']
 
 const lineChartSvg = computed(() => {
-  if (!chartData.value.length) return '<div class="us-chart-empty">暂无统计数据，请先搜索</div>'
+  if (!chartData.value.length) return `<div class="us-chart-empty">${esc(t('usage.chartEmpty'))}</div>`
   // 多用户对比模式：每个用户一条折线
   if (chartUserDim.value.length > 1) {
     const dates = [...new Set(chartData.value.map(r => r.date))].sort()
@@ -540,7 +543,7 @@ const lineChartSvg = computed(() => {
 })
 
 const barChartSvg = computed(() => {
-  if (!chartData.value.length) return '<div class="us-chart-empty">暂无统计数据，请先搜索</div>'
+  if (!chartData.value.length) return `<div class="us-chart-empty">${esc(t('usage.chartEmpty'))}</div>`
   // 多用户对比模式：按模型分组的并排柱
   if (chartUserDim.value.length > 1) {
     const byModelAll = aggregateBy(chartData.value, r => r.modelName, barMetric.value)
@@ -557,7 +560,19 @@ const barChartSvg = computed(() => {
   return buildBarSvg(models, values, barMetric.value)
 })
 
-const METRIC_NAMES = { count: '调用次数', promptTokens: '输入Token', completionTokens: '输出Token', reasoningTokens: '思考Token', cachedTokens: '缓存Token', thinkingCount: '思考模式', totalTokens: 'Token总量' }
+// 指标展示名随语言切换，改为函数式取字典
+function metricName(metric) {
+  const map = {
+    count: t('usage.calls'),
+    promptTokens: t('usage.promptTokens'),
+    completionTokens: t('usage.completionTokens'),
+    reasoningTokens: t('usage.reasoningTokens'),
+    cachedTokens: t('usage.cachedTokens'),
+    thinkingCount: t('usage.thinkingMode'),
+    totalTokens: t('usage.totalTokens')
+  }
+  return map[metric] || metric
+}
 
 function buildLineSvg(labels, values, metric) {
   const w = 720, h = 320
@@ -570,7 +585,7 @@ function buildLineSvg(labels, values, metric) {
     y: padT + chartH - (v / niceMax) * chartH,
     v, label: labels[i]
   }))
-  const valueName = METRIC_NAMES[metric] || metric
+  const valueName = metricName(metric)
   let svg = `<svg viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" style="width:100%;height:100%;">`
   for (let i = 0; i <= 4; i++) {
     const yy = padT + chartH - (i / 4) * chartH
@@ -591,7 +606,7 @@ function buildLineSvg(labels, values, metric) {
     const dl = (p.label && p.label.length >= 10) ? p.label.substring(5) : (p.label || '')
     svg += `<text class="us-chart-label" x="${p.x}" y="${padT + chartH + 18}" text-anchor="middle">${esc(dl)}</text>`
   })
-  svg += `<text class="us-chart-axis-label" x="${padL}" y="${h - 8}">${esc(valueName + ' · 按日期趋势')}</text>`
+  svg += `<text class="us-chart-axis-label" x="${padL}" y="${h - 8}">${esc(valueName + ' · ' + t('usage.byDateTrend'))}</text>`
   svg += '</svg>'
   return svg
 }
@@ -604,7 +619,7 @@ function buildBarSvg(labels, values, metric) {
   const niceMax = maxV > 0 ? Math.ceil(maxV * 1.15) : 1
   const step = chartW / Math.max(labels.length, 1)
   const barW = Math.min(40, step * 0.6)
-  const valueName = METRIC_NAMES[metric] || metric
+  const valueName = metricName(metric)
   let svg = `<svg viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" style="width:100%;height:100%;">`
   for (let i = 0; i <= 4; i++) {
     const yy = padT + chartH - (i / 4) * chartH
@@ -621,7 +636,7 @@ function buildBarSvg(labels, values, metric) {
     if (lbl.length > 14) lbl = lbl.substring(0, 13) + '…'
     svg += `<text class="us-chart-label" x="${x + barW/2}" y="${padT + chartH + 16}" text-anchor="end" transform="rotate(-30 ${x + barW/2} ${padT + chartH + 16})">${esc(lbl)}</text>`
   })
-  svg += `<text class="us-chart-axis-label" x="${padL}" y="${h - 12}">${esc(valueName + ' · 按模型 Top 10')}</text>`
+  svg += `<text class="us-chart-axis-label" x="${padL}" y="${h - 12}">${esc(valueName + ' · ' + t('usage.byModelTop10'))}</text>`
   svg += '</svg>'
   return svg
 }
@@ -655,7 +670,7 @@ function buildMultiLineSvg(labels, series, metric) {
   const chartW = w - padL - padR, chartH = h - padT - padB
   const maxV = Math.max(...series.flatMap(s => s.values))
   const niceMax = maxV > 0 ? Math.ceil(maxV * 1.15) : 1
-  const valueName = METRIC_NAMES[metric] || metric
+  const valueName = metricName(metric)
   const xAt = i => padL + (labels.length === 1 ? chartW / 2 : (i / (labels.length - 1)) * chartW)
   let svg = `<svg viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" style="width:100%;height:100%;">`
   svg += legend.svg
@@ -681,7 +696,7 @@ function buildMultiLineSvg(labels, series, metric) {
     const dl = (lb && lb.length >= 10) ? lb.substring(5) : (lb || '')
     svg += `<text class="us-chart-label" x="${xAt(i)}" y="${padT + chartH + 18}" text-anchor="middle">${esc(dl)}</text>`
   })
-  svg += `<text class="us-chart-axis-label" x="${padL}" y="${h - 8}">${esc(valueName + ' · 按日期趋势（多用户对比）')}</text>`
+  svg += `<text class="us-chart-axis-label" x="${padL}" y="${h - 8}">${esc(valueName + ' · ' + t('usage.byDateTrendMulti'))}</text>`
   svg += '</svg>'
   return svg
 }
@@ -699,7 +714,7 @@ function buildGroupedBarSvg(labels, series, metric) {
   const niceMax = maxV > 0 ? Math.ceil(maxV * 1.15) : 1
   const step = chartW / Math.max(labels.length, 1)
   const barW = Math.min(28, (step * 0.72) / Math.max(series.length, 1))
-  const valueName = METRIC_NAMES[metric] || metric
+  const valueName = metricName(metric)
   let svg = `<svg viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" style="width:100%;height:100%;">`
   svg += legend.svg
   for (let i = 0; i <= 4; i++) {
@@ -722,7 +737,7 @@ function buildGroupedBarSvg(labels, series, metric) {
     const cx = padL + i * step + step / 2
     svg += `<text class="us-chart-label" x="${cx}" y="${padT + chartH + 16}" text-anchor="end" transform="rotate(-30 ${cx} ${padT + chartH + 16})">${esc(lbl)}</text>`
   })
-  svg += `<text class="us-chart-axis-label" x="${padL}" y="${h - 12}">${esc(valueName + ' · 按模型 Top 8（多用户对比）')}</text>`
+  svg += `<text class="us-chart-axis-label" x="${padL}" y="${h - 12}">${esc(valueName + ' · ' + t('usage.byModelTop8Multi'))}</text>`
   svg += '</svg>'
   return svg
 }

@@ -73,6 +73,12 @@ const routes = [
         name: 'Announcements',
         component: () => import('@/views/admin/Announcements.vue'),
         meta: { title: '系统公告管理' }
+      },
+      {
+        path: 'audit-logs',
+        name: 'AuditLogs',
+        component: () => import('@/views/admin/AuditLogs.vue'),
+        meta: { title: '审计日志' }
       }
     ]
   }
@@ -83,14 +89,14 @@ const router = createRouter({
   routes
 })
 
-// 路由守卫：鉴权
+// 路由守卫：鉴权（token 存于 HttpOnly Cookie 不可读，以 username 作为本地登录态标记，真实校验由后端 401 兜底）
 router.beforeEach(async (to, from, next) => {
-  const token = localStorage.getItem('token')
+  const loggedIn = !!localStorage.getItem('username')
 
   // 公开页面（登录页 / 分享页）
   if (to.meta.public) {
     // 已登录用户访问登录页 → 跳转到首页（分享页 allowAuthed 除外）
-    if (token && !to.meta.allowAuthed) {
+    if (loggedIn && !to.meta.allowAuthed) {
       next('/')
       return
     }
@@ -99,7 +105,7 @@ router.beforeEach(async (to, from, next) => {
   }
 
   // 需要登录的页面
-  if (!token) {
+  if (!loggedIn) {
     next('/login')
     return
   }

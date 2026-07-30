@@ -28,12 +28,18 @@ export function getSharedChat(id) {
 
 // ===== 后台管理（仅管理员） =====
 
-// 获取全部用户的分享记录（含失效状态 status: valid/expired/orphaned）
-export function getAdminShares() {
-  return request.get('/admin/shares')
+// 分页查询全部用户的分享记录（服务端筛选+分页，params: { page, size, username, status }）
+// 额外返回 invalidCount（全量失效条数，供「清除失效」按钮用）
+export function getAdminShares(params) {
+  return request.get('/admin/shares', { params })
 }
 
 // 批量删除分享（批量清除失效/批量撤销）
 export function batchDeleteShares(ids) {
   return request.post('/admin/shares/batch-delete', { ids })
+}
+
+// 一键清除全部失效分享（失效判定在服务端完成）
+export function deleteInvalidShares() {
+  return request.post('/admin/shares/delete-invalid')
 }

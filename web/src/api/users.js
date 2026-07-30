@@ -1,8 +1,8 @@
 import request from './request'
 
-// 获取所有用户
-export function getUsers() {
-  return request.get('/admin/users')
+// 分页查询用户（服务端分页，params: { page, size, username }）
+export function getUsers(params) {
+  return request.get('/admin/users', { params })
 }
 
 // 添加用户

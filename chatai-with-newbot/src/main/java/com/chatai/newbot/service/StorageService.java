@@ -10,8 +10,7 @@ import java.util.Map;
 
 /**
  * 存储服务接口 - 定义所有数据操作方法签名
- * 由 JsonFileStorageService（JSON文件）和 SqliteStorageService（SQLite数据库）分别实现，
- * 由 StorageManager 根据开关状态委托给对应实现。
+ * 由 SqliteStorageService（SQLite数据库）实现，由 StorageManager 统一委托对外暴露。
  */
 public interface StorageService {
 
@@ -54,6 +53,22 @@ public interface StorageService {
      * @return 用户列表副本
      */
     List<User> getAllUsers();
+
+    /**
+     * 按用户名模糊匹配分页查询用户（按创建时间升序）
+     * @param keyword 用户名关键字，null/空=不筛选
+     * @param offset 偏移量（从0开始）
+     * @param limit 返回条数上限
+     * @return 当页用户列表
+     */
+    List<User> queryUsers(String keyword, int offset, int limit);
+
+    /**
+     * 按用户名模糊匹配统计用户总数（与 queryUsers 相同筛选口径）
+     * @param keyword 用户名关键字，null/空=不筛选
+     * @return 用户总数
+     */
+    int countUsers(String keyword);
 
     /**
      * 根据ID获取用户
@@ -275,6 +290,28 @@ public interface StorageService {
      *         cachedTokens/reasoningTokens/thinkingCount，按日期降序、用户名/模型名升序
      */
     List<Map<String, Object>> aggregateUsageStats(List<String> usernames, String modelName, String startDate, String endDate);
+
+    /**
+     * 按（用户名, 日期, 模型名）维度聚合使用统计（SQL 分页版）
+     * @param usernames 用户名列表筛选，null/空=不筛选
+     * @param modelName 模型名筛选，null/空=不筛选
+     * @param startDate 开始日期（含当天），null/空=不限
+     * @param endDate 结束日期（含当天），null/空=不限
+     * @param offset 偏移量（从0开始）
+     * @param limit 返回条数上限
+     * @return 当页聚合行列表（字段同全量版）
+     */
+    List<Map<String, Object>> aggregateUsageStats(List<String> usernames, String modelName, String startDate, String endDate, int offset, int limit);
+
+    /**
+     * 统计聚合分组总数（与 aggregateUsageStats 相同筛选口径，分页总数用）
+     * @param usernames 用户名列表筛选，null/空=不筛选
+     * @param modelName 模型名筛选，null/空=不筛选
+     * @param startDate 开始日期（含当天），null/空=不限
+     * @param endDate 结束日期（含当天），null/空=不限
+     * @return 分组总数
+     */
+    int countUsageStatGroups(List<String> usernames, String modelName, String startDate, String endDate);
 
     /**
      * 获取使用记录中出现过的用户名列表（去重排序，筛选下拉框用）

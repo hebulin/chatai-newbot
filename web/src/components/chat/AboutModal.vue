@@ -4,9 +4,9 @@
       <div class="about-modal" @click.stop>
         <div class="about-logo"><img :src="logoSrc" alt="AI Chat" /></div>
         <div class="about-title">AI Chat Platform</div>
-        <div class="about-version">软件版本号：v{{ APP_VERSION }}</div>
-        <div class="about-desc">一个简洁高效的多模型 AI 聊天平台</div>
-        <button class="about-close-btn" @click="$emit('close')">关闭</button>
+        <div class="about-version">{{ t('about.version') }}v{{ APP_VERSION }}</div>
+        <div class="about-desc">{{ t('about.desc') }}</div>
+        <button class="about-close-btn" @click="$emit('close')">{{ t('common.close') }}</button>
       </div>
     </div>
   </Teleport>
@@ -14,10 +14,13 @@
 
 <script setup>
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useTheme } from '@/composables/useTheme'
 import { APP_VERSION } from '@/config/version'
 
 defineEmits(['close'])
+
+const { t } = useI18n()
 
 const { getTheme } = useTheme()
 const logoSrc = computed(() => getTheme() === 'dark' ? '/icons/AIBot_ss.svg' : '/icons/AIBot.svg')

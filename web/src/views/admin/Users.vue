@@ -16,14 +16,14 @@
     </div>
 
     <div class="admin-card">
-      <!-- 筛选栏 -->
+      <!-- 筛选栏（服务端筛选） -->
       <div class="filter-bar">
-        <el-input v-model="filterUsername" placeholder="用户名模糊查询" clearable style="width:200px" @input="userPage = 1" />
-        <el-button @click="filterUsername = ''; userPage = 1">重置</el-button>
+        <el-input v-model="filterUsername" placeholder="用户名模糊查询" clearable style="width:200px" @change="reloadUsers" />
+        <el-button @click="filterUsername = ''; reloadUsers()">重置</el-button>
       </div>
 
       <!-- 用户表格：列宽按内容自适应（上限 50 汉字），border 模式支持拖拽表头调宽，超宽时横向滚动；selection 列支持跨页勾选批量删除（内置 admin 不可勾选） -->
-      <el-table ref="tableRef" :data="pagedUsers" v-loading="loading" stripe border style="width:100%"
+      <el-table ref="tableRef" :data="users" v-loading="loading" stripe border style="width:100%"
                 @selection-change="onSelectionChange" row-key="id">
         <el-table-column type="selection" width="44" align="center" reserve-selection :selectable="isRowSelectable" />
         <el-table-column prop="username" label="用户名" :width="colW.username" show-overflow-tooltip />
@@ -85,14 +85,14 @@
         </el-table-column>
       </el-table>
       <div class="admin-pager">
-        <select v-model.number="userPageSize" class="admin-pager-size" @change="userPage = 1">
+        <select v-model.number="userPageSize" class="admin-pager-size" @change="reloadUsers">
           <option :value="10">10条/页</option>
           <option :value="20">20条/页</option>
           <option :value="50">50条/页</option>
         </select>
-        <button class="admin-pager-btn" :disabled="userPage <= 1" @click="userPage--">上一页</button>
-        <span class="admin-pager-info">第 {{ userPage }} / {{ userTotalPages }} 页 · 共 {{ filteredUsers.length }} 条</span>
-        <button class="admin-pager-btn" :disabled="userPage >= userTotalPages" @click="userPage++">下一页</button>
+        <button class="admin-pager-btn" :disabled="userPage <= 1" @click="userPage--; loadUsers()">上一页</button>
+        <span class="admin-pager-info">第 {{ userPage }} / {{ userTotalPages }} 页 · 共 {{ userTotal }} 条</span>
+        <button class="admin-pager-btn" :disabled="userPage >= userTotalPages" @click="userPage++; loadUsers()">下一页</button>
       </div>
     </div>
 
@@ -210,7 +210,7 @@ const providerIconMap = {
 
 const loading = ref(false)
 const submitting = ref(false)
-const allUsers = ref([])
+const users = ref([])
 const allModels = ref([])
 const filterUsername = ref('')
 const tableRef = ref(null)
@@ -218,20 +218,10 @@ const selectedRows = ref([])
 
 const userPage = ref(1)
 const userPageSize = ref(10)
+const userTotal = ref(0)
+const userTotalPages = ref(1)
 
-const filteredUsers = computed(() => {
-  if (!filterUsername.value) return allUsers.value
-  const kw = filterUsername.value.toLowerCase()
-  return allUsers.value.filter(u => (u.username || '').toLowerCase().includes(kw))
-})
-
-const pagedUsers = computed(() => {
-  const start = (userPage.value - 1) * userPageSize.value
-  return filteredUsers.value.slice(start, start + userPageSize.value)
-})
-const userTotalPages = computed(() => Math.max(1, Math.ceil(filteredUsers.value.length / userPageSize.value)))
-
-// 列宽自适应：按当前列最长内容计算，上限 50 个汉字
+// 列宽自适应：按当页列最长内容计算，上限 50 个汉字
 // 每日限额列的展示文本
 function limitText(u) {
   if (u.dailyLimitType === 'count') return `${u.dailyLimitValue} 次/日`
@@ -239,7 +229,7 @@ function limitText(u) {
   return '全局配额'
 }
 const colW = computed(() => {
-  const list = allUsers.value
+  const list = users.value
   return {
     username: autoColWidth(list.map(u => u.username), { header: '用户名', min: 100 }),
     role: autoColWidth(['管理员', '普通用户'], { header: '角色', extra: 24 }),
@@ -439,11 +429,24 @@ async function savePermissions() {
 async function loadUsers() {
   loading.value = true
   try {
-    const res = await getUsers()
-    if (res?.success) allUsers.value = res.data || []
+    const params = { page: userPage.value, size: userPageSize.value }
+    if (filterUsername.value) params.username = filterUsername.value
+    const res = await getUsers(params)
+    if (res?.success) {
+      users.value = res.data || []
+      userTotal.value = res.total || 0
+      userTotalPages.value = res.totalPages || 1
+      userPage.value = res.page || 1
+    }
   } finally {
     loading.value = false
   }
+}
+
+// 筛选/页大小变化：回到第一页重新加载
+function reloadUsers() {
+  userPage.value = 1
+  loadUsers()
 }
 
 async function loadModels() {

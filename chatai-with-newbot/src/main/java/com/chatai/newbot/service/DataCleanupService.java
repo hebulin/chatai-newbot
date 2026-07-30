@@ -39,10 +39,13 @@ public class DataCleanupService {
 
     private final SqliteStorageService sqliteStorage;
     private final StorageManager storageManager;
+    private final AuditLogService auditLogService;
 
-    public DataCleanupService(SqliteStorageService sqliteStorage, StorageManager storageManager) {
+    public DataCleanupService(SqliteStorageService sqliteStorage, StorageManager storageManager,
+                              AuditLogService auditLogService) {
         this.sqliteStorage = sqliteStorage;
         this.storageManager = storageManager;
+        this.auditLogService = auditLogService;
     }
 
     /**
@@ -80,6 +83,22 @@ public class DataCleanupService {
         if (deletedFiles > 0 || deletedRows > 0) {
             log.info("使用记录清理完成: 保留{}天, 删除JSON文件{}个, 删除SQLite记录{}条",
                     retentionDays, deletedFiles, deletedRows);
+        }
+    }
+
+    /**
+     * 每天 04:10 清理保留期之外的审计日志
+     */
+    @Scheduled(cron = "0 10 4 * * ?")
+    public void cleanupAuditLogs() {
+        try {
+            int deleted = auditLogService.purgeBefore(AuditLogService.DEFAULT_RETENTION_DAYS);
+            if (deleted > 0) {
+                log.info("审计日志清理完成: 保留{}天, 删除{}条",
+                        AuditLogService.DEFAULT_RETENTION_DAYS, deleted);
+            }
+        } catch (Exception e) {
+            log.warn("清理过期审计日志失败", e);
         }
     }
 

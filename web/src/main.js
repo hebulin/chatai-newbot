@@ -19,6 +19,8 @@ import {
 } from '@element-plus/icons-vue'
 import App from './App.vue'
 import router from './router'
+// 用户端中英双语（管理后台保持中文），locale 持久化在 localStorage
+import i18n from './i18n'
 import './styles/variables.css'
 import './theme/admin-theme.css'
 
@@ -32,6 +34,7 @@ for (const [key, component] of Object.entries(icons)) {
 
 app.use(createPinia())
 app.use(router)
+app.use(i18n)
 // v-loading 指令非模板组件，按需插件无法自动注册，需显式安装
 app.use(ElLoading)
 
