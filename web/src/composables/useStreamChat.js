@@ -1,0 +1,192 @@
+import { ref } from 'vue'
+import { useRouter } from 'vue-router'
+
+export function useStreamChat() {
+  const router = useRouter()
+  const isStreaming = ref(false)
+  const thinkingContent = ref('')
+  const answerContent = ref('')
+  const thinkingTime = ref(null)
+  const usage = ref(null)
+  const error = ref(null)
+
+  let controller = null
+  let buffer = ''
+  let thinkingStartTime = null
+
+  // 结算思考用时：最小记 1 秒，避免思考很快时 round 出 0（falsy）导致
+  // 历史消息渲染时误判为“正在思考”且持久化后刷新也无法恢复
+  function finalizeThinkingTime() {
+    if (thinkingStartTime && !thinkingTime.value) {
+      thinkingTime.value = Math.max(1, Math.round((Date.now() - thinkingStartTime) / 1000))
+    }
+  }
+
+  function reset() {
+    buffer = ''
+    thinkingContent.value = ''
+    answerContent.value = ''
+    thinkingTime.value = null
+    usage.value = null
+    error.value = null
+    thinkingStartTime = null
+  }
+
+  async function send(requestBody, { onUpdate, onDone, onError } = {}) {
+    reset()
+    isStreaming.value = true
+    controller = new AbortController()
+
+    let hasResponse = false
+
+    try {
+      // 认证凭证存于 HttpOnly Cookie，同域 fetch 自动携带
+      const resp = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal
+      })
+
+      // 401 处理
+      if (resp.status === 401) {
+        isStreaming.value = false
+        localStorage.removeItem('username')
+        localStorage.removeItem('role')
+        router.push('/login')
+        return
+      }
+
+      if (!resp.ok) {
+        const text = await resp.text()
+        let errMsg = '服务器错误 (' + resp.status + ')'
+        try {
+          const json = JSON.parse(text)
+          if (json.message) errMsg = json.message
+          else if (json.error && json.error.message) errMsg = json.error.message
+        } catch (e) { /* ignore */ }
+        throw new Error(errMsg)
+      }
+
+      const reader = resp.body.getReader()
+      const decoder = new TextDecoder()
+
+      const read = async () => {
+        const result = await reader.read()
+        if (result.done) {
+          // 处理 buffer 中残留数据（可能是未以换行结尾的最后一行 data: 事件）
+          let remaining = buffer.trim()
+          if (remaining.startsWith('data:')) remaining = remaining.slice(5).trim()
+          if (remaining && remaining !== '[DONE]' && remaining.startsWith('{')) {
+            try {
+              const json = JSON.parse(remaining)
+              if (json.error) {
+                error.value = json.error.message || '未知错误'
+              }
+            } catch (e) { /* skip */ }
+          }
+          isStreaming.value = false
+          // 流结束时若只有思考没有正文（或正文 delta 未触发结算），补结算思考用时
+          finalizeThinkingTime()
+          if (onDone) onDone({
+            content: answerContent.value,
+            reasoning_content: thinkingContent.value,
+            thinkingTime: thinkingTime.value,
+            usage: usage.value,
+            error: error.value
+          })
+          return
+        }
+
+        const chunk = decoder.decode(result.value, { stream: true })
+        buffer += chunk
+        // 按行解析 SSE：仅保留最后一行（可能不完整）在 buffer 中，其余整行处理。
+        // 此前用字面量 'data:' 切分，当模型正文本身包含 'data:' 时会解析错乱、内容丢失。
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        let updated = false
+
+        for (const rawLine of lines) {
+          const line = rawLine.trim()
+          if (!line || !line.startsWith('data:')) continue
+          const payload = line.slice(5).trim()
+          if (!payload || payload === '[DONE]') continue
+          if (payload.startsWith('{')) {
+            try {
+              const json = JSON.parse(payload)
+              if (json.error) {
+                // 流内错误不再拼接到正文，统一由 onDone 带出后渲染为错误气泡
+                error.value = json.error.message || '未知错误'
+                continue
+              }
+              // 提取usage数据
+              if (json.usage) {
+                usage.value = json.usage
+              }
+              if (json.choices && json.choices[0] && json.choices[0].delta) {
+                const delta = json.choices[0].delta
+                if (!hasResponse) hasResponse = true
+
+                // 兼容不同厂商的思考内容字段
+                const deltaThinking = delta.reasoning_content || delta.reasoning
+                if (deltaThinking) {
+                  if (!thinkingStartTime) thinkingStartTime = Date.now()
+                  thinkingContent.value += deltaThinking
+                  updated = true
+                }
+                if (delta.content) {
+                  if (thinkingStartTime) finalizeThinkingTime()
+                  answerContent.value += delta.content
+                  updated = true
+                }
+              }
+            } catch (e) { /* skip parse error */ }
+          }
+        }
+
+        if (updated && onUpdate) {
+          onUpdate({
+            content: answerContent.value,
+            reasoning_content: thinkingContent.value,
+            thinkingTime: thinkingTime.value,
+            usage: usage.value
+          })
+        }
+
+        return read()
+      }
+
+      await read()
+    } catch (err) {
+      isStreaming.value = false
+      if (err.name === 'AbortError') {
+        // 用户中断：若已进入思考阶段同样补结算思考用时
+        finalizeThinkingTime()
+        if (onDone) onDone({
+          content: answerContent.value,
+          reasoning_content: thinkingContent.value,
+          thinkingTime: thinkingTime.value,
+          usage: usage.value,
+          interrupted: true
+        })
+        return
+      }
+      error.value = err.message
+      if (onError) onError(err)
+    }
+  }
+
+  function stop() {
+    if (controller) {
+      controller.abort()
+      controller = null
+    }
+  }
+
+  return {
+    isStreaming, thinkingContent, answerContent, thinkingTime, usage, error,
+    send, stop, reset
+  }
+}

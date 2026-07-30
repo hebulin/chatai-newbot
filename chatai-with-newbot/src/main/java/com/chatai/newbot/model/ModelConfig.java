@@ -23,4 +23,7 @@ public class ModelConfig {
     private Boolean visibleToAll;    // 是否对所有用户可见，默认true
     private boolean builtIn;        // 是否为系统内置
     private String createdAt;       // 创建时间
+    private Integer testLatencyMs;  // 最近一次连通测试延迟（ms），null=未测试
+    private Double testSpeed;       // 最近一次连通测试生成速度（token/s），null=未测试
+    private String testedAt;        // 最近一次连通测试时间，null=未测试
 }

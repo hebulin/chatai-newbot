@@ -1,0 +1,21 @@
+{
+  "name": "chatai-newbot",
+  "version": "1.0.0",
+  "description": "多厂商 AI 大模型聊天平台，支持动态模型配置、权限管理、流式输出、深度思考模式。",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hebulin/chatai-newbot.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/hebulin/chatai-newbot/issues"
+  },
+  "homepage": "https://github.com/hebulin/chatai-newbot#readme"
+}

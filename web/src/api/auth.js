@@ -1,0 +1,36 @@
+import request from './request'
+
+// 获取当前用户信息
+export function getMe() {
+  return request.get('/auth/me')
+}
+
+// 登录
+export function login(data) {
+  return request.post('/auth/login', data)
+}
+
+// 注册
+export function register(data) {
+  return request.post('/auth/register', data)
+}
+
+// 退出登录
+export function logout() {
+  return request.post('/auth/logout')
+}
+
+// 修改密码
+export function changePassword(data) {
+  return request.post('/auth/change-password', data)
+}
+
+// 获取当前账号的登录设备列表
+export function getSessions() {
+  return request.get('/auth/sessions')
+}
+
+// 踢掉指定登录设备
+export function kickSession(sessionId) {
+  return request.delete(`/auth/sessions/${sessionId}`)
+}

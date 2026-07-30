@@ -38,6 +38,14 @@ public class SqliteStorageService implements StorageService {
     // IP 注册计数（内存缓存，持久化到 t_setting）
     private Map<String, Map<String, Integer>> ipRegisterMap = new ConcurrentHashMap<>();
 
+    // ========== 内存缓存（读多写少的小数据，减少高频 SQL 查询） ==========
+    // t_setting 全量写穿缓存：启动时全量加载，读走缓存、写同步更新库+缓存（值为 NULL 的键不入缓存，读取同样返回 null）
+    private final Map<String, String> settingsCache = new ConcurrentHashMap<>();
+    // 模型配置列表失效式缓存：任何模型写操作后置空，下次读取重建（volatile 保证多线程可见性）
+    private volatile List<ModelConfig> modelConfigsCache;
+    // 当前启用公告缓存：null=未加载，Optional.empty=确认无启用公告；公告写操作后置空
+    private volatile Optional<Announcement> enabledAnnouncementCache;
+
     private static final String ADMIN_USERNAME = "admin";
     private static final String ADMIN_DEFAULT_PASSWORD = "admin123";
 
@@ -51,12 +59,18 @@ public class SqliteStorageService implements StorageService {
     @PostConstruct
     public void init() {
         try {
-            // 设置 WAL 模式和忙碌超时
+            // WAL 模式/busy_timeout/synchronous 由数据源连接参数统一下发（application.yml 的 hikari.data-source-properties），
+            // 此处再执行一次 journal_mode=WAL 作为兜底（数据库级持久属性，幂等）
             jdbcTemplate.execute("PRAGMA journal_mode=WAL");
-            jdbcTemplate.execute("PRAGMA busy_timeout=5000");
 
             // 建表（IF NOT EXISTS，幂等）
             createTables();
+
+            // 全量加载 t_setting 到内存缓存（后续 getSetting 纯内存读取）
+            loadSettingsCache();
+
+            // 存量明文 API Key 一次性加密升级
+            encryptLegacyApiKeys();
 
             // 加载 classpath 内置厂商
             loadProviders();
@@ -72,6 +86,9 @@ public class SqliteStorageService implements StorageService {
             // 确保 admin 用户存在
             ensureAdminUser();
             log.info("SQLite: 已确保admin用户存在");
+
+            // 预置模型播种（全新库首次启动时写入各厂商旗舰模型待启用条目）
+            seedDefaultModelConfigs();
 
             log.info("SQLite存储服务初始化完成");
         } catch (Exception e) {
@@ -94,11 +111,21 @@ public class SqliteStorageService implements StorageService {
                 "last_login_ip TEXT," +
                 "last_login_browser TEXT," +
                 "allowed_model_ids TEXT DEFAULT '[]'," +
-                "system_prompt TEXT" +
+                "system_prompt TEXT," +
+                "disabled INTEGER DEFAULT 0," +
+                "daily_limit_type TEXT," +
+                "daily_limit_value INTEGER DEFAULT 0," +
+                "prompt_presets TEXT" +
                 ")");
 
         // 老数据库补充 system_prompt 列（幂等迁移）
         ensureUserSystemPromptColumn();
+        // 老数据库补充 disabled 列（幂等迁移）
+        ensureUserDisabledColumn();
+        // 老数据库补充单用户每日限额列（幂等迁移）
+        ensureUserDailyLimitColumns();
+        // 老数据库补充提示词预设列（幂等迁移）
+        ensureUserPromptPresetsColumn();
 
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_model_config (" +
                 "id TEXT PRIMARY KEY," +
@@ -116,8 +143,14 @@ public class SqliteStorageService implements StorageService {
                 "enabled INTEGER DEFAULT 1," +
                 "visible_to_all INTEGER DEFAULT 1," +
                 "built_in INTEGER DEFAULT 0," +
-                "created_at TEXT" +
+                "created_at TEXT," +
+                "test_latency_ms INTEGER," +
+                "test_speed REAL," +
+                "tested_at TEXT" +
                 ")");
+
+        // 老数据库补充连通测试指标列（幂等迁移）
+        ensureModelTestColumns();
 
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_usage_log (" +
                 "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -142,12 +175,93 @@ public class SqliteStorageService implements StorageService {
                 "updated_at_ts INTEGER DEFAULT 0" +
                 ")");
 
+        // 按会话行存储表（每行一个会话，保存时仅重写变更会话，避免整文档重写的写放大；
+        // 冗余摘要列供侧边栏列表直查，无需解析消息 JSON；旧 t_chat_history 整文档保留作迁移来源与备份）
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_chat_session (" +
+                "user_id TEXT NOT NULL," +
+                "chat_id TEXT NOT NULL," +
+                "messages TEXT NOT NULL," +
+                "meta TEXT," +
+                "title TEXT," +
+                "preview TEXT," +
+                "last_time TEXT," +
+                "msg_count INTEGER DEFAULT 0," +
+                "updated_at TEXT," +
+                "updated_at_ts INTEGER DEFAULT 0," +
+                "PRIMARY KEY (user_id, chat_id)" +
+                ")");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_chat_session_user ON t_chat_session(user_id)");
+
+        // 用户会话全局状态（最后所在会话 + 已删除会话ID累积；行存在即表示该用户已完成按会话行迁移）
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_chat_user_state (" +
+                "user_id TEXT PRIMARY KEY," +
+                "last_chat_id TEXT," +
+                "deleted_chat_ids TEXT," +
+                "updated_at TEXT," +
+                "updated_at_ts INTEGER DEFAULT 0" +
+                ")");
+
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_setting (" +
                 "key TEXT PRIMARY KEY," +
                 "value TEXT" +
                 ")");
 
+        // 登录 Token 持久化表（服务重启后登录态不丢失）
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_token (" +
+                "token TEXT PRIMARY KEY," +
+                "user_id TEXT NOT NULL," +
+                "ip TEXT," +
+                "browser TEXT," +
+                "created_at TEXT," +
+                "expires_at INTEGER NOT NULL DEFAULT 0" +
+                ")");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_token_user ON t_token(user_id)");
+        // 老数据库补充 browser 列（幂等迁移）
+        ensureTokenBrowserColumn();
+
+        // 会话分享表（只读链接，两种存储模式共用 SQLite）
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_chat_share (" +
+                "id TEXT PRIMARY KEY," +
+                "chat_id TEXT NOT NULL," +
+                "user_id TEXT NOT NULL," +
+                "user_name TEXT," +
+                "title TEXT," +
+                "created_at TEXT," +
+                "expires_at TEXT" +
+                ")");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_share_user ON t_chat_share(user_id)");
+        // 老数据库补充 expires_at 列（幂等迁移）
+        ensureChatShareExpiresColumn();
+
+        // 系统公告表（支持公告期与历史公告，两种存储模式共用 SQLite）
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_announcement (" +
+                "id TEXT PRIMARY KEY," +
+                "title TEXT," +
+                "content TEXT NOT NULL," +
+                "start_at TEXT," +
+                "end_at TEXT," +
+                "enabled INTEGER DEFAULT 1," +
+                "created_at TEXT," +
+                "updated_at TEXT" +
+                ")");
+        // 老数据库补充 title 列（幂等迁移）
+        ensureAnnouncementTitleColumn();
+
         log.info("SQLite: 数据表已就绪");
+    }
+
+    /**
+     * 为 t_announcement 表补充 title 列（幂等迁移）。
+     * 旧版公告表无标题列时自动执行 ALTER TABLE；已存在则跳过。
+     */
+    private void ensureAnnouncementTitleColumn() {
+        List<Map<String, Object>> columns = jdbcTemplate.queryForList("PRAGMA table_info(t_announcement)");
+        boolean hasColumn = columns.stream()
+                .anyMatch(c -> "title".equals(String.valueOf(c.get("name"))));
+        if (!hasColumn) {
+            jdbcTemplate.execute("ALTER TABLE t_announcement ADD COLUMN title TEXT");
+            log.info("SQLite: t_announcement 表已补充 title 列");
+        }
     }
 
     /**
@@ -164,28 +278,181 @@ public class SqliteStorageService implements StorageService {
         }
     }
 
-    // ========== t_setting 键值操作 ==========
+    /**
+     * 为 t_token 表补充 browser 列（幂等迁移）。
+     * 记录登录时的浏览器/终端信息，用于个人设置中的登录设备管理。
+     */
+    private void ensureTokenBrowserColumn() {
+        List<Map<String, Object>> columns = jdbcTemplate.queryForList("PRAGMA table_info(t_token)");
+        boolean hasColumn = columns.stream()
+                .anyMatch(c -> "browser".equals(String.valueOf(c.get("name"))));
+        if (!hasColumn) {
+            jdbcTemplate.execute("ALTER TABLE t_token ADD COLUMN browser TEXT");
+            log.info("SQLite: t_token 表已补充 browser 列");
+        }
+    }
 
     /**
-     * 读取配置值
+     * 为 t_model_config 表补充连通测试指标列（幂等迁移）。
+     * 记录管理员手动测试的延迟(ms)/生成速度(token/s)/测试时间。
+     */
+    private void ensureModelTestColumns() {
+        List<Map<String, Object>> columns = jdbcTemplate.queryForList("PRAGMA table_info(t_model_config)");
+        boolean hasColumn = columns.stream()
+                .anyMatch(c -> "test_latency_ms".equals(String.valueOf(c.get("name"))));
+        if (!hasColumn) {
+            jdbcTemplate.execute("ALTER TABLE t_model_config ADD COLUMN test_latency_ms INTEGER");
+            jdbcTemplate.execute("ALTER TABLE t_model_config ADD COLUMN test_speed REAL");
+            jdbcTemplate.execute("ALTER TABLE t_model_config ADD COLUMN tested_at TEXT");
+            log.info("SQLite: t_model_config 表已补充连通测试指标列");
+        }
+    }
+
+    /**
+     * 为 t_user 表补充 prompt_presets 列（幂等迁移）。
+     * 存储用户自定义提示词预设列表的 JSON。
+     */
+    private void ensureUserPromptPresetsColumn() {
+        List<Map<String, Object>> columns = jdbcTemplate.queryForList("PRAGMA table_info(t_user)");
+        boolean hasColumn = columns.stream()
+                .anyMatch(c -> "prompt_presets".equals(String.valueOf(c.get("name"))));
+        if (!hasColumn) {
+            jdbcTemplate.execute("ALTER TABLE t_user ADD COLUMN prompt_presets TEXT");
+            log.info("SQLite: t_user 表已补充 prompt_presets 列");
+        }
+    }
+
+    /** 解析提示词预设 JSON 字符串为列表（空或解析失败返回空列表） */
+    private List<PromptPreset> parsePromptPresets(String json) {
+        if (json == null || json.trim().isEmpty()) {
+            return new ArrayList<>();
+        }
+        try {
+            List<PromptPreset> list = objectMapper.readValue(json, new TypeReference<List<PromptPreset>>() {});
+            return list != null ? list : new ArrayList<>();
+        } catch (Exception e) {
+            log.warn("解析 prompt_presets 失败: {}", e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    /** 序列化提示词预设列表为 JSON 字符串（空列表存 '[]'） */
+    private String toPromptPresetsJson(List<PromptPreset> presets) {
+        try {
+            return objectMapper.writeValueAsString(presets != null ? presets : new ArrayList<>());
+        } catch (Exception e) {
+            log.warn("序列化 prompt_presets 失败: {}", e.getMessage());
+            return "[]";
+        }
+    }
+
+    /**
+     * 存量明文 API Key 一次性加密升级（幂等迁移）。
+     * 扫描 t_model_config 中无 ENC: 前缀的明文 Key，加密后写回；已是密文则跳过。
+     */
+    private void encryptLegacyApiKeys() {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT id, api_key FROM t_model_config WHERE api_key IS NOT NULL AND api_key != ''");
+        int migrated = 0;
+        for (Map<String, Object> row : rows) {
+            String apiKey = String.valueOf(row.get("api_key"));
+            if (!ApiKeyCrypto.isEncrypted(apiKey)) {
+                String encrypted = ApiKeyCrypto.encrypt(apiKey);
+                if (ApiKeyCrypto.isEncrypted(encrypted)) {
+                    jdbcTemplate.update("UPDATE t_model_config SET api_key = ? WHERE id = ?",
+                            encrypted, row.get("id"));
+                    migrated++;
+                }
+            }
+        }
+        if (migrated > 0) {
+            log.info("SQLite: 已将 {} 个存量明文 API Key 加密存储", migrated);
+        }
+    }
+
+    /**
+     * 为 t_user 表补充 disabled 列（幂等迁移）。
+     * 老版本数据库没有该列时自动执行 ALTER TABLE；已存在则跳过，保证重复启动安全。
+     */
+    private void ensureUserDisabledColumn() {
+        List<Map<String, Object>> columns = jdbcTemplate.queryForList("PRAGMA table_info(t_user)");
+        boolean hasColumn = columns.stream()
+                .anyMatch(c -> "disabled".equals(String.valueOf(c.get("name"))));
+        if (!hasColumn) {
+            jdbcTemplate.execute("ALTER TABLE t_user ADD COLUMN disabled INTEGER DEFAULT 0");
+            log.info("SQLite: t_user 表已补充 disabled 列");
+        }
+    }
+
+    /**
+     * 为 t_user 表补充单用户每日限额列（幂等迁移）。
+     * 老版本数据库没有 daily_limit_type / daily_limit_value 列时自动执行 ALTER TABLE；已存在则跳过。
+     */
+    private void ensureUserDailyLimitColumns() {
+        List<Map<String, Object>> columns = jdbcTemplate.queryForList("PRAGMA table_info(t_user)");
+        boolean hasType = columns.stream()
+                .anyMatch(c -> "daily_limit_type".equals(String.valueOf(c.get("name"))));
+        if (!hasType) {
+            jdbcTemplate.execute("ALTER TABLE t_user ADD COLUMN daily_limit_type TEXT");
+            log.info("SQLite: t_user 表已补充 daily_limit_type 列");
+        }
+        boolean hasValue = columns.stream()
+                .anyMatch(c -> "daily_limit_value".equals(String.valueOf(c.get("name"))));
+        if (!hasValue) {
+            jdbcTemplate.execute("ALTER TABLE t_user ADD COLUMN daily_limit_value INTEGER DEFAULT 0");
+            log.info("SQLite: t_user 表已补充 daily_limit_value 列");
+        }
+    }
+
+    /**
+     * 为 t_chat_share 表补充 expires_at 列（幂等迁移）。
+     */
+    private void ensureChatShareExpiresColumn() {
+        List<Map<String, Object>> columns = jdbcTemplate.queryForList("PRAGMA table_info(t_chat_share)");
+        boolean hasColumn = columns.stream()
+                .anyMatch(c -> "expires_at".equals(String.valueOf(c.get("name"))));
+        if (!hasColumn) {
+            jdbcTemplate.execute("ALTER TABLE t_chat_share ADD COLUMN expires_at TEXT");
+            log.info("SQLite: t_chat_share 表已补充 expires_at 列");
+        }
+    }
+
+    // ========== t_setting 键值操作（写穿内存缓存） ==========
+
+    /** 启动时全量加载 t_setting 到内存缓存（值为 NULL 的行跳过，读取时同样返回 null） */
+    private void loadSettingsCache() {
+        settingsCache.clear();
+        for (Map<String, Object> row : jdbcTemplate.queryForList("SELECT key, value FROM t_setting")) {
+            Object value = row.get("value");
+            if (value != null) {
+                settingsCache.put(String.valueOf(row.get("key")), String.valueOf(value));
+            }
+        }
+    }
+
+    /**
+     * 读取配置值（纯内存缓存读取，所有 t_setting 读写均经过本类，缓存与库始终一致）
      * @param key 配置键
      * @return 配置值，不存在返回 null
      */
     public String getSetting(String key) {
-        List<String> values = jdbcTemplate.queryForList(
-                "SELECT value FROM t_setting WHERE key = ?", String.class, key);
-        return values.isEmpty() ? null : values.get(0);
+        return settingsCache.get(key);
     }
 
     /**
-     * 写入配置值（存在则更新，不存在则插入）
+     * 写入配置值（存在则更新，不存在则插入；同步更新内存缓存）
      * @param key 配置键
      * @param value 配置值
      */
-    public void setSetting(String key, String value) {
+    public synchronized void setSetting(String key, String value) {
         int updated = jdbcTemplate.update("UPDATE t_setting SET value = ? WHERE key = ?", value, key);
         if (updated == 0) {
             jdbcTemplate.update("INSERT INTO t_setting (key, value) VALUES (?, ?)", key, value);
+        }
+        if (value == null) {
+            settingsCache.remove(key);
+        } else {
+            settingsCache.put(key, value);
         }
     }
 
@@ -204,6 +471,10 @@ public class SqliteStorageService implements StorageService {
         u.setLastLoginBrowser(rs.getString("last_login_browser"));
         u.setAllowedModelIds(parseJsonArray(rs.getString("allowed_model_ids")));
         u.setSystemPrompt(rs.getString("system_prompt"));
+        u.setPromptPresets(parsePromptPresets(rs.getString("prompt_presets")));
+        u.setDisabled(rs.getInt("disabled") == 1);
+        u.setDailyLimitType(rs.getString("daily_limit_type"));
+        u.setDailyLimitValue(rs.getInt("daily_limit_value"));
         return u;
     };
 
@@ -215,7 +486,7 @@ public class SqliteStorageService implements StorageService {
             User admin = new User();
             admin.setId(UUID.randomUUID().toString());
             admin.setUsername(ADMIN_USERNAME);
-            admin.setPassword(JsonFileStorageService.hashPassword(ADMIN_DEFAULT_PASSWORD));
+            admin.setPassword(PasswordHasher.hash(ADMIN_DEFAULT_PASSWORD));
             admin.setRole("admin");
             admin.setCreatedAt(nowString());
             insertUser(admin);
@@ -223,21 +494,73 @@ public class SqliteStorageService implements StorageService {
         }
     }
 
+    /**
+     * 预置模型播种（项目重置/全新部署时的默认数据加载）：
+     * 模型表为空且从未播种过时，为每个内置厂商写入首个（旗舰）模型的待启用条目，
+     * API Key 留空、默认禁用，管理员补填 Key 后启用即可使用。
+     * 播种完成后写入 default_models_seeded 标记，删除播种模型不会重复播种。
+     */
+    private void seedDefaultModelConfigs() {
+        try {
+            if ("true".equals(getSetting("default_models_seeded"))) return;
+            Integer count = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM t_model_config", Integer.class);
+            if (count != null && count > 0) {
+                // 已有模型数据（老库），仅补标记不播种
+                setSetting("default_models_seeded", "true");
+                return;
+            }
+            int seeded = 0;
+            for (Provider p : providers) {
+                if (p.getModels() == null || p.getModels().isEmpty()) continue;
+                ProviderModel pm = p.getModels().get(0);
+                ModelConfig config = new ModelConfig();
+                config.setProviderId(p.getId());
+                config.setModelId(pm.getId());
+                config.setDisplayName(pm.getName());
+                config.setApiKey("");
+                config.setApiUrl(p.getDefaultApiUrl());
+                config.setProtocol(p.getProtocol());
+                config.setSupportsThinking(pm.isSupportsThinking());
+                config.setSupportsMultimodal(pm.isSupportsMultimodal());
+                config.setEnabled(false);
+                config.setVisibleToAll(true);
+                config.setBuiltIn(true);
+                addModelConfig(config);
+                seeded++;
+            }
+            setSetting("default_models_seeded", "true");
+            log.info("SQLite: 已播种 {} 个预置模型（禁用状态，需管理员配置 API Key 后启用）", seeded);
+        } catch (Exception e) {
+            log.warn("SQLite: 预置模型播种失败（非致命，不影响启动）", e);
+        }
+    }
+
     /** 插入用户记录 */
     private void insertUser(User u) {
         jdbcTemplate.update(
-                "INSERT INTO t_user (id, username, password, role, created_at, last_login_at, last_login_ip, last_login_browser, allowed_model_ids, system_prompt) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO t_user (id, username, password, role, created_at, last_login_at, last_login_ip, last_login_browser, allowed_model_ids, system_prompt, disabled, daily_limit_type, daily_limit_value, prompt_presets) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 u.getId(), u.getUsername(), u.getPassword(), u.getRole(), u.getCreatedAt(),
                 u.getLastLoginAt(), u.getLastLoginIp(), u.getLastLoginBrowser(),
-                toJsonArray(u.getAllowedModelIds()), u.getSystemPrompt());
+                toJsonArray(u.getAllowedModelIds()), u.getSystemPrompt(), u.isDisabled() ? 1 : 0,
+                u.getDailyLimitType(), u.getDailyLimitValue(), toPromptPresetsJson(u.getPromptPresets()));
     }
 
     @Override
     public User authenticate(String username, String password) {
         List<User> users = jdbcTemplate.query(
-                "SELECT * FROM t_user WHERE username = ? AND password = ?",
-                userRowMapper, username, JsonFileStorageService.hashPassword(password));
-        return users.isEmpty() ? null : users.get(0);
+                "SELECT * FROM t_user WHERE username = ?", userRowMapper, username);
+        User user = users.isEmpty() ? null : users.get(0);
+        if (user == null || !PasswordHasher.matches(password, user.getPassword())) {
+            return null;
+        }
+        // 旧版 SHA-256 哈希校验通过后透明升级为 BCrypt
+        if (PasswordHasher.isLegacyHash(user.getPassword())) {
+            user.setPassword(PasswordHasher.hash(password));
+            jdbcTemplate.update("UPDATE t_user SET password = ? WHERE id = ?",
+                    user.getPassword(), user.getId());
+        }
+        return user;
     }
 
     @Override
@@ -259,7 +582,7 @@ public class SqliteStorageService implements StorageService {
         User user = new User();
         user.setId(UUID.randomUUID().toString());
         user.setUsername(username);
-        user.setPassword(JsonFileStorageService.hashPassword(password));
+        user.setPassword(PasswordHasher.hash(password));
         user.setRole("user");
         user.setCreatedAt(nowString());
         user.setLastLoginIp(ip);
@@ -286,6 +609,36 @@ public class SqliteStorageService implements StorageService {
         return jdbcTemplate.query("SELECT * FROM t_user", userRowMapper);
     }
 
+    /**
+     * 拼接用户查询的 WHERE 子句（用户名模糊匹配），参数追加到 args
+     * @return WHERE 子句（含前导空格），无条件返回空字符串
+     */
+    private String buildUserWhere(String keyword, List<Object> args) {
+        if (keyword == null || keyword.isEmpty()) return "";
+        args.add("%" + keyword + "%");
+        return " WHERE username LIKE ?";
+    }
+
+    @Override
+    public List<User> queryUsers(String keyword, int offset, int limit) {
+        List<Object> args = new ArrayList<>();
+        String where = buildUserWhere(keyword, args);
+        args.add(limit);
+        args.add(offset);
+        return jdbcTemplate.query(
+                "SELECT * FROM t_user" + where + " ORDER BY created_at ASC LIMIT ? OFFSET ?",
+                userRowMapper, args.toArray());
+    }
+
+    @Override
+    public int countUsers(String keyword) {
+        List<Object> args = new ArrayList<>();
+        String where = buildUserWhere(keyword, args);
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_user" + where, Integer.class, args.toArray());
+        return count == null ? 0 : count;
+    }
+
     @Override
     public User getUserById(String id) {
         List<User> users = jdbcTemplate.query(
@@ -305,19 +658,20 @@ public class SqliteStorageService implements StorageService {
     @Override
     public void updateUser(User user) {
         jdbcTemplate.update(
-                "UPDATE t_user SET username=?, password=?, role=?, created_at=?, last_login_at=?, last_login_ip=?, last_login_browser=?, allowed_model_ids=?, system_prompt=? WHERE id=?",
+                "UPDATE t_user SET username=?, password=?, role=?, created_at=?, last_login_at=?, last_login_ip=?, last_login_browser=?, allowed_model_ids=?, system_prompt=?, disabled=?, daily_limit_type=?, daily_limit_value=?, prompt_presets=? WHERE id=?",
                 user.getUsername(), user.getPassword(), user.getRole(), user.getCreatedAt(),
                 user.getLastLoginAt(), user.getLastLoginIp(), user.getLastLoginBrowser(),
-                toJsonArray(user.getAllowedModelIds()), user.getSystemPrompt(), user.getId());
+                toJsonArray(user.getAllowedModelIds()), user.getSystemPrompt(), user.isDisabled() ? 1 : 0,
+                user.getDailyLimitType(), user.getDailyLimitValue(), toPromptPresetsJson(user.getPromptPresets()), user.getId());
     }
 
     @Override
     public int changePassword(String userId, String oldPassword, String newPassword) {
         User user = getUserById(userId);
         if (user == null) return 1;
-        if (!user.getPassword().equals(JsonFileStorageService.hashPassword(oldPassword))) return 2;
+        if (!PasswordHasher.matches(oldPassword, user.getPassword())) return 2;
         jdbcTemplate.update("UPDATE t_user SET password = ? WHERE id = ?",
-                JsonFileStorageService.hashPassword(newPassword), userId);
+                PasswordHasher.hash(newPassword), userId);
         return 0;
     }
 
@@ -332,7 +686,7 @@ public class SqliteStorageService implements StorageService {
         m.setProviderIcon(rs.getString("provider_icon"));
         m.setModelId(rs.getString("model_id"));
         m.setDisplayName(rs.getString("display_name"));
-        m.setApiKey(rs.getString("api_key"));
+        m.setApiKey(ApiKeyCrypto.decrypt(rs.getString("api_key")));
         m.setApiUrl(rs.getString("api_url"));
         m.setProtocol(rs.getString("protocol"));
         m.setThinkingParamType(rs.getString("thinking_param_type"));
@@ -344,22 +698,43 @@ public class SqliteStorageService implements StorageService {
         m.setVisibleToAll(rs.wasNull() ? true : vta == 1);
         m.setBuiltIn(rs.getInt("built_in") == 1);
         m.setCreatedAt(rs.getString("created_at"));
+        // 连通测试指标（可空，null=未测试）
+        int latency = rs.getInt("test_latency_ms");
+        m.setTestLatencyMs(rs.wasNull() ? null : latency);
+        double speed = rs.getDouble("test_speed");
+        m.setTestSpeed(rs.wasNull() ? null : speed);
+        m.setTestedAt(rs.getString("tested_at"));
         return m;
     };
 
     @Override
     public List<ModelConfig> getAllModelConfigs() {
-        return jdbcTemplate.query("SELECT * FROM t_model_config", modelConfigRowMapper);
+        // 失效式缓存：写操作后置空，此处按需重建；返回浅拷贝列表，避免调用方增删元素污染缓存
+        List<ModelConfig> cached = modelConfigsCache;
+        if (cached == null) {
+            cached = jdbcTemplate.query("SELECT * FROM t_model_config", modelConfigRowMapper);
+            modelConfigsCache = cached;
+        }
+        return new ArrayList<>(cached);
     }
 
     @Override
     public List<ModelConfig> getVisibleModels(User user) {
+        // 权限语义：admin 全部可见；配置了 allowedModelIds（非空）的用户仅可见白名单内模型；
+        // 未配置则不限制，可见所有公开（visibleToAll）模型
         return getAllModelConfigs().stream()
                 .filter(ModelConfig::isEnabled)
-                .filter(m -> Boolean.TRUE.equals(m.getVisibleToAll())
-                        || user.isAdmin()
-                        || user.getAllowedModelIds().contains(m.getId()))
+                .filter(m -> isModelPermitted(user, m))
                 .collect(Collectors.toList());
+    }
+
+    private boolean isModelPermitted(User user, ModelConfig m) {
+        if (user.isAdmin()) return true;
+        List<String> allowed = user.getAllowedModelIds();
+        if (allowed != null && !allowed.isEmpty()) {
+            return allowed.contains(m.getId());
+        }
+        return Boolean.TRUE.equals(m.getVisibleToAll());
     }
 
     @Override
@@ -382,39 +757,45 @@ public class SqliteStorageService implements StorageService {
         }
         fillProviderInfo(config);
         insertModelConfig(config);
+        modelConfigsCache = null;
         return config;
     }
 
     /** 插入模型配置记录 */
     private void insertModelConfig(ModelConfig m) {
         jdbcTemplate.update(
-                "INSERT INTO t_model_config (id, provider_id, provider_name, provider_icon, model_id, display_name, api_key, api_url, protocol, thinking_param_type, supports_thinking, supports_multimodal, enabled, visible_to_all, built_in, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO t_model_config (id, provider_id, provider_name, provider_icon, model_id, display_name, api_key, api_url, protocol, thinking_param_type, supports_thinking, supports_multimodal, enabled, visible_to_all, built_in, created_at, test_latency_ms, test_speed, tested_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 m.getId(), m.getProviderId(), m.getProviderName(), m.getProviderIcon(),
-                m.getModelId(), m.getDisplayName(), m.getApiKey(), m.getApiUrl(),
+                m.getModelId(), m.getDisplayName(), ApiKeyCrypto.encrypt(m.getApiKey()), m.getApiUrl(),
                 m.getProtocol(), m.getThinkingParamType(),
                 m.isSupportsThinking() ? 1 : 0, m.isSupportsMultimodal() ? 1 : 0,
                 m.isEnabled() ? 1 : 0,
                 m.getVisibleToAll() == null ? 1 : (m.getVisibleToAll() ? 1 : 0),
-                m.isBuiltIn() ? 1 : 0, m.getCreatedAt());
+                m.isBuiltIn() ? 1 : 0, m.getCreatedAt(),
+                m.getTestLatencyMs(), m.getTestSpeed(), m.getTestedAt());
     }
 
     @Override
     public void updateModelConfig(ModelConfig config) {
         fillProviderInfo(config);
         jdbcTemplate.update(
-                "UPDATE t_model_config SET provider_id=?, provider_name=?, provider_icon=?, model_id=?, display_name=?, api_key=?, api_url=?, protocol=?, thinking_param_type=?, supports_thinking=?, supports_multimodal=?, enabled=?, visible_to_all=?, built_in=?, created_at=? WHERE id=?",
+                "UPDATE t_model_config SET provider_id=?, provider_name=?, provider_icon=?, model_id=?, display_name=?, api_key=?, api_url=?, protocol=?, thinking_param_type=?, supports_thinking=?, supports_multimodal=?, enabled=?, visible_to_all=?, built_in=?, created_at=?, test_latency_ms=?, test_speed=?, tested_at=? WHERE id=?",
                 config.getProviderId(), config.getProviderName(), config.getProviderIcon(),
-                config.getModelId(), config.getDisplayName(), config.getApiKey(), config.getApiUrl(),
+                config.getModelId(), config.getDisplayName(), ApiKeyCrypto.encrypt(config.getApiKey()), config.getApiUrl(),
                 config.getProtocol(), config.getThinkingParamType(),
                 config.isSupportsThinking() ? 1 : 0, config.isSupportsMultimodal() ? 1 : 0,
                 config.isEnabled() ? 1 : 0,
                 config.getVisibleToAll() == null ? 1 : (config.getVisibleToAll() ? 1 : 0),
-                config.isBuiltIn() ? 1 : 0, config.getCreatedAt(), config.getId());
+                config.isBuiltIn() ? 1 : 0, config.getCreatedAt(),
+                config.getTestLatencyMs(), config.getTestSpeed(), config.getTestedAt(),
+                config.getId());
+        modelConfigsCache = null;
     }
 
     @Override
     public boolean deleteModelConfig(String id) {
         int deleted = jdbcTemplate.update("DELETE FROM t_model_config WHERE id = ?", id);
+        modelConfigsCache = null;
         if (deleted > 0) {
             // 删除的是默认模型则清空默认设置
             String defId = getDefaultModelId();
@@ -703,6 +1084,22 @@ public class SqliteStorageService implements StorageService {
     }
 
     @Override
+    public int countUsageByUserAndDay(String userId, String day) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_usage_log WHERE user_id = ? AND timestamp LIKE ?",
+                Integer.class, userId, day + "%");
+        return count == null ? 0 : count;
+    }
+
+    @Override
+    public long sumTokensByUserAndDay(String userId, String day) {
+        Long sum = jdbcTemplate.queryForObject(
+                "SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) FROM t_usage_log WHERE user_id = ? AND timestamp LIKE ?",
+                Long.class, userId, day + "%");
+        return sum == null ? 0L : sum;
+    }
+
+    @Override
     public void updateUsageLog(UsageLog updatedLog) {
         // 按 userId + timestamp + modelId 匹配更新
         jdbcTemplate.update(
@@ -720,10 +1117,193 @@ public class SqliteStorageService implements StorageService {
                 String.class);
     }
 
-    // ========== 聊天记录（整文档存储） ==========
+    /**
+     * 删除指定日期之前的使用记录（定期清理过期日志用）
+     * @param day 截止日期（yyyy-MM-dd，不含当天）
+     * @return 删除条数
+     */
+    public int deleteUsageLogsBefore(String day) {
+        return jdbcTemplate.update(
+                "DELETE FROM t_usage_log WHERE SUBSTR(timestamp, 1, 10) < ?", day);
+    }
+
+    // ========== 使用记录查询下推（筛选/分页/聚合在 SQL 层完成） ==========
 
     /**
-     * 加载用户聊天记录 JSON 文档
+     * 拼接用量查询的 WHERE 子句（username/modelName/日期范围），参数追加到 args
+     * @return WHERE 子句（含前导空格），无条件返回空字符串
+     */
+    private String buildUsageWhere(String username, String modelName, String startDate, String endDate,
+                                   List<Object> args) {
+        List<String> conds = new ArrayList<>();
+        if (username != null && !username.isEmpty()) {
+            conds.add("username = ?");
+            args.add(username);
+        }
+        if (modelName != null && !modelName.isEmpty()) {
+            conds.add("model_name = ?");
+            args.add(modelName);
+        }
+        // timestamp 为 yyyy-MM-dd HH:mm:ss，字典序比较即日期比较（含边界当天），可命中 idx_usage_time
+        if (startDate != null && !startDate.isEmpty()) {
+            conds.add("timestamp >= ?");
+            args.add(startDate);
+        }
+        if (endDate != null && !endDate.isEmpty()) {
+            conds.add("timestamp < ?");
+            args.add(LocalDate.parse(endDate).plusDays(1).toString());
+        }
+        return conds.isEmpty() ? "" : " WHERE " + String.join(" AND ", conds);
+    }
+
+    @Override
+    public List<UsageLog> queryUsageLogs(String username, String modelName, String startDate, String endDate,
+                                         int offset, int limit) {
+        List<Object> args = new ArrayList<>();
+        String where = buildUsageWhere(username, modelName, startDate, endDate, args);
+        args.add(limit);
+        args.add(offset);
+        return jdbcTemplate.query(
+                "SELECT * FROM t_usage_log" + where + " ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+                usageLogRowMapper, args.toArray());
+    }
+
+    @Override
+    public int countUsageLogs(String username, String modelName, String startDate, String endDate) {
+        List<Object> args = new ArrayList<>();
+        String where = buildUsageWhere(username, modelName, startDate, endDate, args);
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_usage_log" + where, Integer.class, args.toArray());
+        return count == null ? 0 : count;
+    }
+
+    @Override
+    public Map<String, Long> summarizeUsage(String username, String startDate, String endDate) {
+        List<Object> args = new ArrayList<>();
+        String where = buildUsageWhere(username, null, startDate, endDate, args);
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+                "SELECT COUNT(*) AS calls, COALESCE(SUM(prompt_tokens),0) AS prompt_tokens, " +
+                "COALESCE(SUM(completion_tokens),0) AS completion_tokens, " +
+                "COALESCE(SUM(reasoning_tokens),0) AS reasoning_tokens FROM t_usage_log" + where,
+                args.toArray());
+        Map<String, Long> result = new LinkedHashMap<>();
+        result.put("calls", ((Number) row.get("calls")).longValue());
+        result.put("promptTokens", ((Number) row.get("prompt_tokens")).longValue());
+        result.put("completionTokens", ((Number) row.get("completion_tokens")).longValue());
+        result.put("reasoningTokens", ((Number) row.get("reasoning_tokens")).longValue());
+        return result;
+    }
+
+    /**
+     * 拼接聚合统计的 WHERE 子句（modelName/日期范围 + username IN），参数追加到 args
+     * @return WHERE 子句（含前导空格），无条件返回空字符串
+     */
+    private String buildStatsWhere(List<String> usernames, String modelName,
+                                   String startDate, String endDate, List<Object> args) {
+        String where = buildUsageWhere(null, modelName, startDate, endDate, args);
+        if (usernames != null && !usernames.isEmpty()) {
+            String in = usernames.stream().map(u -> "?").collect(Collectors.joining(","));
+            where += (where.isEmpty() ? " WHERE " : " AND ") + "username IN (" + in + ")";
+            args.addAll(usernames);
+        }
+        return where;
+    }
+
+    /** 聚合统计的 SELECT + GROUP BY 主体（复用于全量与分页查询） */
+    private static final String USAGE_STATS_SELECT =
+            "SELECT COALESCE(username,'未知') AS username, " +
+            "COALESCE(SUBSTR(timestamp,1,10),'未知') AS date, " +
+            "COALESCE(model_name,'未知') AS model_name, " +
+            "COUNT(*) AS count, " +
+            "COALESCE(SUM(prompt_tokens),0) AS prompt_tokens, " +
+            "COALESCE(SUM(completion_tokens),0) AS completion_tokens, " +
+            "COALESCE(SUM(cached_tokens),0) AS cached_tokens, " +
+            "COALESCE(SUM(reasoning_tokens),0) AS reasoning_tokens, " +
+            "COALESCE(SUM(deep_thinking),0) AS thinking_count " +
+            "FROM t_usage_log";
+
+    private static final String USAGE_STATS_GROUP_ORDER =
+            " GROUP BY 1, 2, 3 ORDER BY date DESC, username ASC, model_name ASC";
+
+    @Override
+    public List<Map<String, Object>> aggregateUsageStats(List<String> usernames, String modelName,
+                                                         String startDate, String endDate) {
+        List<Object> args = new ArrayList<>();
+        String where = buildStatsWhere(usernames, modelName, startDate, endDate, args);
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                USAGE_STATS_SELECT + where + USAGE_STATS_GROUP_ORDER, args.toArray());
+        return mapUsageStatRows(rows);
+    }
+
+    @Override
+    public List<Map<String, Object>> aggregateUsageStats(List<String> usernames, String modelName,
+                                                         String startDate, String endDate,
+                                                         int offset, int limit) {
+        List<Object> args = new ArrayList<>();
+        String where = buildStatsWhere(usernames, modelName, startDate, endDate, args);
+        args.add(limit);
+        args.add(offset);
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                USAGE_STATS_SELECT + where + USAGE_STATS_GROUP_ORDER + " LIMIT ? OFFSET ?",
+                args.toArray());
+        return mapUsageStatRows(rows);
+    }
+
+    @Override
+    public int countUsageStatGroups(List<String> usernames, String modelName,
+                                    String startDate, String endDate) {
+        List<Object> args = new ArrayList<>();
+        String where = buildStatsWhere(usernames, modelName, startDate, endDate, args);
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM (SELECT 1 FROM t_usage_log" + where + " GROUP BY " +
+                "COALESCE(username,'未知'), COALESCE(SUBSTR(timestamp,1,10),'未知'), COALESCE(model_name,'未知'))",
+                Integer.class, args.toArray());
+        return count == null ? 0 : count;
+    }
+
+    /** 聚合统计行 → 驼峰字段 Map 列表 */
+    private List<Map<String, Object>> mapUsageStatRows(List<Map<String, Object>> rows) {
+        List<Map<String, Object>> statsList = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            Map<String, Object> item = new HashMap<>();
+            item.put("username", row.get("username"));
+            item.put("date", row.get("date"));
+            item.put("modelName", row.get("model_name"));
+            item.put("count", ((Number) row.get("count")).intValue());
+            item.put("promptTokens", ((Number) row.get("prompt_tokens")).intValue());
+            item.put("completionTokens", ((Number) row.get("completion_tokens")).intValue());
+            item.put("cachedTokens", ((Number) row.get("cached_tokens")).intValue());
+            item.put("reasoningTokens", ((Number) row.get("reasoning_tokens")).intValue());
+            item.put("thinkingCount", ((Number) row.get("thinking_count")).longValue());
+            statsList.add(item);
+        }
+        return statsList;
+    }
+
+
+    @Override
+    public List<String> getUsageUsernames() {
+        return jdbcTemplate.queryForList(
+                "SELECT DISTINCT username FROM t_usage_log WHERE username IS NOT NULL ORDER BY username",
+                String.class);
+    }
+
+    @Override
+    public List<String> getUsageModelNames(String username) {
+        if (username != null && !username.isEmpty()) {
+            return jdbcTemplate.queryForList(
+                    "SELECT DISTINCT model_name FROM t_usage_log WHERE model_name IS NOT NULL AND username = ? ORDER BY model_name",
+                    String.class, username);
+        }
+        return jdbcTemplate.queryForList(
+                "SELECT DISTINCT model_name FROM t_usage_log WHERE model_name IS NOT NULL ORDER BY model_name",
+                String.class);
+    }
+
+    // ========== 聊天记录（按会话行存储 + 旧整文档兼容） ==========
+
+    /**
+     * 加载用户聊天记录 JSON 文档（旧整文档表，仅作按会话行迁移来源与备份）
      * @param userId 用户ID
      * @return JSON 字符串，不存在返回 null
      */
@@ -734,74 +1314,433 @@ public class SqliteStorageService implements StorageService {
     }
 
     /**
-     * 保存用户聊天记录 JSON 文档（存在则更新，不存在则插入）
-     * @param userId 用户ID
-     * @param chatData JSON 字符串
-     * @param updatedAt 更新时间字符串
-     * @param updatedAtTs 更新时间戳
-     */
-    public void saveChatData(String userId, String chatData, String updatedAt, long updatedAtTs) {
-        int updated = jdbcTemplate.update(
-                "UPDATE t_chat_history SET chat_data=?, updated_at=?, updated_at_ts=? WHERE user_id=?",
-                chatData, updatedAt, updatedAtTs, userId);
-        if (updated == 0) {
-            jdbcTemplate.update(
-                    "INSERT INTO t_chat_history (user_id, chat_data, updated_at, updated_at_ts) VALUES (?,?,?,?)",
-                    userId, chatData, updatedAt, updatedAtTs);
-        }
-    }
-
-    /**
-     * 删除用户聊天记录
+     * 删除用户聊天记录（整文档备份 + 按会话行 + 用户状态三张表一并清理）
      * @param userId 用户ID
      */
     public void deleteChatData(String userId) {
         jdbcTemplate.update("DELETE FROM t_chat_history WHERE user_id = ?", userId);
+        jdbcTemplate.update("DELETE FROM t_chat_session WHERE user_id = ?", userId);
+        jdbcTemplate.update("DELETE FROM t_chat_user_state WHERE user_id = ?", userId);
     }
 
-    // ========== 数据迁移辅助方法（供 StorageManager 调用） ==========
+    /**
+     * 判断用户是否已存在会话状态行（存在即表示已完成按会话行迁移）
+     * @param userId 用户ID
+     * @return true=已迁移
+     */
+    public boolean hasChatUserState(String userId) {
+        Integer n = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_chat_user_state WHERE user_id = ?", Integer.class, userId);
+        return n != null && n > 0;
+    }
 
     /**
-     * 批量插入用户（迁移用）
-     * @param userList 用户列表
+     * 加载用户会话全局状态
+     * @param userId 用户ID
+     * @return 含 last_chat_id、deleted_chat_ids 的记录，不存在返回 null
      */
-    public void batchInsertUsers(List<User> userList) {
-        for (User u : userList) {
-            // 跳过已存在的（同时检查 id 和 username，避免 UNIQUE 约束冲突）
-            Integer count = jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM t_user WHERE id = ? OR username = ?",
-                    Integer.class, u.getId(), u.getUsername());
-            if (count != null && count > 0) continue;
-            insertUser(u);
+    public Map<String, Object> loadChatUserState(String userId) {
+        List<Map<String, Object>> list = jdbcTemplate.queryForList(
+                "SELECT last_chat_id, deleted_chat_ids FROM t_chat_user_state WHERE user_id = ?", userId);
+        return list.isEmpty() ? null : list.get(0);
+    }
+
+    /**
+     * 保存用户会话全局状态（存在则更新，不存在则插入）
+     * @param userId 用户ID
+     * @param lastChatId 最后所在会话ID
+     * @param deletedChatIdsJson 已删除会话ID列表 JSON
+     * @param updatedAt 更新时间字符串
+     * @param updatedAtTs 更新时间戳
+     */
+    public void saveChatUserState(String userId, String lastChatId, String deletedChatIdsJson,
+                                   String updatedAt, long updatedAtTs) {
+        int updated = jdbcTemplate.update(
+                "UPDATE t_chat_user_state SET last_chat_id=?, deleted_chat_ids=?, updated_at=?, updated_at_ts=? WHERE user_id=?",
+                lastChatId, deletedChatIdsJson, updatedAt, updatedAtTs, userId);
+        if (updated == 0) {
+            jdbcTemplate.update(
+                    "INSERT INTO t_chat_user_state (user_id, last_chat_id, deleted_chat_ids, updated_at, updated_at_ts) VALUES (?,?,?,?,?)",
+                    userId, lastChatId, deletedChatIdsJson, updatedAt, updatedAtTs);
         }
     }
 
     /**
-     * 批量插入模型配置（迁移用）
-     * @param configList 模型配置列表
+     * 加载用户全部会话行（含消息正文，导出/全文搜索等全量场景用）
+     * @param userId 用户ID
+     * @return 每条记录含 chat_id/messages/meta，按插入顺序返回
      */
-    public void batchInsertModelConfigs(List<ModelConfig> configList) {
-        for (ModelConfig m : configList) {
-            Integer count = jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM t_model_config WHERE id = ?", Integer.class, m.getId());
-            if (count != null && count > 0) continue;
-            insertModelConfig(m);
+    public List<Map<String, Object>> listChatSessions(String userId) {
+        return jdbcTemplate.queryForList(
+                "SELECT chat_id, messages, meta FROM t_chat_session WHERE user_id = ? ORDER BY rowid", userId);
+    }
+
+    /**
+     * 加载用户全部会话摘要行（仅冗余摘要列 + 元信息，不含消息正文，侧边栏首屏用）
+     * @param userId 用户ID
+     * @return 每条记录含 chat_id/title/preview/last_time/msg_count/meta，按插入顺序返回
+     */
+    public List<Map<String, Object>> listChatSessionSummaries(String userId) {
+        return jdbcTemplate.queryForList(
+                "SELECT chat_id, title, preview, last_time, msg_count, meta FROM t_chat_session WHERE user_id = ? ORDER BY rowid",
+                userId);
+    }
+
+    /**
+     * 加载单个会话行（切换会话按需加载用）
+     * @param userId 用户ID
+     * @param chatId 会话ID
+     * @return 含 messages/meta 的记录，不存在返回 null
+     */
+    public Map<String, Object> getChatSession(String userId, String chatId) {
+        List<Map<String, Object>> list = jdbcTemplate.queryForList(
+                "SELECT messages, meta FROM t_chat_session WHERE user_id = ? AND chat_id = ?", userId, chatId);
+        return list.isEmpty() ? null : list.get(0);
+    }
+
+    /**
+     * 查询用户全部会话 ID（仅 ID 列，分享状态判定等存在性检查用，不加载消息正文）
+     * @param userId 用户ID
+     * @return 会话ID列表
+     */
+    public List<String> listChatSessionIds(String userId) {
+        return jdbcTemplate.queryForList(
+                "SELECT chat_id FROM t_chat_session WHERE user_id = ?", String.class, userId);
+    }
+
+    /**
+     * 插入或更新单个会话行
+     * @param userId 用户ID
+     * @param chatId 会话ID
+     * @param messagesJson 消息列表 JSON
+     * @param metaJson 会话元信息 JSON（null 时保留原值，上传数据可能不带该会话的元信息）
+     * @param title 会话标题
+     * @param preview 首条用户消息预览
+     * @param lastTime 最后消息时间
+     * @param msgCount 消息条数
+     * @param updatedAt 更新时间字符串
+     * @param updatedAtTs 更新时间戳
+     */
+    public void upsertChatSession(String userId, String chatId, String messagesJson, String metaJson,
+                                   String title, String preview, String lastTime, int msgCount,
+                                   String updatedAt, long updatedAtTs) {
+        int updated = jdbcTemplate.update(
+                "UPDATE t_chat_session SET messages=?, meta=COALESCE(?, meta), title=?, preview=?, last_time=?, " +
+                "msg_count=?, updated_at=?, updated_at_ts=? WHERE user_id=? AND chat_id=?",
+                messagesJson, metaJson, title, preview, lastTime, msgCount, updatedAt, updatedAtTs, userId, chatId);
+        if (updated == 0) {
+            jdbcTemplate.update(
+                    "INSERT INTO t_chat_session (user_id, chat_id, messages, meta, title, preview, last_time, msg_count, updated_at, updated_at_ts) " +
+                    "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    userId, chatId, messagesJson, metaJson, title, preview, lastTime, msgCount, updatedAt, updatedAtTs);
         }
     }
 
     /**
-     * 批量插入使用记录（迁移用，幂等：按 user_id+timestamp+model_id 去重）
-     * @param logList 使用记录列表
+     * 删除用户的指定会话行（同步 deletedChatIds 时清理）
+     * @param userId 用户ID
+     * @param chatIds 待删除的会话ID集合
      */
-    public void batchInsertUsageLogs(List<UsageLog> logList) {
-        for (UsageLog l : logList) {
-            // 跳过已存在的记录（避免重复迁移时产生重复数据）
-            Integer count = jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM t_usage_log WHERE user_id = ? AND timestamp = ? AND model_id = ?",
-                    Integer.class, l.getUserId(), l.getTimestamp(), l.getModelId());
-            if (count != null && count > 0) continue;
-            addUsageLog(l);
+    public void deleteChatSessions(String userId, Collection<String> chatIds) {
+        if (chatIds == null || chatIds.isEmpty()) return;
+        for (String chatId : chatIds) {
+            jdbcTemplate.update("DELETE FROM t_chat_session WHERE user_id = ? AND chat_id = ?", userId, chatId);
         }
+    }
+
+    /**
+     * 加载全部聊天数据的原始 JSON 文本（含按会话行与旧整文档备份），
+     * 供孤儿上传文件清理时正则提取附件引用，不做 JSON 解析避免解析失败遗漏引用
+     * @return 原始 JSON 文本列表
+     */
+    public List<String> listAllChatPayloads() {
+        List<String> payloads = new ArrayList<>();
+        payloads.addAll(jdbcTemplate.queryForList("SELECT chat_data FROM t_chat_history", String.class));
+        for (Map<String, Object> row : jdbcTemplate.queryForList("SELECT messages, meta FROM t_chat_session")) {
+            if (row.get("messages") instanceof String s) payloads.add(s);
+            if (row.get("meta") instanceof String s) payloads.add(s);
+        }
+        return payloads;
+    }
+
+    // ========== 登录 Token 持久化 ==========
+
+    /**
+     * 插入登录 Token 记录
+     * @param token token 字符串
+     * @param userId 用户ID
+     * @param ip 登录IP
+     * @param browser 登录浏览器/终端
+     * @param expiresAt 过期时间戳（毫秒）
+     */
+    public void insertToken(String token, String userId, String ip, String browser, long expiresAt) {
+        jdbcTemplate.update(
+                "INSERT OR REPLACE INTO t_token (token, user_id, ip, browser, created_at, expires_at) VALUES (?,?,?,?,?,?)",
+                token, userId, ip, browser, nowString(), expiresAt);
+    }
+
+    /**
+     * 查询指定用户的所有登录 Token 记录（登录设备管理，新登录在前）
+     * @param userId 用户ID
+     * @return 每条记录含 token/ip/browser/created_at/expires_at
+     */
+    public List<Map<String, Object>> listTokensByUser(String userId) {
+        return jdbcTemplate.queryForList(
+                "SELECT token, ip, browser, created_at, expires_at FROM t_token WHERE user_id = ? ORDER BY created_at DESC",
+                userId);
+    }
+
+    /**
+     * 删除指定 Token
+     * @param token token 字符串
+     */
+    public void deleteToken(String token) {
+        jdbcTemplate.update("DELETE FROM t_token WHERE token = ?", token);
+    }
+
+    /**
+     * 删除指定用户的所有 Token
+     * @param userId 用户ID
+     */
+    public void deleteTokensByUser(String userId) {
+        jdbcTemplate.update("DELETE FROM t_token WHERE user_id = ?", userId);
+    }
+
+    /**
+     * 更新 Token 过期时间（滑动续期）
+     * @param token token 字符串
+     * @param expiresAt 新的过期时间戳（毫秒）
+     */
+    public void updateTokenExpiry(String token, long expiresAt) {
+        jdbcTemplate.update("UPDATE t_token SET expires_at = ? WHERE token = ?", expiresAt, token);
+    }
+
+    /**
+     * 回填 Token 的浏览器信息（browser 列上线前登录的旧 token 值为空，
+     * 当前设备访问登录管理时用本次请求的 UA 补齐）
+     * @param token token 字符串
+     * @param browser 浏览器/终端名称
+     */
+    public void updateTokenBrowser(String token, String browser) {
+        jdbcTemplate.update("UPDATE t_token SET browser = ? WHERE token = ?", browser, token);
+    }
+
+    /**
+     * 删除所有已过期的 Token
+     * @param now 当前时间戳（毫秒）
+     * @return 删除条数
+     */
+    public int deleteExpiredTokens(long now) {
+        return jdbcTemplate.update("DELETE FROM t_token WHERE expires_at < ?", now);
+    }
+
+    /**
+     * 加载所有未过期的 Token 记录（启动时恢复登录态）
+     * @param now 当前时间戳（毫秒）
+     * @return 每条记录含 token/user_id/ip/expires_at
+     */
+    public List<Map<String, Object>> loadActiveTokens(long now) {
+        return jdbcTemplate.queryForList(
+                "SELECT token, user_id, ip, expires_at FROM t_token WHERE expires_at >= ?", now);
+    }
+
+    // ========== 会话分享（恒走 SQLite，与存储模式开关无关） ==========
+
+    /** 会话分享行映射器 */
+    private final RowMapper<ChatShare> chatShareRowMapper = (ResultSet rs, int rowNum) -> {
+        ChatShare s = new ChatShare();
+        s.setId(rs.getString("id"));
+        s.setChatId(rs.getString("chat_id"));
+        s.setUserId(rs.getString("user_id"));
+        s.setUserName(rs.getString("user_name"));
+        s.setTitle(rs.getString("title"));
+        s.setCreatedAt(rs.getString("created_at"));
+        s.setExpiresAt(rs.getString("expires_at"));
+        return s;
+    };
+
+    /**
+     * 新增分享记录（自动生成分享码与创建时间）
+     * @param s 分享记录
+     * @return 保存后的记录
+     */
+    public ChatShare addChatShare(ChatShare s) {
+        if (s.getId() == null || s.getId().isEmpty()) {
+            s.setId(UUID.randomUUID().toString().replace("-", ""));
+        }
+        if (s.getCreatedAt() == null) {
+            s.setCreatedAt(nowString());
+        }
+        jdbcTemplate.update(
+                "INSERT INTO t_chat_share (id, chat_id, user_id, user_name, title, created_at, expires_at) VALUES (?,?,?,?,?,?,?)",
+                s.getId(), s.getChatId(), s.getUserId(), s.getUserName(), s.getTitle(), s.getCreatedAt(), s.getExpiresAt());
+        return s;
+    }
+
+    /**
+     * 根据分享码获取分享记录
+     * @param id 分享码
+     * @return 分享记录，不存在返回 null
+     */
+    public ChatShare getChatShareById(String id) {
+        List<ChatShare> list = jdbcTemplate.query(
+                "SELECT * FROM t_chat_share WHERE id = ?", chatShareRowMapper, id);
+        return list.isEmpty() ? null : list.get(0);
+    }
+
+    /**
+     * 获取用户创建的所有分享记录（新建在前）
+     * @param userId 用户ID
+     * @return 分享列表
+     */
+    public List<ChatShare> getChatSharesByUser(String userId) {
+        return jdbcTemplate.query(
+                "SELECT * FROM t_chat_share WHERE user_id = ? ORDER BY created_at DESC",
+                chatShareRowMapper, userId);
+    }
+
+    /**
+     * 获取全部用户的分享记录（新建在前，后台分享管理用）
+     * @return 分享列表
+     */
+    public List<ChatShare> getAllChatShares() {
+        return jdbcTemplate.query(
+                "SELECT * FROM t_chat_share ORDER BY created_at DESC", chatShareRowMapper);
+    }
+
+    /**
+     * 查找某用户对某会话已有的分享记录（同一会话复用分享码，避免重复生成）
+     * @param userId 用户ID
+     * @param chatId 会话ID
+     * @return 分享记录，不存在返回 null
+     */
+    public ChatShare getChatShareByChat(String userId, String chatId) {
+        List<ChatShare> list = jdbcTemplate.query(
+                "SELECT * FROM t_chat_share WHERE user_id = ? AND chat_id = ?",
+                chatShareRowMapper, userId, chatId);
+        return list.isEmpty() ? null : list.get(0);
+    }
+
+    /**
+     * 删除分享记录（撤销只读链接）
+     * @param id 分享码
+     * @return true=删除成功
+     */
+    public boolean deleteChatShare(String id) {
+        return jdbcTemplate.update("DELETE FROM t_chat_share WHERE id = ?", id) > 0;
+    }
+
+    /**
+     * 更新分享记录的过期时间（重新分享时续期；null=永久有效）
+     * @param id 分享码
+     * @param expiresAt 新的过期时间，null=永久
+     */
+    public void updateChatShareExpiry(String id, String expiresAt) {
+        jdbcTemplate.update("UPDATE t_chat_share SET expires_at = ? WHERE id = ?", expiresAt, id);
+    }
+
+    // ========== 系统公告（恒走 SQLite，与存储模式开关无关） ==========
+
+    /** 公告行映射器 */
+    private final RowMapper<Announcement> announcementRowMapper = (ResultSet rs, int rowNum) -> {
+        Announcement a = new Announcement();
+        a.setId(rs.getString("id"));
+        a.setTitle(rs.getString("title"));
+        a.setContent(rs.getString("content"));
+        a.setStartAt(rs.getString("start_at"));
+        a.setEndAt(rs.getString("end_at"));
+        a.setEnabled(rs.getInt("enabled") == 1);
+        a.setCreatedAt(rs.getString("created_at"));
+        a.setUpdatedAt(rs.getString("updated_at"));
+        return a;
+    };
+
+    /**
+     * 新增公告记录（自动生成ID与创建/更新时间）
+     * @param a 公告记录
+     * @return 保存后的记录
+     */
+    public Announcement addAnnouncement(Announcement a) {
+        if (a.getId() == null || a.getId().isEmpty()) {
+            a.setId(UUID.randomUUID().toString().replace("-", ""));
+        }
+        if (a.getCreatedAt() == null) {
+            a.setCreatedAt(nowString());
+        }
+        if (a.getUpdatedAt() == null) {
+            a.setUpdatedAt(a.getCreatedAt());
+        }
+        jdbcTemplate.update(
+                "INSERT INTO t_announcement (id, title, content, start_at, end_at, enabled, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+                a.getId(), a.getTitle(), a.getContent(), a.getStartAt(), a.getEndAt(), a.isEnabled() ? 1 : 0, a.getCreatedAt(), a.getUpdatedAt());
+        enabledAnnouncementCache = null;
+        return a;
+    }
+
+    /**
+     * 根据ID获取公告记录
+     * @param id 公告ID
+     * @return 公告记录，不存在返回 null
+     */
+    public Announcement getAnnouncementById(String id) {
+        List<Announcement> list = jdbcTemplate.query(
+                "SELECT * FROM t_announcement WHERE id = ?", announcementRowMapper, id);
+        return list.isEmpty() ? null : list.get(0);
+    }
+
+    /**
+     * 获取全部公告记录（含历史公告，最近更新在前）
+     * @return 公告列表
+     */
+    public List<Announcement> getAllAnnouncements() {
+        return jdbcTemplate.query(
+                "SELECT * FROM t_announcement ORDER BY updated_at DESC, created_at DESC", announcementRowMapper);
+    }
+
+    /**
+     * 获取当前启用的公告（最多一条；失效式缓存，登录/聊天页高频拉取不再每次查库）
+     * @return 启用中的公告，无则返回 null
+     */
+    public Announcement getEnabledAnnouncement() {
+        Optional<Announcement> cached = enabledAnnouncementCache;
+        if (cached == null) {
+            List<Announcement> list = jdbcTemplate.query(
+                    "SELECT * FROM t_announcement WHERE enabled = 1 ORDER BY updated_at DESC LIMIT 1", announcementRowMapper);
+            cached = list.isEmpty() ? Optional.empty() : Optional.of(list.get(0));
+            enabledAnnouncementCache = cached;
+        }
+        return cached.orElse(null);
+    }
+
+    /**
+     * 更新公告标题、内容与公告期（重新生效/改期时刷新 updated_at）
+     * @param a 公告记录（需包含 id）
+     */
+    public void updateAnnouncement(Announcement a) {
+        jdbcTemplate.update(
+                "UPDATE t_announcement SET title = ?, content = ?, start_at = ?, end_at = ?, enabled = ?, updated_at = ? WHERE id = ?",
+                a.getTitle(), a.getContent(), a.getStartAt(), a.getEndAt(), a.isEnabled() ? 1 : 0, a.getUpdatedAt(), a.getId());
+        enabledAnnouncementCache = null;
+    }
+
+    /**
+     * 下线除指定ID外的全部公告（保证同一时刻最多一条启用）
+     * @param exceptId 保留启用的公告ID
+     */
+    public void disableOtherAnnouncements(String exceptId) {
+        jdbcTemplate.update("UPDATE t_announcement SET enabled = 0 WHERE id <> ?", exceptId);
+        enabledAnnouncementCache = null;
+    }
+
+    /**
+     * 删除公告记录
+     * @param id 公告ID
+     * @return true=删除成功
+     */
+    public boolean deleteAnnouncement(String id) {
+        boolean deleted = jdbcTemplate.update("DELETE FROM t_announcement WHERE id = ?", id) > 0;
+        enabledAnnouncementCache = null;
+        return deleted;
     }
 
     // ========== JSON 序列化工具 ==========

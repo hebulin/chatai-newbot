@@ -1,10 +1,13 @@
 package com.chatai.newbot.service;
 
+import com.chatai.newbot.model.ChatAttachment;
 import com.chatai.newbot.model.ChatRequest;
 import com.chatai.newbot.model.ModelConfig;
 import com.chatai.newbot.model.NewBotMessage;
+import com.chatai.newbot.model.PromptPreset;
 import com.chatai.newbot.model.UsageLog;
 import com.chatai.newbot.model.User;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,6 +16,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Flux;
 
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -28,10 +32,22 @@ public class UnifiedChatService {
     private static final String DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant.";
     private static final String ANTHROPIC_VERSION = "2023-06-01";
     private final StorageManager storageService;
+    private final FileStorageService fileStorageService;
+    private final WebSearchService webSearchService;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    /** 共享 WebClient：所有厂商请求复用同一实例（鉴权头按请求设置），避免每次对话新建客户端与连接池 */
+    private final WebClient sharedWebClient = WebClient.builder()
+            .defaultHeader("Content-Type", "application/json")
+            .codecs(configurer -> configurer
+                    .defaultCodecs()
+                    .maxInMemorySize(16 * 1024 * 1024))
+            .build();
 
-    public UnifiedChatService(StorageManager storageService) {
+    public UnifiedChatService(StorageManager storageService, FileStorageService fileStorageService,
+                              WebSearchService webSearchService) {
         this.storageService = storageService;
+        this.fileStorageService = fileStorageService;
+        this.webSearchService = webSearchService;
     }
 
     public Flux<String> chat(ChatRequest request, String modelConfigId, UsageLog usageLog) {
@@ -43,16 +59,35 @@ public class UnifiedChatService {
             return Flux.just("{\"error\":{\"message\":\"该模型已被禁用\",\"type\":\"config_error\"}}");
         }
 
+        // 联网搜索：用户开启且全局启用时，用最后一条用户消息检索，将结果作为参考资料注入
+        String searchContext = null;
+        if (request.isWebSearch() && webSearchService.isEnabled()) {
+            searchContext = webSearchService.searchAsContext(lastUserText(request.getMessages()));
+        }
+
         String protocol = config.getProtocol();
         if ("anthropic".equalsIgnoreCase(protocol)) {
-            return chatAnthropic(request, config, usageLog);
+            return chatAnthropic(request, config, usageLog, searchContext);
         }
-        return chatOpenAI(request, config, usageLog);
+        return chatOpenAI(request, config, usageLog, searchContext);
+    }
+
+    /** 取最后一条用户消息的纯文本内容（用作联网检索词） */
+    private String lastUserText(List<NewBotMessage> messages) {
+        if (messages == null) return null;
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            NewBotMessage m = messages.get(i);
+            if (m != null && "user".equals(m.getRole()) && m.getContent() != null
+                    && !m.getContent().trim().isEmpty()) {
+                return m.getContent().trim();
+            }
+        }
+        return null;
     }
 
     // ==================== OpenAI 兼容协议 ====================
 
-    private Flux<String> chatOpenAI(ChatRequest request, ModelConfig config, UsageLog usageLog) {
+    private Flux<String> chatOpenAI(ChatRequest request, ModelConfig config, UsageLog usageLog, String searchContext) {
         String apiUrl = config.getApiUrl();
         String apiKey = config.getApiKey();
         String modelId = config.getModelId();
@@ -72,7 +107,7 @@ public class UnifiedChatService {
         // 解析当前用户的全局提示词（System Prompt）：
         // 优先级最高，永远置于消息列表起始位置（system role），时间顺序上先于对话历史与当前用户输入。
         // 由后端统一注入，客户端无法伪造或遗漏，从而保证每次 API 调用都必然携带。
-        String systemPrompt = resolveSystemPrompt(usageLog);
+        String systemPrompt = resolveSystemPrompt(request, usageLog);
 
         // 构建消息列表（支持多模态：当消息含图片时，content转为数组格式）
         List<Object> messages = new ArrayList<>();
@@ -82,9 +117,19 @@ public class UnifiedChatService {
         systemMsg.put("content", systemPrompt);
         messages.add(systemMsg);
 
+        // 1.5) 联网搜索参考资料：作为额外的 system 消息注入（RAG），紧随全局提示词之后
+        if (searchContext != null && !searchContext.trim().isEmpty()) {
+            Map<String, Object> searchMsg = new HashMap<>();
+            searchMsg.put("role", "system");
+            searchMsg.put("content", searchContext);
+            messages.add(searchMsg);
+        }
+
         // 2) 追加对话历史与当前用户输入（忽略客户端自带的 system 消息，统一由后端注入）
-        if (request.getMessages() != null) {
-            for (NewBotMessage msg : request.getMessages()) {
+        // 上下文截断：仅保留最近 N 条（后端兜底，system 不占名额）
+        List<NewBotMessage> historyMessages = applyContextLimit(request.getMessages());
+        if (historyMessages != null) {
+            for (NewBotMessage msg : historyMessages) {
                 // 跳过客户端携带的 system 消息，避免与后端注入的全局提示词重复或冲突
                 if ("system".equals(msg.getRole())) {
                     continue;
@@ -95,11 +140,17 @@ public class UnifiedChatService {
                 }
                 Map<String, Object> m = new HashMap<>();
                 m.put("role", msg.getRole());
+                // 附件文档：解析文本合并进文本内容（纯文本方式，不依赖多模态）
+                String textContent = contentWithAttachments(msg);
                 // 多模态：当消息含图片时，content转为 OpenAI Vision 格式的数组
                 if (msg.getImages() != null && !msg.getImages().isEmpty() && config.isSupportsMultimodal()) {
                     List<Map<String, Object>> contentParts = new ArrayList<>();
-                    // 添加图片部分
-                    for (String imageBase64 : msg.getImages()) {
+                    // 添加图片部分（本地上传 URL 先还原为 base64 data URL，存量 base64 原样透传）
+                    for (String image : msg.getImages()) {
+                        String imageBase64 = fileStorageService.toDataUrl(image);
+                        if (imageBase64 == null) {
+                            continue; // 本地文件已被删除，跳过该图片
+                        }
                         Map<String, Object> imagePart = new HashMap<>();
                         imagePart.put("type", "image_url");
                         Map<String, String> imageUrl = new HashMap<>();
@@ -108,15 +159,15 @@ public class UnifiedChatService {
                         contentParts.add(imagePart);
                     }
                     // 添加文本部分
-                    if (msg.getContent() != null && !msg.getContent().trim().isEmpty()) {
+                    if (textContent != null && !textContent.trim().isEmpty()) {
                         Map<String, Object> textPart = new HashMap<>();
                         textPart.put("type", "text");
-                        textPart.put("text", msg.getContent());
+                        textPart.put("text", textContent);
                         contentParts.add(textPart);
                     }
                     m.put("content", contentParts);
                 } else {
-                    m.put("content", msg.getContent());
+                    m.put("content", textContent);
                 }
                 messages.add(m);
             }
@@ -218,20 +269,13 @@ public class UnifiedChatService {
         }
         fullUrl += "chat/completions";
 
-        WebClient webClient = WebClient.builder()
-                .defaultHeader("Authorization", "Bearer " + apiKey)
-                .defaultHeader("Content-Type", "application/json")
-                .codecs(configurer -> configurer
-                        .defaultCodecs()
-                        .maxInMemorySize(16 * 1024 * 1024))
-                .build();
-
         // 用于从流式响应中提取 usage token 数据
         AtomicReference<Map<String, Object>> usageRef = new AtomicReference<>();
 
-        return webClient
+        return sharedWebClient
                 .post()
                 .uri(fullUrl)
+                .header("Authorization", "Bearer " + apiKey)
                 .bodyValue(requestBody)
                 .retrieve()
                 .bodyToFlux(String.class)
@@ -252,14 +296,18 @@ public class UnifiedChatService {
 
     // ==================== Anthropic 协议 ====================
 
-    private Flux<String> chatAnthropic(ChatRequest request, ModelConfig config, UsageLog usageLog) {
+    private Flux<String> chatAnthropic(ChatRequest request, ModelConfig config, UsageLog usageLog, String searchContext) {
         String apiUrl = config.getApiUrl();
         String apiKey = config.getApiKey();
         String modelId = config.getModelId();
 
         log.info("调用模型[Anthropic]: {} ({}), API: {}, 思考模式: {}", config.getDisplayName(), modelId, apiUrl, request.isDeepThinking());
 
-        String systemPrompt = resolveSystemPrompt(usageLog);
+        String systemPrompt = resolveSystemPrompt(request, usageLog);
+        // 联网搜索参考资料：追加到 system 提示词之后（Anthropic 的 system 单独传参）
+        if (searchContext != null && !searchContext.trim().isEmpty()) {
+            systemPrompt = systemPrompt + "\n\n" + searchContext;
+        }
 
         // 构建 Anthropic Messages API 请求体
         Map<String, Object> requestBody = new HashMap<>();
@@ -272,8 +320,10 @@ public class UnifiedChatService {
 
         // 构建消息列表（Anthropic 不允许 system role 在 messages 中）
         List<Object> messages = new ArrayList<>();
-        if (request.getMessages() != null) {
-            for (NewBotMessage msg : request.getMessages()) {
+        // 上下文截断：仅保留最近 N 条（后端兜底，system 已单独传参）
+        List<NewBotMessage> historyMessages = applyContextLimit(request.getMessages());
+        if (historyMessages != null) {
+            for (NewBotMessage msg : historyMessages) {
                 if ("system".equals(msg.getRole())) {
                     continue;
                 }
@@ -282,10 +332,17 @@ public class UnifiedChatService {
                 }
                 Map<String, Object> m = new HashMap<>();
                 m.put("role", msg.getRole());
+                // 附件文档：解析文本合并进文本内容（纯文本方式，不依赖多模态）
+                String textContent = contentWithAttachments(msg);
                 // 多模态：Anthropic 图片格式为 {type:"image", source:{type:"base64",...}}
                 if (msg.getImages() != null && !msg.getImages().isEmpty() && config.isSupportsMultimodal()) {
                     List<Map<String, Object>> contentParts = new ArrayList<>();
-                    for (String imageBase64 : msg.getImages()) {
+                    for (String image : msg.getImages()) {
+                        // 本地上传 URL 先还原为 base64 data URL，存量 base64 原样透传
+                        String imageBase64 = fileStorageService.toDataUrl(image);
+                        if (imageBase64 == null) {
+                            continue; // 本地文件已被删除，跳过该图片
+                        }
                         Map<String, Object> imagePart = new HashMap<>();
                         imagePart.put("type", "image");
                         Map<String, Object> source = new HashMap<>();
@@ -309,15 +366,15 @@ public class UnifiedChatService {
                         imagePart.put("source", source);
                         contentParts.add(imagePart);
                     }
-                    if (msg.getContent() != null && !msg.getContent().trim().isEmpty()) {
+                    if (textContent != null && !textContent.trim().isEmpty()) {
                         Map<String, Object> textPart = new HashMap<>();
                         textPart.put("type", "text");
-                        textPart.put("text", msg.getContent());
+                        textPart.put("text", textContent);
                         contentParts.add(textPart);
                     }
                     m.put("content", contentParts);
                 } else {
-                    m.put("content", msg.getContent());
+                    m.put("content", textContent);
                 }
                 messages.add(m);
             }
@@ -352,22 +409,15 @@ public class UnifiedChatService {
         }
         fullUrl += "messages";
 
-        // Anthropic 使用 x-api-key 头认证
-        WebClient webClient = WebClient.builder()
-                .defaultHeader("x-api-key", apiKey)
-                .defaultHeader("anthropic-version", ANTHROPIC_VERSION)
-                .defaultHeader("Content-Type", "application/json")
-                .codecs(configurer -> configurer
-                        .defaultCodecs()
-                        .maxInMemorySize(16 * 1024 * 1024))
-                .build();
-
         // 用于累计 Anthropic usage 数据
         AtomicReference<Map<String, Object>> usageRef = new AtomicReference<>();
 
-        return webClient
+        // Anthropic 使用 x-api-key 头认证
+        return sharedWebClient
                 .post()
                 .uri(fullUrl)
+                .header("x-api-key", apiKey)
+                .header("anthropic-version", ANTHROPIC_VERSION)
                 .bodyValue(requestBody)
                 .retrieve()
                 .bodyToFlux(String.class)
@@ -516,18 +566,397 @@ public class UnifiedChatService {
     // ==================== 公共方法 ====================
 
     /**
-     * 解析当前用户的全局提示词
+     * 解析当前会话生效的提示词：会话绑定的预设（内置智能体/用户角色）> 全局启用的预设 > 旧版单条提示词 > 默认提示词
      */
-    private String resolveSystemPrompt(UsageLog usageLog) {
+    private String resolveSystemPrompt(ChatRequest request, UsageLog usageLog) {
         String systemPrompt = DEFAULT_SYSTEM_PROMPT;
         if (usageLog != null && usageLog.getUserId() != null) {
             User currentUser = storageService.getUserById(usageLog.getUserId());
-            if (currentUser != null && currentUser.getSystemPrompt() != null
-                    && !currentUser.getSystemPrompt().trim().isEmpty()) {
-                systemPrompt = currentUser.getSystemPrompt().trim();
+            if (currentUser != null) {
+                // 0) 会话绑定的预设优先：先匹配内置智能体（builtin- 前缀），再按 ID 精确匹配用户预设（不要求 enabled，绑定即生效）
+                String presetId = request == null ? null : request.getPromptPresetId();
+                String builtinContent = BuiltinAgents.contentById(presetId);
+                if (builtinContent != null) {
+                    return builtinContent;
+                }
+                if (presetId != null && !presetId.trim().isEmpty()
+                        && currentUser.getPromptPresets() != null) {
+                    for (PromptPreset p : currentUser.getPromptPresets()) {
+                        if (p != null && presetId.equals(p.getId()) && p.getContent() != null
+                                && !p.getContent().trim().isEmpty()) {
+                            return p.getContent().trim();
+                        }
+                    }
+                }
+                // 1) 其次使用用户已启用的提示词预设（最多 1 条）
+                if (currentUser.getPromptPresets() != null) {
+                    for (PromptPreset p : currentUser.getPromptPresets()) {
+                        if (p != null && p.isEnabled() && p.getContent() != null
+                                && !p.getContent().trim().isEmpty()) {
+                            return p.getContent().trim();
+                        }
+                    }
+                }
+                // 2) 兼容旧版单条全局提示词
+                if (currentUser.getSystemPrompt() != null
+                        && !currentUser.getSystemPrompt().trim().isEmpty()) {
+                    systemPrompt = currentUser.getSystemPrompt().trim();
+                }
             }
         }
         return systemPrompt;
+    }
+
+    /**
+     * 上下文截断：仅保留最近 N 条消息（后端兜底，避免上下文无限增长）。
+     * N 由全局配置 context_max_messages 控制，<=0 或消息数未超限时原样返回。
+     * 后端注入的 system 消息不包含在此列表中，因此不占名额。
+     * @param messages 客户端传入的完整消息列表
+     * @return 截断后的消息列表
+     */
+    private List<NewBotMessage> applyContextLimit(List<NewBotMessage> messages) {
+        if (messages == null) {
+            return null;
+        }
+        int max = storageService.getContextMaxMessages();
+        if (max <= 0 || messages.size() <= max) {
+            return messages;
+        }
+        return messages.subList(messages.size() - max, messages.size());
+    }
+
+    /**
+     * 将消息携带的附件文档内容合并进文本内容（附件在前、用户输入在后）。
+     * 附件在上传时已解析为纯文本落盘，此处直接读回拼接，
+     * 因此附件能力不依赖模型多模态，任意文本模型均可理解文档内容。
+     * @param msg 待处理消息（无附件时原样返回 content）
+     * @return 合并附件后的文本内容
+     */
+    private String contentWithAttachments(NewBotMessage msg) {
+        String content = msg.getContent() == null ? "" : msg.getContent();
+        if (msg.getAttachments() == null || msg.getAttachments().isEmpty()) {
+            return msg.getContent();
+        }
+        StringBuilder sb = new StringBuilder();
+        for (ChatAttachment att : msg.getAttachments()) {
+            if (att == null) {
+                continue;
+            }
+            String name = att.getName() == null ? "未命名文档" : att.getName();
+            String text = fileStorageService.readDocumentText(att.getUrl());
+            sb.append("【附件文档：").append(name).append("】\n");
+            sb.append(text != null ? text : "（该附件内容已失效，无法读取）");
+            sb.append("\n【附件文档结束】\n\n");
+        }
+        sb.append(content);
+        return sb.toString();
+    }
+
+    /**
+     * AI 自动命名会话：基于首轮对话内容生成一个简短标题（非流式最小请求）。
+     * 复用 testConnection 的同步 WebClient 模式：stream=false、小 max_tokens、短超时、思考显式关闭。
+     * @param modelConfigId 模型配置ID
+     * @param userContent 用户首条消息内容
+     * @param assistantContent 助手首条回复内容（可为空）
+     * @return 生成的标题（已去除引号/换行、截断长度）；失败返回 null
+     */
+    public String generateTitle(String modelConfigId, String userContent, String assistantContent) {
+        ModelConfig config = storageService.getModelConfigById(modelConfigId);
+        if (config == null || !config.isEnabled()) {
+            return null;
+        }
+        if (config.getApiUrl() == null || config.getApiUrl().trim().isEmpty()
+                || config.getApiKey() == null || config.getApiKey().trim().isEmpty()) {
+            return null;
+        }
+        if (userContent == null || userContent.trim().isEmpty()) {
+            return null;
+        }
+
+        boolean anthropic = "anthropic".equalsIgnoreCase(config.getProtocol());
+        StringBuilder convo = new StringBuilder("用户: ").append(clip(userContent, 500));
+        if (assistantContent != null && !assistantContent.trim().isEmpty()) {
+            convo.append("\n助手: ").append(clip(assistantContent, 500));
+        }
+        String prompt = "请为以下对话生成一个不超过 15 个字的简短中文标题，只返回标题本身，不要加引号、标点或解释：\n\n" + convo;
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("model", config.getModelId());
+        body.put("stream", false);
+        body.put("max_tokens", 64);
+        Map<String, Object> msg = new HashMap<>();
+        msg.put("role", "user");
+        msg.put("content", prompt);
+        body.put("messages", List.of(msg));
+        // 显式关闭思考，避免额外耗时与 token
+        if (!anthropic && config.isSupportsThinking()) {
+            String type = config.getThinkingParamType() == null ? "default" : config.getThinkingParamType();
+            switch (type) {
+                case "qwen" -> body.put("enable_thinking", false);
+                case "deepseek", "kimi", "doubao", "zhipu" -> {
+                    Map<String, Object> thinkingOff = new HashMap<>();
+                    thinkingOff.put("type", "disabled");
+                    body.put("thinking", thinkingOff);
+                }
+                default -> { }
+            }
+        }
+
+        String fullUrl = config.getApiUrl();
+        if (!fullUrl.endsWith("/")) {
+            fullUrl += "/";
+        }
+        fullUrl += anthropic ? "messages" : "chat/completions";
+
+        try {
+            String resp = sharedWebClient.post()
+                    .uri(fullUrl)
+                    .headers(h -> applyAuthHeaders(h, config, anthropic))
+                    .bodyValue(body)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block(Duration.ofSeconds(20));
+            return parseTitleFromResponse(resp, anthropic);
+        } catch (Exception e) {
+            log.warn("AI 自动命名失败: {} ({}) -> {}", config.getDisplayName(), config.getModelId(), e.getMessage());
+            return null;
+        }
+    }
+
+    /** 从非流式应答中提取标题文本（OpenAI: choices[0].message.content；Anthropic: content[0].text） */
+    @SuppressWarnings("unchecked")
+    private String parseTitleFromResponse(String resp, boolean anthropic) {
+        if (resp == null || resp.isEmpty()) {
+            return null;
+        }
+        try {
+            Map<String, Object> parsed = objectMapper.readValue(resp, Map.class);
+            String text = null;
+            if (anthropic) {
+                Object contentObj = parsed.get("content");
+                if (contentObj instanceof List<?> list && !list.isEmpty()
+                        && list.get(0) instanceof Map<?, ?> first) {
+                    Object t = ((Map<String, Object>) first).get("text");
+                    text = t == null ? null : String.valueOf(t);
+                }
+            } else {
+                Object choicesObj = parsed.get("choices");
+                if (choicesObj instanceof List<?> list && !list.isEmpty()
+                        && list.get(0) instanceof Map<?, ?> choice) {
+                    Object messageObj = ((Map<String, Object>) choice).get("message");
+                    if (messageObj instanceof Map<?, ?> message) {
+                        Object c = ((Map<String, Object>) message).get("content");
+                        text = c == null ? null : String.valueOf(c);
+                    }
+                }
+            }
+            if (text == null) {
+                return null;
+            }
+            // 清理：去换行/首尾引号/多余空白，限长 30 字
+            String title = text.replaceAll("[\\r\\n]+", " ").trim();
+            title = title.replaceAll("^[\"'“「『]+|[\"'”」』]+$", "").trim();
+            if (title.isEmpty()) {
+                return null;
+            }
+            return clip(title, 30);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 截断字符串到指定最大长度 */
+    private String clip(String s, int max) {
+        if (s == null) {
+            return "";
+        }
+        s = s.trim();
+        return s.length() <= max ? s : s.substring(0, max);
+    }
+
+    /** 按厂商协议设置鉴权头：Anthropic 用 x-api-key + anthropic-version，其余 OpenAI 兼容协议用 Bearer */
+    private void applyAuthHeaders(org.springframework.http.HttpHeaders headers, ModelConfig config, boolean anthropic) {
+        if (anthropic) {
+            headers.set("x-api-key", config.getApiKey());
+            headers.set("anthropic-version", ANTHROPIC_VERSION);
+        } else {
+            headers.set("Authorization", "Bearer " + config.getApiKey());
+        }
+    }
+
+    /**
+     * 模型连通性测试：向厂商 API 发一条最小非流式请求，验证 API Key/URL/模型ID 是否可用。
+     * 连通成功后追加一次短生成请求测算生成速度（token/s），并将延迟/速度/测试时间持久化到模型配置。
+     * 仅由管理员在后台手动触发，不做任何自动测试。
+     * @param modelConfigId 模型配置ID
+     * @return success/message/latencyMs/speed，失败时 message 携带厂商返回的错误信息
+     */
+    public Map<String, Object> testConnection(String modelConfigId) {
+        Map<String, Object> result = new HashMap<>();
+        ModelConfig config = storageService.getModelConfigById(modelConfigId);
+        if (config == null) {
+            result.put("success", false);
+            result.put("message", "模型配置不存在");
+            return result;
+        }
+        if (config.getApiUrl() == null || config.getApiUrl().trim().isEmpty()
+                || config.getApiKey() == null || config.getApiKey().trim().isEmpty()) {
+            result.put("success", false);
+            result.put("message", "API 地址或 API Key 未配置");
+            return result;
+        }
+
+        boolean anthropic = "anthropic".equalsIgnoreCase(config.getProtocol());
+
+        // 拼接端点：OpenAI 兼容协议 /chat/completions，Anthropic /messages
+        String fullUrl = config.getApiUrl();
+        if (!fullUrl.endsWith("/")) {
+            fullUrl += "/";
+        }
+        fullUrl += anthropic ? "messages" : "chat/completions";
+
+        long start = System.currentTimeMillis();
+        try {
+            // 第一次：最小请求（"hi" + max_tokens=16）测连通与延迟
+            sharedWebClient.post()
+                    .uri(fullUrl)
+                    .headers(h -> applyAuthHeaders(h, config, anthropic))
+                    .bodyValue(buildTestBody(config, anthropic, "hi", 16))
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block(Duration.ofSeconds(20));
+            long cost = System.currentTimeMillis() - start;
+
+            // 第二次：短生成请求测速度（失败不影响连通结论，速度记为未知）
+            Double speed = measureSpeed(fullUrl, config, anthropic);
+
+            // 持久化测试指标（config 来自存储层含真实 apiKey，写回时会重新加密）
+            config.setTestLatencyMs((int) cost);
+            config.setTestSpeed(speed);
+            config.setTestedAt(nowString());
+            storageService.updateModelConfig(config);
+
+            result.put("success", true);
+            result.put("latencyMs", cost);
+            result.put("speed", speed);
+            String msg = "连接成功，延迟 " + cost + " ms";
+            if (speed != null) {
+                msg += "，速度 " + speed + " token/s";
+            }
+            result.put("message", msg);
+        } catch (Exception e) {
+            long cost = System.currentTimeMillis() - start;
+            // 测试失败清空历史指标并记录测试时间，避免展示过期数据造成误导
+            config.setTestLatencyMs(null);
+            config.setTestSpeed(null);
+            config.setTestedAt(nowString());
+            storageService.updateModelConfig(config);
+            String reason;
+            // 剥离响应式异常包装，取出厂商真实错误
+            Throwable cause = e;
+            while (cause.getCause() != null && !(cause instanceof WebClientResponseException)) {
+                cause = cause.getCause();
+            }
+            if (cause instanceof WebClientResponseException wce) {
+                String respBody = wce.getResponseBodyAsString();
+                reason = "HTTP " + wce.getStatusCode().value();
+                try {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> parsed = objectMapper.readValue(respBody, Map.class);
+                    Object errorObj = parsed.get("error");
+                    if (errorObj instanceof Map && ((Map<?, ?>) errorObj).get("message") != null) {
+                        reason += " - " + ((Map<?, ?>) errorObj).get("message");
+                    } else if (respBody != null && !respBody.isEmpty()) {
+                        reason += " - " + (respBody.length() > 200 ? respBody.substring(0, 200) : respBody);
+                    }
+                } catch (Exception parseEx) {
+                    if (respBody != null && !respBody.isEmpty()) {
+                        reason += " - " + (respBody.length() > 200 ? respBody.substring(0, 200) : respBody);
+                    }
+                }
+            } else if (cause.getMessage() != null && cause.getMessage().contains("Timeout")) {
+                reason = "连接超时（20 秒），请检查 API 地址是否可达";
+            } else {
+                reason = cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage();
+            }
+            log.warn("模型连通性测试失败: {} ({}) -> {}", config.getDisplayName(), config.getModelId(), reason);
+            result.put("success", false);
+            result.put("latencyMs", cost);
+            result.put("message", reason);
+        }
+        return result;
+    }
+
+    /**
+     * 构建连通测试用的非流式请求体（支持思考的模型显式关闭思考，降低测试成本）
+     */
+    private Map<String, Object> buildTestBody(ModelConfig config, boolean anthropic, String prompt, int maxTokens) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("model", config.getModelId());
+        body.put("stream", false);
+        body.put("max_tokens", maxTokens);
+        Map<String, Object> msg = new HashMap<>();
+        msg.put("role", "user");
+        msg.put("content", prompt);
+        body.put("messages", List.of(msg));
+        // 支持思考的模型需显式关闭思考（部分厂商非流式调用不允许开启思考，且避免消耗额外 token）
+        if (!anthropic && config.isSupportsThinking()) {
+            String type = config.getThinkingParamType() == null ? "default" : config.getThinkingParamType();
+            switch (type) {
+                case "qwen" -> body.put("enable_thinking", false);
+                case "deepseek", "kimi", "doubao", "zhipu" -> {
+                    Map<String, Object> thinkingOff = new HashMap<>();
+                    thinkingOff.put("type", "disabled");
+                    body.put("thinking", thinkingOff);
+                }
+                default -> { }
+            }
+        }
+        return body;
+    }
+
+    /**
+     * 测算生成速度：发一条短生成请求，用 usage 中的输出 token 数 / 总耗时估算 token/s。
+     * 任一环节失败返回 null（速度未知），不影响连通测试结论。
+     */
+    private Double measureSpeed(String fullUrl, ModelConfig config, boolean anthropic) {
+        try {
+            String prompt = "请从1数到50，用逗号分隔，不要输出任何其他内容";
+            long start = System.currentTimeMillis();
+            String resp = sharedWebClient.post()
+                    .uri(fullUrl)
+                    .headers(h -> applyAuthHeaders(h, config, anthropic))
+                    .bodyValue(buildTestBody(config, anthropic, prompt, 256))
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block(Duration.ofSeconds(30));
+            long elapsed = System.currentTimeMillis() - start;
+            if (resp == null || elapsed <= 0) {
+                return null;
+            }
+            // OpenAI 兼容: usage.completion_tokens；Anthropic: usage.output_tokens
+            Map<String, Object> parsed = objectMapper.readValue(resp, new TypeReference<Map<String, Object>>() {});
+            Object usageObj = parsed.get("usage");
+            if (!(usageObj instanceof Map)) {
+                return null;
+            }
+            Object tokens = ((Map<?, ?>) usageObj).get(anthropic ? "output_tokens" : "completion_tokens");
+            if (!(tokens instanceof Number) || ((Number) tokens).intValue() <= 0) {
+                return null;
+            }
+            // token/s 保留一位小数
+            return Math.round(((Number) tokens).intValue() * 10000.0 / elapsed) / 10.0;
+        } catch (Exception e) {
+            log.warn("模型测速失败（不影响连通结论）: {} ({}) -> {}",
+                    config.getDisplayName(), config.getModelId(), e.getMessage());
+            return null;
+        }
+    }
+
+    /** 当前时间字符串（与存储层 createdAt 格式一致） */
+    private String nowString() {
+        return java.time.LocalDateTime.now()
+                .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
     }
 
     /**

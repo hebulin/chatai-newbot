@@ -1,0 +1,72 @@
+/* ============================================
+   GLOBAL CSS VARIABLES - 深浅主题
+   ============================================ */
+
+:root {
+  --bg: #161616;
+  --bg-2: #1d1d1c;
+  --paper: #1d1d1c;
+  --paper-2: #2e2e2e;
+  --paper-3: #383838;
+  --ink: #eff1f4;
+  --ink-2: #949494;
+  --ink-3: #7f8d9f;
+  --ink-4: #5c5c5c;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-2: rgba(255, 255, 255, 0.12);
+  --line-strong: rgba(255, 255, 255, 0.20);
+  --accent: #fc2c50;
+  --primary: #4285f4;
+  --primary-hover: #66a3ff;
+  --border: #333333;
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.08);
+  --shadow-elevated: 0 4px 6px rgba(0,0,0,0.15), 0 2px 4px rgba(0,0,0,0.12);
+  --radius: 8px;
+  --radius-sm: 6px;
+  --radius-lg: 12px;
+  --sans: 'DM Sans', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  /* 别名变量：部分组件引用了 -1 后缀命名，指向现有主题变量，随深浅主题自动切换 */
+  --ink-1: var(--ink);
+  --surface-1: var(--paper);
+  --line-1: var(--line-2);
+}
+
+[data-theme="light"] {
+  --bg: #ffffff;
+  --bg-2: #ffffff;
+  --paper: #ffffff;
+  --paper-2: #f9f9fa;
+  --paper-3: #e8e8e8;
+  --ink: #0e1115;
+  --ink-2: #7f8d9f;
+  --ink-3: #7f8d9f;
+  --ink-4: #b0b0b0;
+  --line: rgba(0, 0, 0, 0.06);
+  --line-2: rgba(0, 0, 0, 0.10);
+  --line-strong: rgba(0, 0, 0, 0.18);
+  --accent: #4285f4;
+  --primary: #4285f4;
+  --primary-hover: #66a3ff;
+  --border: #ebebeb;
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-elevated: 0 4px 6px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04);
+}
+
+/* 全局基础 */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+#app { min-height: 100vh; }
+
+/* 滚动条 */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: var(--line-strong); }
