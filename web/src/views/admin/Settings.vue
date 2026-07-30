@@ -65,13 +65,28 @@
       </div>
     </div>
 
+    <div class="admin-card" v-loading="securityLoading" style="margin-top:20px;">
+      <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;color:var(--ink);">安全设置</h3>
+
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
+        <span style="font-size:13px;color:var(--ink-3);width:150px;">IP绑定校验</span>
+        <el-switch v-model="ipBindingEnabled" active-text="开启" inactive-text="关闭" />
+        <el-button type="primary" @click="handleSaveSecurity" :loading="securitySaving">保存</el-button>
+      </div>
+
+      <div style="font-size:13px;color:var(--ink-3);line-height:1.8;background:var(--paper-2);padding:12px 16px;border-radius:8px;border:1px solid var(--line);">
+        开启后，登录时的 IP 会绑定到登录凭证，后续请求 IP 发生变更将强制下线并要求重新登录，可防止凭证被盗用。
+        若用户网络环境 IP 频繁变化（如移动网络、公司出口多 IP）导致频繁被踢下线，可关闭此开关。保存后立即生效。
+      </div>
+    </div>
+
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getStorageSettings, setStorageMode, migrateData, getQuotaSettings, setQuotaSettings } from '@/api/settings'
+import { getStorageSettings, setStorageMode, migrateData, getQuotaSettings, setQuotaSettings, getSecuritySettings, setSecuritySettings } from '@/api/settings'
 
 const loading = ref(false)
 const migrating = ref(false)
@@ -82,6 +97,9 @@ const quotaSaving = ref(false)
 const dailyChatLimit = ref(0)
 const rateLimitPerMinute = ref(0)
 const contextMaxMessages = ref(0)
+const securityLoading = ref(false)
+const securitySaving = ref(false)
+const ipBindingEnabled = ref(true)
 
 async function loadSettings() {
   loading.value = true
@@ -178,6 +196,7 @@ async function handleToggle() {
 onMounted(() => {
   loadSettings()
   loadQuota()
+  loadSecurity()
 })
 
 // 加载每日配额设置
@@ -211,6 +230,34 @@ async function handleSaveQuota() {
     }
   } finally {
     quotaSaving.value = false
+  }
+}
+
+// 加载安全设置
+async function loadSecurity() {
+  securityLoading.value = true
+  try {
+    const res = await getSecuritySettings()
+    if (res?.success) {
+      ipBindingEnabled.value = res.data?.ipBindingEnabled ?? true
+    }
+  } finally {
+    securityLoading.value = false
+  }
+}
+
+// 保存安全设置
+async function handleSaveSecurity() {
+  securitySaving.value = true
+  try {
+    const res = await setSecuritySettings({ ipBindingEnabled: ipBindingEnabled.value })
+    if (res?.success) {
+      ElMessage.success(res.message || '保存成功')
+    } else {
+      ElMessage.error(res?.message || '保存失败')
+    }
+  } finally {
+    securitySaving.value = false
   }
 }
 </script>

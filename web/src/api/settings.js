@@ -25,6 +25,16 @@ export function setQuotaSettings(payload) {
   return request.put('/admin/settings/quota', payload)
 }
 
+// 获取安全设置（IP绑定校验开关）
+export function getSecuritySettings() {
+  return request.get('/admin/settings/security')
+}
+
+// 保存安全设置（payload: { ipBindingEnabled }）
+export function setSecuritySettings(payload) {
+  return request.put('/admin/settings/security', payload)
+}
+
 // 获取联网搜索设置（Key 仅返回掩码）
 export function getWebSearchSettings() {
   return request.get('/admin/settings/websearch')

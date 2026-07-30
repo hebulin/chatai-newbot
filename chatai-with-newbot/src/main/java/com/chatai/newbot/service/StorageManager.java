@@ -403,6 +403,37 @@ public class StorageManager implements StorageService {
         sqliteStorage.setSetting("context_max_messages", String.valueOf(Math.max(0, max)));
     }
 
+    // ========== 安全设置（存于 t_setting，两种存储模式通用） ==========
+
+    /** IP绑定开关缓存（每次请求都会读取，避免频繁查库） */
+    private volatile Boolean ipBindingEnabledCache;
+
+    /**
+     * IP绑定校验是否开启（登录后IP变更强制下线）
+     * @return true=开启（默认开启）
+     */
+    public boolean getIpBindingEnabled() {
+        Boolean cached = ipBindingEnabledCache;
+        if (cached != null) return cached;
+        boolean enabled;
+        try {
+            enabled = !"false".equals(sqliteStorage.getSetting("ip_binding_enabled"));
+        } catch (Exception e) {
+            enabled = true;
+        }
+        ipBindingEnabledCache = enabled;
+        return enabled;
+    }
+
+    /**
+     * 设置IP绑定校验开关
+     * @param enabled 是否开启
+     */
+    public void setIpBindingEnabled(boolean enabled) {
+        sqliteStorage.setSetting("ip_binding_enabled", enabled ? "true" : "false");
+        ipBindingEnabledCache = enabled;
+    }
+
     // ========== 联网搜索配置（Tavily，存于 t_setting，两种存储模式通用） ==========
 
     /**
@@ -763,6 +794,36 @@ public class StorageManager implements StorageService {
     @Override
     public List<String> getUsageLogDates() {
         return active().getUsageLogDates();
+    }
+
+    @Override
+    public List<UsageLog> queryUsageLogs(String username, String modelName, String startDate, String endDate, int offset, int limit) {
+        return active().queryUsageLogs(username, modelName, startDate, endDate, offset, limit);
+    }
+
+    @Override
+    public int countUsageLogs(String username, String modelName, String startDate, String endDate) {
+        return active().countUsageLogs(username, modelName, startDate, endDate);
+    }
+
+    @Override
+    public Map<String, Long> summarizeUsage(String username, String startDate, String endDate) {
+        return active().summarizeUsage(username, startDate, endDate);
+    }
+
+    @Override
+    public List<Map<String, Object>> aggregateUsageStats(List<String> usernames, String modelName, String startDate, String endDate) {
+        return active().aggregateUsageStats(usernames, modelName, startDate, endDate);
+    }
+
+    @Override
+    public List<String> getUsageUsernames() {
+        return active().getUsageUsernames();
+    }
+
+    @Override
+    public List<String> getUsageModelNames(String username) {
+        return active().getUsageModelNames(username);
     }
 
     // ========== 会话分享（恒走 SQLite，两种存储模式通用） ==========

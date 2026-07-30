@@ -562,6 +562,116 @@ public class JsonFileStorageService implements StorageService {
         return usageLogsByDay.keySet().stream().sorted().collect(Collectors.toList());
     }
 
+    // ========== 使用记录查询下推（JSON 模式下仍为内存过滤，与 SQLite 实现口径一致） ==========
+
+    /** 按筛选条件过滤使用记录（username/modelName/日期范围均可选） */
+    private List<UsageLog> filterUsageLogs(String username, String modelName, String startDate, String endDate) {
+        boolean hasStart = startDate != null && !startDate.isEmpty();
+        boolean hasEnd = endDate != null && !endDate.isEmpty();
+        return getAllUsageLogs().stream()
+                .filter(l -> username == null || username.isEmpty() || username.equals(l.getUsername()))
+                .filter(l -> modelName == null || modelName.isEmpty() || modelName.equals(l.getModelName()))
+                .filter(l -> {
+                    if (!hasStart && !hasEnd) return true;
+                    String ts = l.getTimestamp();
+                    if (ts == null || ts.length() < 10) return false;
+                    String d = ts.substring(0, 10);
+                    if (hasStart && d.compareTo(startDate) < 0) return false;
+                    return !hasEnd || d.compareTo(endDate) <= 0;
+                })
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    public List<UsageLog> queryUsageLogs(String username, String modelName, String startDate, String endDate,
+                                         int offset, int limit) {
+        List<UsageLog> logs = filterUsageLogs(username, modelName, startDate, endDate);
+        logs.sort((a, b) -> {
+            if (a.getTimestamp() == null && b.getTimestamp() == null) return 0;
+            if (a.getTimestamp() == null) return 1;
+            if (b.getTimestamp() == null) return -1;
+            return b.getTimestamp().compareTo(a.getTimestamp());
+        });
+        int from = Math.min(Math.max(offset, 0), logs.size());
+        int to = Math.min(from + Math.max(limit, 0), logs.size());
+        return new ArrayList<>(logs.subList(from, to));
+    }
+
+    @Override
+    public int countUsageLogs(String username, String modelName, String startDate, String endDate) {
+        return filterUsageLogs(username, modelName, startDate, endDate).size();
+    }
+
+    @Override
+    public Map<String, Long> summarizeUsage(String username, String startDate, String endDate) {
+        List<UsageLog> logs = filterUsageLogs(username, null, startDate, endDate);
+        Map<String, Long> result = new LinkedHashMap<>();
+        result.put("calls", (long) logs.size());
+        result.put("promptTokens", logs.stream().mapToLong(UsageLog::getPromptTokens).sum());
+        result.put("completionTokens", logs.stream().mapToLong(UsageLog::getCompletionTokens).sum());
+        result.put("reasoningTokens", logs.stream().mapToLong(UsageLog::getReasoningTokens).sum());
+        return result;
+    }
+
+    @Override
+    public List<Map<String, Object>> aggregateUsageStats(List<String> usernames, String modelName,
+                                                         String startDate, String endDate) {
+        List<UsageLog> logs = filterUsageLogs(null, modelName, startDate, endDate);
+        if (usernames != null && !usernames.isEmpty()) {
+            Set<String> nameSet = new HashSet<>(usernames);
+            logs = logs.stream().filter(l -> nameSet.contains(l.getUsername())).collect(Collectors.toList());
+        }
+        Map<String, List<UsageLog>> grouped = logs.stream()
+                .collect(Collectors.groupingBy(l ->
+                        (l.getUsername() != null ? l.getUsername() : "未知") + "|" +
+                        (l.getTimestamp() != null ? l.getTimestamp().substring(0, Math.min(10, l.getTimestamp().length())) : "未知") + "|" +
+                        (l.getModelName() != null ? l.getModelName() : "未知")
+                ));
+        List<Map<String, Object>> statsList = new ArrayList<>();
+        for (Map.Entry<String, List<UsageLog>> entry : grouped.entrySet()) {
+            String[] keys = entry.getKey().split("\\|", 3);
+            List<UsageLog> group = entry.getValue();
+            Map<String, Object> row = new HashMap<>();
+            row.put("username", keys[0]);
+            row.put("date", keys[1]);
+            row.put("modelName", keys[2]);
+            row.put("count", group.size());
+            row.put("promptTokens", group.stream().mapToInt(UsageLog::getPromptTokens).sum());
+            row.put("completionTokens", group.stream().mapToInt(UsageLog::getCompletionTokens).sum());
+            row.put("cachedTokens", group.stream().mapToInt(UsageLog::getCachedTokens).sum());
+            row.put("reasoningTokens", group.stream().mapToInt(UsageLog::getReasoningTokens).sum());
+            row.put("thinkingCount", group.stream().filter(UsageLog::isDeepThinking).count());
+            statsList.add(row);
+        }
+        statsList.sort((a, b) -> {
+            int dateCompare = ((String) b.get("date")).compareTo((String) a.get("date"));
+            if (dateCompare != 0) return dateCompare;
+            int userCompare = ((String) a.get("username")).compareTo((String) b.get("username"));
+            if (userCompare != 0) return userCompare;
+            return ((String) a.get("modelName")).compareTo((String) b.get("modelName"));
+        });
+        return statsList;
+    }
+
+    @Override
+    public List<String> getUsageUsernames() {
+        return getAllUsageLogs().stream()
+                .map(UsageLog::getUsername)
+                .filter(Objects::nonNull)
+                .distinct().sorted()
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    public List<String> getUsageModelNames(String username) {
+        return getAllUsageLogs().stream()
+                .filter(l -> username == null || username.isEmpty() || username.equals(l.getUsername()))
+                .map(UsageLog::getModelName)
+                .filter(Objects::nonNull)
+                .distinct().sorted()
+                .collect(Collectors.toList());
+    }
+
     // ========== 文件读写 ==========
 
     /** 加载用户列表 */

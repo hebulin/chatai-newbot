@@ -62,25 +62,16 @@ public class UsageController {
         if (rangeCheck != null) return rangeCheck;
 
         String effectiveUsername = resolveUsernameScope(request, username);
-        List<UsageLog> logs = filterLogs(storageService.getAllUsageLogs(), effectiveUsername, modelName, startDate, endDate);
-
-        logs.sort((a, b) -> {
-            if (a.getTimestamp() == null && b.getTimestamp() == null) return 0;
-            if (a.getTimestamp() == null) return 1;
-            if (b.getTimestamp() == null) return -1;
-            return b.getTimestamp().compareTo(a.getTimestamp());
-        });
-
-        int total = logs.size();
         if (page < 1) page = 1;
         if (size < 1) size = 20;
         if (size > 500) size = 500;
+        int total = storageService.countUsageLogs(effectiveUsername, modelName, startDate, endDate);
         int totalPages = Math.max(1, (int) Math.ceil((double) total / size));
-        int fromIndex = Math.min((page - 1) * size, total);
-        int toIndex = Math.min(fromIndex + size, total);
+        int offset = Math.min((page - 1) * size, total);
+        List<UsageLog> logs = storageService.queryUsageLogs(effectiveUsername, modelName, startDate, endDate, offset, size);
 
         result.put("success", true);
-        result.put("data", logs.subList(fromIndex, toIndex));
+        result.put("data", logs);
         result.put("total", total);
         result.put("page", page);
         result.put("size", size);
@@ -100,18 +91,13 @@ public class UsageController {
             HttpServletRequest request) {
         Map<String, Object> result = new HashMap<>();
         String effectiveUsername = resolveUsernameScope(request, username);
-        List<UsageLog> logs = filterLogs(storageService.getAllUsageLogs(), effectiveUsername, null, startDate, endDate);
-
-        int calls = logs.size();
-        int promptTokens = logs.stream().mapToInt(UsageLog::getPromptTokens).sum();
-        int completionTokens = logs.stream().mapToInt(UsageLog::getCompletionTokens).sum();
-        int reasoningTokens = logs.stream().mapToInt(UsageLog::getReasoningTokens).sum();
+        Map<String, Long> sums = storageService.summarizeUsage(effectiveUsername, startDate, endDate);
 
         Map<String, Object> data = new HashMap<>();
-        data.put("calls", calls);
-        data.put("promptTokens", promptTokens);
-        data.put("completionTokens", completionTokens);
-        data.put("reasoningTokens", reasoningTokens);
+        data.put("calls", sums.getOrDefault("calls", 0L));
+        data.put("promptTokens", sums.getOrDefault("promptTokens", 0L));
+        data.put("completionTokens", sums.getOrDefault("completionTokens", 0L));
+        data.put("reasoningTokens", sums.getOrDefault("reasoningTokens", 0L));
 
         result.put("success", true);
         result.put("data", data);
@@ -125,23 +111,16 @@ public class UsageController {
     public Map<String, Object> getUsageFilters(HttpServletRequest request) {
         Map<String, Object> result = new HashMap<>();
         User user = (User) request.getAttribute("currentUser");
-        List<UsageLog> logs = storageService.getAllUsageLogs();
 
         List<String> usernames;
         List<String> modelNames;
         if (user != null && user.isAdmin()) {
-            usernames = logs.stream().map(UsageLog::getUsername).filter(Objects::nonNull).distinct().sorted().collect(Collectors.toList());
-            modelNames = logs.stream().map(UsageLog::getModelName).filter(Objects::nonNull).distinct().sorted().collect(Collectors.toList());
+            usernames = storageService.getUsageUsernames();
+            modelNames = storageService.getUsageModelNames(null);
         } else {
             String me = user != null ? user.getUsername() : "";
             usernames = Collections.singletonList(me);
-            modelNames = logs.stream()
-                    .filter(l -> me.equals(l.getUsername()))
-                    .map(UsageLog::getModelName)
-                    .filter(Objects::nonNull)
-                    .distinct()
-                    .sorted()
-                    .collect(Collectors.toList());
+            modelNames = storageService.getUsageModelNames(me);
         }
 
         result.put("success", true);
@@ -172,50 +151,22 @@ public class UsageController {
         if (rangeCheck != null) return rangeCheck;
 
         String effectiveUsername = resolveUsernameScope(request, username);
-        List<UsageLog> logs = filterLogs(storageService.getAllUsageLogs(), effectiveUsername, modelName, startDate, endDate);
 
-        // 多用户筛选：仅管理员生效，普通用户已被 resolveUsernameScope 限制为本人
+        // 用户范围：普通用户强制本人；管理员支持多用户筛选（逗号分隔）或单用户筛选
+        List<String> nameList = null;
         if (isAdmin(request) && usernames != null && !usernames.isEmpty()) {
-            Set<String> nameSet = Arrays.stream(usernames.split(","))
+            List<String> parsed = Arrays.stream(usernames.split(","))
                     .map(String::trim)
                     .filter(s -> !s.isEmpty())
-                    .collect(Collectors.toSet());
-            if (!nameSet.isEmpty()) {
-                logs = logs.stream().filter(l -> nameSet.contains(l.getUsername())).collect(Collectors.toList());
-            }
+                    .distinct()
+                    .collect(Collectors.toList());
+            if (!parsed.isEmpty()) nameList = parsed;
+        }
+        if (nameList == null && effectiveUsername != null && !effectiveUsername.isEmpty()) {
+            nameList = Collections.singletonList(effectiveUsername);
         }
 
-        Map<String, List<UsageLog>> grouped = logs.stream()
-                .collect(Collectors.groupingBy(l ->
-                        (l.getUsername() != null ? l.getUsername() : "未知") + "|" +
-                        (l.getTimestamp() != null ? l.getTimestamp().substring(0, Math.min(10, l.getTimestamp().length())) : "未知") + "|" +
-                        (l.getModelName() != null ? l.getModelName() : "未知")
-                ));
-
-        List<Map<String, Object>> statsList = new ArrayList<>();
-        for (Map.Entry<String, List<UsageLog>> entry : grouped.entrySet()) {
-            String[] keys = entry.getKey().split("\\|", 3);
-            List<UsageLog> group = entry.getValue();
-            Map<String, Object> row = new HashMap<>();
-            row.put("username", keys[0]);
-            row.put("date", keys[1]);
-            row.put("modelName", keys[2]);
-            row.put("count", group.size());
-            row.put("promptTokens", group.stream().mapToInt(UsageLog::getPromptTokens).sum());
-            row.put("completionTokens", group.stream().mapToInt(UsageLog::getCompletionTokens).sum());
-            row.put("cachedTokens", group.stream().mapToInt(UsageLog::getCachedTokens).sum());
-            row.put("reasoningTokens", group.stream().mapToInt(UsageLog::getReasoningTokens).sum());
-            row.put("thinkingCount", group.stream().filter(UsageLog::isDeepThinking).count());
-            statsList.add(row);
-        }
-
-        statsList.sort((a, b) -> {
-            int dateCompare = ((String) b.get("date")).compareTo((String) a.get("date"));
-            if (dateCompare != 0) return dateCompare;
-            int userCompare = ((String) a.get("username")).compareTo((String) b.get("username"));
-            if (userCompare != 0) return userCompare;
-            return ((String) a.get("modelName")).compareTo((String) b.get("modelName"));
-        });
+        List<Map<String, Object>> statsList = storageService.aggregateUsageStats(nameList, modelName, startDate, endDate);
 
         int total = statsList.size();
         if (page < 1) page = 1;
@@ -240,28 +191,6 @@ public class UsageController {
             result.put("totalPages", totalPages);
         }
         return result;
-    }
-
-    private List<UsageLog> filterLogs(List<UsageLog> logs, String username, String modelName, String startDate, String endDate) {
-        if (username != null && !username.isEmpty()) {
-            logs = logs.stream().filter(l -> username.equals(l.getUsername())).collect(Collectors.toList());
-        }
-        if (modelName != null && !modelName.isEmpty()) {
-            logs = logs.stream().filter(l -> modelName.equals(l.getModelName())).collect(Collectors.toList());
-        }
-        boolean hasStart = startDate != null && !startDate.isEmpty();
-        boolean hasEnd = endDate != null && !endDate.isEmpty();
-        if (hasStart || hasEnd) {
-            logs = logs.stream().filter(l -> {
-                String ts = l.getTimestamp();
-                if (ts == null || ts.length() < 10) return false;
-                String d = ts.substring(0, 10);
-                if (hasStart && d.compareTo(startDate) < 0) return false;
-                if (hasEnd && d.compareTo(endDate) > 0) return false;
-                return true;
-            }).collect(Collectors.toList());
-        }
-        return logs;
     }
 
     private Map<String, Object> validateDateRange(String startDate, String endDate) {

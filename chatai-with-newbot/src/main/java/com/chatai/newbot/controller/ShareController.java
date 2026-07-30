@@ -14,6 +14,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 会话分享接口
@@ -40,10 +41,13 @@ public class ShareController {
     public Map<String, Object> list(HttpServletRequest request) {
         User user = (User) request.getAttribute("currentUser");
         Map<String, Object> result = new HashMap<>();
-        // 只涉及当前用户，会话历史加载一次即可
-        Object chats = chatHistoryService.loadChatHistory(user.getId()).get("chats");
+        List<ChatShare> shares = storageManager.getChatSharesByUser(user.getId());
+        // 只做会话存在性检查，不加载消息正文
+        List<String> chatIds = new ArrayList<>();
+        for (ChatShare s : shares) chatIds.add(s.getChatId());
+        Set<String> existingChatIds = chatHistoryService.filterExistingChats(user.getId(), chatIds);
         List<Map<String, Object>> list = new ArrayList<>();
-        for (ChatShare s : storageManager.getChatSharesByUser(user.getId())) {
+        for (ChatShare s : shares) {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("id", s.getId());
             item.put("chatId", s.getChatId());
@@ -52,7 +56,7 @@ public class ShareController {
             item.put("title", s.getTitle());
             item.put("createdAt", s.getCreatedAt());
             item.put("expiresAt", s.getExpiresAt());
-            item.put("status", resolveShareStatus(s, chats));
+            item.put("status", resolveShareStatus(s, existingChatIds));
             list.add(item);
         }
         result.put("success", true);
@@ -188,7 +192,7 @@ public class ShareController {
         }
 
         List<Map<String, Object>> messages = extractChatMessages(share.getUserId(), share.getChatId());
-        if (messages == null) {
+        if (messages == null || messages.isEmpty()) {
             result.put("success", false);
             result.put("message", "分享的会话已被删除");
             return result;
@@ -219,24 +223,18 @@ public class ShareController {
     /**
      * 判定分享状态：已过期 > 源会话已删 > 有效（与后台分享管理口径一致）
      */
-    private String resolveShareStatus(ChatShare s, Object chats) {
+    private String resolveShareStatus(ChatShare s, Set<String> existingChatIds) {
         if (isExpired(s.getExpiresAt())) return "expired";
-        if (!(chats instanceof Map) || !(((Map<?, ?>) chats).get(s.getChatId()) instanceof List)) {
-            return "orphaned";
-        }
-        return "valid";
+        return existingChatIds.contains(s.getChatId()) ? "valid" : "orphaned";
     }
 
     /**
-     * 从用户会话历史中取出指定会话的消息列表
-     * @return 消息列表；会话不存在返回 null
+     * 加载指定会话的消息列表（仅加载目标会话，不拉取全量历史）
+     * @return 消息列表；会话不存在时为空列表
      */
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> extractChatMessages(String userId, String chatId) {
-        Map<String, Object> history = chatHistoryService.loadChatHistory(userId);
-        Object chatsObj = history.get("chats");
-        if (!(chatsObj instanceof Map)) return null;
-        Object msgs = ((Map<String, Object>) chatsObj).get(chatId);
+        Object msgs = chatHistoryService.loadSingleChat(userId, chatId).get("messages");
         return msgs instanceof List ? (List<Map<String, Object>>) msgs : null;
     }
 
