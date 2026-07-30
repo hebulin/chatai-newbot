@@ -66,17 +66,14 @@
             </template>
           </el-dropdown>
           <span v-if="allRolePresets.length" class="toolbar-divider"></span>
-          <div class="upload-image-btn" :title="t('input.uploadImage')" @click="triggerUpload">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-          </div>
-          <div class="upload-image-btn" :title="t('input.uploadDoc')" @click="triggerDocUpload">
+          <!-- 附件按钮：图片与文本文档统一入口，按文件类型自动分流 -->
+          <div class="upload-image-btn" :title="t('input.uploadAttach')" @click="triggerAttachUpload">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
           </div>
           <div class="upload-image-btn" :title="t('input.clearContext')" @click="emit('clear-context')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m13 11 9-9"/><path d="M14.6 12.6c.8.8.9 2.1.2 3L10 22l-8-8 6.4-4.8c.9-.7 2.2-.6 3 .2Z"/><path d="m6.8 10.4 6.8 6.8"/><path d="m5 17 1.4-1.4"/></svg>
           </div>
-          <input type="file" ref="fileInputRef" accept="image/*" multiple style="display:none" @change="handleFileUpload">
-          <input type="file" ref="docInputRef" :accept="DOC_ACCEPT" multiple style="display:none" @change="handleDocUpload">
+          <input type="file" ref="attachInputRef" :accept="ATTACH_ACCEPT" multiple style="display:none" @change="handleAttachUpload">
           <div class="model-select-area">
             <img v-if="currentIconIsImg" :src="currentIcon" class="model-area-icon" />
             <span v-else-if="currentIcon" class="model-area-icon model-area-emoji">{{ currentIcon }}</span>
@@ -164,14 +161,15 @@ const pendingImages = ref([])
 const pendingFiles = ref([]) // 待发送附件文档：{ name, url, chars, uploading }
 const pasteWarning = ref('')
 const textareaRef = ref(null)
-const fileInputRef = ref(null)
-const docInputRef = ref(null)
+const attachInputRef = ref(null)
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024
 const MAX_DOC_SIZE = 3 * 1024 * 1024
 // 支持的文本类文档类型（与后端 DocumentParseService 白名单一致），暂不支持 pdf
 const DOC_EXTS = ['txt', 'log', 'md', 'markdown', 'csv', 'json', 'xml', 'yml', 'yaml', 'properties', 'doc', 'docx', 'xls', 'xlsx']
 const DOC_ACCEPT = DOC_EXTS.map(ext => '.' + ext).join(',')
+// 附件选择器同时接受图片与文本文档，选中后按类型分流处理
+const ATTACH_ACCEPT = 'image/*,' + DOC_ACCEPT
 
 function extOf(filename) {
   const idx = (filename || '').lastIndexOf('.')
@@ -470,20 +468,30 @@ function handlePaste(e) {
   docFiles.forEach(file => addDocFile(file))
 }
 
-function triggerUpload() {
-  if (fileInputRef.value) {
-    fileInputRef.value.value = ''
-    fileInputRef.value.click()
+// 统一附件入口：图片走图片上传，白名单文档走附件解析，其余类型提示不支持
+function triggerAttachUpload() {
+  if (attachInputRef.value) {
+    attachInputRef.value.value = ''
+    attachInputRef.value.click()
   }
 }
 
-function handleFileUpload(e) {
+function handleAttachUpload(e) {
   const files = e.target.files
   if (!files || files.length === 0) return
+  const unsupported = []
   Array.from(files).forEach(file => {
-    if (!file.type.includes('image')) return
-    addImageFile(file)
+    if (file.type.includes('image')) {
+      addImageFile(file)
+    } else if (DOC_EXTS.includes(extOf(file.name))) {
+      addDocFile(file)
+    } else {
+      unsupported.push(file.name || t('common.unknown'))
+    }
   })
+  if (unsupported.length > 0) {
+    ElMessage.warning(t('input.unsupportedAttach', { names: unsupported.join('、') }))
+  }
 }
 
 // 上传图片到服务端，成功后以文件 URL 加入待发送列表（替代原 base64 内嵌）
@@ -547,19 +555,6 @@ function removeImage(idx) {
 }
 
 // ===== 附件文档上传（服务端解析为纯文本，不依赖模型多模态） =====
-function triggerDocUpload() {
-  if (docInputRef.value) {
-    docInputRef.value.value = ''
-    docInputRef.value.click()
-  }
-}
-
-function handleDocUpload(e) {
-  const files = e.target.files
-  if (!files || files.length === 0) return
-  Array.from(files).forEach(file => addDocFile(file))
-}
-
 // 上传并解析附件：先占位展示“解析中”，成功后回填引用 URL 与字数，失败则移除占位
 async function addDocFile(file) {
   if (file.size > MAX_DOC_SIZE) {

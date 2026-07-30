@@ -767,10 +767,10 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
 .token-wave span:nth-child(3) { animation-delay: 0.3s; }
 @keyframes tokenWave { 0%, 60%, 100% { transform: scaleY(0.4); opacity: 0.4; } 30% { transform: scaleY(1); opacity: 1; } }
 .msg-footer .footer-copy-btn {
-    background: none; border: 1px solid var(--border);
+    background: none; border: none;
     color: var(--fg-3);
     cursor: pointer;
-    padding: 2px 8px;
+    padding: 2px 6px;
     transition: all 0.15s;
     display: flex;
     align-items: center;
@@ -779,7 +779,7 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
     letter-spacing: 0.04em;
     border-radius: var(--radius-sm);
 }
-.msg-footer .footer-copy-btn:hover { color: var(--primary); border-color: var(--primary); }
+.msg-footer .footer-copy-btn:hover { color: var(--primary); background: var(--primary-soft); }
 .msg-copy-btn { display: none; }
 
 /* ============================================
@@ -1635,7 +1635,7 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
 }
 .input-inner-toolbar > * { pointer-events: auto; }
 
-/* Think icon button */
+/* Think icon button（简约风：无边框，悬停淡色底） */
 .think-icon-btn {
     width: 28px; height: 28px;
     display: flex;
@@ -1644,14 +1644,14 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
     cursor: pointer;
     transition: all 0.2s;
     background: transparent;
-    border: 1px solid var(--border);
+    border: none;
     color: var(--fg-3);
     flex-shrink: 0;
     border-radius: var(--radius-sm);
 }
-.think-icon-btn:hover { border-color: var(--primary); color: var(--primary); }
-.think-icon-btn.active { background: var(--primary); color: #ffffff; border-color: var(--primary); }
-.think-icon-btn.active:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+.think-icon-btn:hover { background: var(--primary-soft); color: var(--primary); }
+.think-icon-btn.active { background: var(--primary); color: #ffffff; }
+.think-icon-btn.active:hover { background: var(--primary-hover); }
 
 /* Toolbar divider */
 .toolbar-divider {
@@ -1661,7 +1661,7 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
     flex-shrink: 0;
 }
 
-/* Upload image button */
+/* Upload attachment button（简约风：无边框，悬停淡色底） */
 .upload-image-btn {
     width: 28px; height: 28px;
     display: flex;
@@ -1670,12 +1670,12 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
     cursor: pointer;
     transition: all 0.2s;
     background: transparent;
-    border: 1px solid var(--border);
+    border: none;
     color: var(--fg-3);
     flex-shrink: 0;
     border-radius: var(--radius-sm);
 }
-.upload-image-btn:hover { border-color: var(--primary); color: var(--primary); }
+.upload-image-btn:hover { background: var(--primary-soft); color: var(--primary); }
 
 /* Model select — el-cascader 嵌入工具栏 */
 .model-select-area { position: relative; margin-left: auto; flex: 1; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 3px; }
@@ -1882,9 +1882,9 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
 .send-btn::before { content: none; }
 .send-btn > * { position: relative; z-index: 1; transition: color 0.3s; }
 .send-btn:hover { background: var(--primary-hover); }
-.send-btn.stop { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+.send-btn.stop { background: var(--danger-soft); color: var(--danger); border: none; }
 .send-btn.stop::before { content: none; }
-.send-btn.stop:hover { background: var(--danger-soft); }
+.send-btn.stop:hover { background: var(--danger); color: #ffffff; }
 
 .input-footer {
     display: flex;
