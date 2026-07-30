@@ -76,6 +76,9 @@ public class SqliteStorageService implements StorageService {
             ensureAdminUser();
             log.info("SQLite: 已确保admin用户存在");
 
+            // 预置模型播种（全新库首次启动时写入各厂商旗舰模型待启用条目）
+            seedDefaultModelConfigs();
+
             log.info("SQLite存储服务初始化完成");
         } catch (Exception e) {
             log.error("初始化SQLite存储服务失败", e);
@@ -463,6 +466,55 @@ public class SqliteStorageService implements StorageService {
             admin.setCreatedAt(nowString());
             insertUser(admin);
             log.info("SQLite: 已创建内置admin账户");
+        }
+    }
+
+    /**
+     * 预置模型播种（项目重置/全新部署时的默认数据加载）：
+     * 模型表为空且从未播种过时，为每个内置厂商写入首个（旗舰）模型的待启用条目，
+     * API Key 留空、默认禁用，管理员补填 Key 后启用即可使用。
+     * 播种完成后写入 default_models_seeded 标记，删除播种模型不会重复播种；
+     * 存在待迁移的旧版 JSON 模型数据时跳过，避免与迁移结果重复。
+     */
+    private void seedDefaultModelConfigs() {
+        try {
+            if ("true".equals(getSetting("default_models_seeded"))) return;
+            Integer count = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM t_model_config", Integer.class);
+            if (count != null && count > 0) {
+                // 已有模型数据（老库/已迁移），仅补标记不播种
+                setSetting("default_models_seeded", "true");
+                return;
+            }
+            // 旧版 JSON 模型数据尚未迁移时不播种，由自动迁移导入后再走上面的补标记分支
+            if (!"true".equals(getSetting("migration_done"))) {
+                java.io.File legacyModels = java.nio.file.Paths
+                        .get(System.getProperty("user.dir"), "data", "models.json").toFile();
+                if (legacyModels.exists() && legacyModels.length() > 2) return;
+            }
+            int seeded = 0;
+            for (Provider p : providers) {
+                if (p.getModels() == null || p.getModels().isEmpty()) continue;
+                ProviderModel pm = p.getModels().get(0);
+                ModelConfig config = new ModelConfig();
+                config.setProviderId(p.getId());
+                config.setModelId(pm.getId());
+                config.setDisplayName(pm.getName());
+                config.setApiKey("");
+                config.setApiUrl(p.getDefaultApiUrl());
+                config.setProtocol(p.getProtocol());
+                config.setSupportsThinking(pm.isSupportsThinking());
+                config.setSupportsMultimodal(pm.isSupportsMultimodal());
+                config.setEnabled(false);
+                config.setVisibleToAll(true);
+                config.setBuiltIn(true);
+                addModelConfig(config);
+                seeded++;
+            }
+            setSetting("default_models_seeded", "true");
+            log.info("SQLite: 已播种 {} 个预置模型（禁用状态，需管理员配置 API Key 后启用）", seeded);
+        } catch (Exception e) {
+            log.warn("SQLite: 预置模型播种失败（非致命，不影响启动）", e);
         }
     }
 
@@ -1018,6 +1070,132 @@ public class SqliteStorageService implements StorageService {
                 "DELETE FROM t_usage_log WHERE SUBSTR(timestamp, 1, 10) < ?", day);
     }
 
+    // ========== 使用记录查询下推（筛选/分页/聚合在 SQL 层完成） ==========
+
+    /**
+     * 拼接用量查询的 WHERE 子句（username/modelName/日期范围），参数追加到 args
+     * @return WHERE 子句（含前导空格），无条件返回空字符串
+     */
+    private String buildUsageWhere(String username, String modelName, String startDate, String endDate,
+                                   List<Object> args) {
+        List<String> conds = new ArrayList<>();
+        if (username != null && !username.isEmpty()) {
+            conds.add("username = ?");
+            args.add(username);
+        }
+        if (modelName != null && !modelName.isEmpty()) {
+            conds.add("model_name = ?");
+            args.add(modelName);
+        }
+        // timestamp 为 yyyy-MM-dd HH:mm:ss，字典序比较即日期比较（含边界当天），可命中 idx_usage_time
+        if (startDate != null && !startDate.isEmpty()) {
+            conds.add("timestamp >= ?");
+            args.add(startDate);
+        }
+        if (endDate != null && !endDate.isEmpty()) {
+            conds.add("timestamp < ?");
+            args.add(LocalDate.parse(endDate).plusDays(1).toString());
+        }
+        return conds.isEmpty() ? "" : " WHERE " + String.join(" AND ", conds);
+    }
+
+    @Override
+    public List<UsageLog> queryUsageLogs(String username, String modelName, String startDate, String endDate,
+                                         int offset, int limit) {
+        List<Object> args = new ArrayList<>();
+        String where = buildUsageWhere(username, modelName, startDate, endDate, args);
+        args.add(limit);
+        args.add(offset);
+        return jdbcTemplate.query(
+                "SELECT * FROM t_usage_log" + where + " ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+                usageLogRowMapper, args.toArray());
+    }
+
+    @Override
+    public int countUsageLogs(String username, String modelName, String startDate, String endDate) {
+        List<Object> args = new ArrayList<>();
+        String where = buildUsageWhere(username, modelName, startDate, endDate, args);
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_usage_log" + where, Integer.class, args.toArray());
+        return count == null ? 0 : count;
+    }
+
+    @Override
+    public Map<String, Long> summarizeUsage(String username, String startDate, String endDate) {
+        List<Object> args = new ArrayList<>();
+        String where = buildUsageWhere(username, null, startDate, endDate, args);
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+                "SELECT COUNT(*) AS calls, COALESCE(SUM(prompt_tokens),0) AS prompt_tokens, " +
+                "COALESCE(SUM(completion_tokens),0) AS completion_tokens, " +
+                "COALESCE(SUM(reasoning_tokens),0) AS reasoning_tokens FROM t_usage_log" + where,
+                args.toArray());
+        Map<String, Long> result = new LinkedHashMap<>();
+        result.put("calls", ((Number) row.get("calls")).longValue());
+        result.put("promptTokens", ((Number) row.get("prompt_tokens")).longValue());
+        result.put("completionTokens", ((Number) row.get("completion_tokens")).longValue());
+        result.put("reasoningTokens", ((Number) row.get("reasoning_tokens")).longValue());
+        return result;
+    }
+
+    @Override
+    public List<Map<String, Object>> aggregateUsageStats(List<String> usernames, String modelName,
+                                                         String startDate, String endDate) {
+        List<Object> args = new ArrayList<>();
+        String where = buildUsageWhere(null, modelName, startDate, endDate, args);
+        if (usernames != null && !usernames.isEmpty()) {
+            String in = usernames.stream().map(u -> "?").collect(Collectors.joining(","));
+            where += (where.isEmpty() ? " WHERE " : " AND ") + "username IN (" + in + ")";
+            args.addAll(usernames);
+        }
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT COALESCE(username,'未知') AS username, " +
+                "COALESCE(SUBSTR(timestamp,1,10),'未知') AS date, " +
+                "COALESCE(model_name,'未知') AS model_name, " +
+                "COUNT(*) AS count, " +
+                "COALESCE(SUM(prompt_tokens),0) AS prompt_tokens, " +
+                "COALESCE(SUM(completion_tokens),0) AS completion_tokens, " +
+                "COALESCE(SUM(cached_tokens),0) AS cached_tokens, " +
+                "COALESCE(SUM(reasoning_tokens),0) AS reasoning_tokens, " +
+                "COALESCE(SUM(deep_thinking),0) AS thinking_count " +
+                "FROM t_usage_log" + where + " " +
+                "GROUP BY 1, 2, 3 ORDER BY date DESC, username ASC, model_name ASC",
+                args.toArray());
+        List<Map<String, Object>> statsList = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            Map<String, Object> item = new HashMap<>();
+            item.put("username", row.get("username"));
+            item.put("date", row.get("date"));
+            item.put("modelName", row.get("model_name"));
+            item.put("count", ((Number) row.get("count")).intValue());
+            item.put("promptTokens", ((Number) row.get("prompt_tokens")).intValue());
+            item.put("completionTokens", ((Number) row.get("completion_tokens")).intValue());
+            item.put("cachedTokens", ((Number) row.get("cached_tokens")).intValue());
+            item.put("reasoningTokens", ((Number) row.get("reasoning_tokens")).intValue());
+            item.put("thinkingCount", ((Number) row.get("thinking_count")).longValue());
+            statsList.add(item);
+        }
+        return statsList;
+    }
+
+    @Override
+    public List<String> getUsageUsernames() {
+        return jdbcTemplate.queryForList(
+                "SELECT DISTINCT username FROM t_usage_log WHERE username IS NOT NULL ORDER BY username",
+                String.class);
+    }
+
+    @Override
+    public List<String> getUsageModelNames(String username) {
+        if (username != null && !username.isEmpty()) {
+            return jdbcTemplate.queryForList(
+                    "SELECT DISTINCT model_name FROM t_usage_log WHERE model_name IS NOT NULL AND username = ? ORDER BY model_name",
+                    String.class, username);
+        }
+        return jdbcTemplate.queryForList(
+                "SELECT DISTINCT model_name FROM t_usage_log WHERE model_name IS NOT NULL ORDER BY model_name",
+                String.class);
+    }
+
     // ========== 聊天记录（按会话行存储 + 旧整文档兼容） ==========
 
     /**
@@ -1136,6 +1314,16 @@ public class SqliteStorageService implements StorageService {
         List<Map<String, Object>> list = jdbcTemplate.queryForList(
                 "SELECT messages, meta FROM t_chat_session WHERE user_id = ? AND chat_id = ?", userId, chatId);
         return list.isEmpty() ? null : list.get(0);
+    }
+
+    /**
+     * 查询用户全部会话 ID（仅 ID 列，分享状态判定等存在性检查用，不加载消息正文）
+     * @param userId 用户ID
+     * @return 会话ID列表
+     */
+    public List<String> listChatSessionIds(String userId) {
+        return jdbcTemplate.queryForList(
+                "SELECT chat_id FROM t_chat_session WHERE user_id = ?", String.class, userId);
     }
 
     /**

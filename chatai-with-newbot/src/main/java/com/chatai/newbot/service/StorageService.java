@@ -231,4 +231,61 @@ public interface StorageService {
      * @return 日期字符串列表（yyyy-MM-dd），已排序
      */
     List<String> getUsageLogDates();
+
+    // ========== 使用记录查询下推（筛选/分页/聚合在存储层完成，避免全表加载到内存） ==========
+
+    /**
+     * 按条件分页查询使用记录（按时间降序）
+     * @param username 用户名筛选，null/空=不筛选
+     * @param modelName 模型名筛选，null/空=不筛选
+     * @param startDate 开始日期（yyyy-MM-dd，含当天），null/空=不限
+     * @param endDate 结束日期（yyyy-MM-dd，含当天），null/空=不限
+     * @param offset 偏移量（从0开始）
+     * @param limit 返回条数上限
+     * @return 当页使用记录列表
+     */
+    List<UsageLog> queryUsageLogs(String username, String modelName, String startDate, String endDate, int offset, int limit);
+
+    /**
+     * 按条件统计使用记录总条数（与 queryUsageLogs 相同的筛选口径）
+     * @param username 用户名筛选，null/空=不筛选
+     * @param modelName 模型名筛选，null/空=不筛选
+     * @param startDate 开始日期（含当天），null/空=不限
+     * @param endDate 结束日期（含当天），null/空=不限
+     * @return 记录总条数
+     */
+    int countUsageLogs(String username, String modelName, String startDate, String endDate);
+
+    /**
+     * 按条件汇总使用量（总调用次数与各类 Token 总量）
+     * @param username 用户名筛选，null/空=不筛选
+     * @param startDate 开始日期（含当天），null/空=不限
+     * @param endDate 结束日期（含当天），null/空=不限
+     * @return 含 calls/promptTokens/completionTokens/reasoningTokens 的汇总 Map
+     */
+    Map<String, Long> summarizeUsage(String username, String startDate, String endDate);
+
+    /**
+     * 按（用户名, 日期, 模型名）维度聚合使用统计
+     * @param usernames 用户名列表筛选，null/空=不筛选
+     * @param modelName 模型名筛选，null/空=不筛选
+     * @param startDate 开始日期（含当天），null/空=不限
+     * @param endDate 结束日期（含当天），null/空=不限
+     * @return 聚合行列表，每行含 username/date/modelName/count/promptTokens/completionTokens/
+     *         cachedTokens/reasoningTokens/thinkingCount，按日期降序、用户名/模型名升序
+     */
+    List<Map<String, Object>> aggregateUsageStats(List<String> usernames, String modelName, String startDate, String endDate);
+
+    /**
+     * 获取使用记录中出现过的用户名列表（去重排序，筛选下拉框用）
+     * @return 用户名列表
+     */
+    List<String> getUsageUsernames();
+
+    /**
+     * 获取使用记录中出现过的模型名列表（去重排序，筛选下拉框用）
+     * @param username 仅统计该用户使用过的模型，null/空=全部用户
+     * @return 模型名列表
+     */
+    List<String> getUsageModelNames(String username);
 }

@@ -38,30 +38,3 @@ logging:
     # 避免 DEBUG 级别把含 Authorization 头（厂商 API Key）的出站请求细节写入日志
     org.springframework.web: INFO
     reactor.netty.http.client: WARN
-
-# DeepSeek AI配置
-ai:
-  deepseek-key: sk-xxxx
-  deepseek-url: https://api.deepseek.com/chat/completions
-
-# 阿里通义千问动态模型配置
-ali:
-  tongyi:
-    common:
-      api-key: sk-xxxx
-      api-url: https://dashscope.aliyuncs.com/compatible-mode/v1
-
-# 通义千问系列模型配置
-qwq-32b:
-  ai:
-    api-key: ${ali.tongyi.common.api-key}
-    app-id:
-    api-url: ${ali.tongyi.common.api-url}
-
-qwen-plus-latest:
-  ai:
-    api-key: ${ali.tongyi.common.api-key}
-    app-id: xxxx
-    api-url: ${ali.tongyi.common.api-url}
-
-

@@ -639,45 +639,15 @@ public class AdminController {
         // 校验日期范围（最多 30 天）
         Map<String, Object> rangeCheck = validateDateRange(startDate, endDate);
         if (rangeCheck != null) return rangeCheck;
-        List<UsageLog> logs = storageService.getAllUsageLogs();
 
-        // 过滤
-        if (username != null && !username.isEmpty()) {
-            logs = logs.stream().filter(l -> username.equals(l.getUsername())).collect(Collectors.toList());
-        }
-        if (modelName != null && !modelName.isEmpty()) {
-            logs = logs.stream().filter(l -> modelName.equals(l.getModelName())).collect(Collectors.toList());
-        }
-        // 日期范围过滤：startDate <= log.date <= endDate（按 timestamp 前 10 位 yyyy-MM-dd 比较）
-        String finalStart = startDate;
-        String finalEnd = endDate;
-        if ((finalStart != null && !finalStart.isEmpty()) || (finalEnd != null && !finalEnd.isEmpty())) {
-            logs = logs.stream().filter(l -> {
-                String ts = l.getTimestamp();
-                if (ts == null || ts.length() < 10) return false;
-                String d = ts.substring(0, 10);
-                if (finalStart != null && !finalStart.isEmpty() && d.compareTo(finalStart) < 0) return false;
-                if (finalEnd != null && !finalEnd.isEmpty() && d.compareTo(finalEnd) > 0) return false;
-                return true;
-            }).collect(Collectors.toList());
-        }
-
-        // 按时间降序
-        logs.sort((a, b) -> {
-            if (a.getTimestamp() == null && b.getTimestamp() == null) return 0;
-            if (a.getTimestamp() == null) return 1;
-            if (b.getTimestamp() == null) return -1;
-            return b.getTimestamp().compareTo(a.getTimestamp());
-        });
-
-        int total = logs.size();
+        // 筛选/分页下推到存储层（SQLite 模式走 SQL，避免全表拉取到内存）
         if (page < 1) page = 1;
         if (size < 1) size = 20;
         if (size > 500) size = 500;
+        int total = storageService.countUsageLogs(username, modelName, startDate, endDate);
         int totalPages = Math.max(1, (int) Math.ceil((double) total / size));
-        int fromIndex = Math.min((page - 1) * size, total);
-        int toIndex = Math.min(fromIndex + size, total);
-        List<UsageLog> pageData = logs.subList(fromIndex, toIndex);
+        int offset = Math.min((page - 1) * size, total);
+        List<UsageLog> pageData = storageService.queryUsageLogs(username, modelName, startDate, endDate, offset, size);
 
         result.put("success", true);
         result.put("data", pageData);
@@ -699,9 +669,8 @@ public class AdminController {
             result.put("message", "无权限");
             return result;
         }
-        List<UsageLog> logs = storageService.getAllUsageLogs();
-        List<String> usernames = logs.stream().map(UsageLog::getUsername).filter(Objects::nonNull).distinct().sorted().collect(Collectors.toList());
-        List<String> modelNames = logs.stream().map(UsageLog::getModelName).filter(Objects::nonNull).distinct().sorted().collect(Collectors.toList());
+        List<String> usernames = storageService.getUsageUsernames();
+        List<String> modelNames = storageService.getUsageModelNames(null);
 
         result.put("success", true);
         result.put("usernames", usernames);
@@ -733,62 +702,10 @@ public class AdminController {
         Map<String, Object> rangeCheck = validateDateRange(startDate, endDate);
         if (rangeCheck != null) return rangeCheck;
 
-        List<UsageLog> logs = storageService.getAllUsageLogs();
-
-        // 过滤
-        if (username != null && !username.isEmpty()) {
-            logs = logs.stream().filter(l -> username.equals(l.getUsername())).collect(Collectors.toList());
-        }
-        if (modelName != null && !modelName.isEmpty()) {
-            logs = logs.stream().filter(l -> modelName.equals(l.getModelName())).collect(Collectors.toList());
-        }
-        // 日期范围过滤
-        String finalStart = startDate;
-        String finalEnd = endDate;
-        if ((finalStart != null && !finalStart.isEmpty()) || (finalEnd != null && !finalEnd.isEmpty())) {
-            logs = logs.stream().filter(l -> {
-                String ts = l.getTimestamp();
-                if (ts == null || ts.length() < 10) return false;
-                String d = ts.substring(0, 10);
-                if (finalStart != null && !finalStart.isEmpty() && d.compareTo(finalStart) < 0) return false;
-                if (finalEnd != null && !finalEnd.isEmpty() && d.compareTo(finalEnd) > 0) return false;
-                return true;
-            }).collect(Collectors.toList());
-        }
-
-        // 按 (username, date, modelName) 聚合
-        Map<String, List<UsageLog>> grouped = logs.stream()
-                .collect(Collectors.groupingBy(l ->
-                        (l.getUsername() != null ? l.getUsername() : "未知") + "|" +
-                        (l.getTimestamp() != null ? l.getTimestamp().substring(0, Math.min(10, l.getTimestamp().length())) : "未知") + "|" +
-                        (l.getModelName() != null ? l.getModelName() : "未知")
-                ));
-
-        List<Map<String, Object>> statsList = new ArrayList<>();
-        for (Map.Entry<String, List<UsageLog>> entry : grouped.entrySet()) {
-            String[] keys = entry.getKey().split("\\|", 3);
-            List<UsageLog> group = entry.getValue();
-            Map<String, Object> row = new HashMap<>();
-            row.put("username", keys[0]);
-            row.put("date", keys[1]);
-            row.put("modelName", keys[2]);
-            row.put("count", group.size());
-            row.put("promptTokens", group.stream().mapToInt(UsageLog::getPromptTokens).sum());
-            row.put("completionTokens", group.stream().mapToInt(UsageLog::getCompletionTokens).sum());
-            row.put("cachedTokens", group.stream().mapToInt(UsageLog::getCachedTokens).sum());
-            row.put("reasoningTokens", group.stream().mapToInt(UsageLog::getReasoningTokens).sum());
-            row.put("thinkingCount", group.stream().filter(UsageLog::isDeepThinking).count());
-            statsList.add(row);
-        }
-
-        // 排序
-        statsList.sort((a, b) -> {
-            int dateCompare = ((String) b.get("date")).compareTo((String) a.get("date"));
-            if (dateCompare != 0) return dateCompare;
-            int userCompare = ((String) a.get("username")).compareTo((String) b.get("username"));
-            if (userCompare != 0) return userCompare;
-            return ((String) a.get("modelName")).compareTo((String) b.get("modelName"));
-        });
+        // 筛选+聚合下推到存储层（聚合结果集小，分页在内存完成）
+        List<String> nameList = (username != null && !username.isEmpty())
+                ? Collections.singletonList(username) : null;
+        List<Map<String, Object>> statsList = storageService.aggregateUsageStats(nameList, modelName, startDate, endDate);
 
         int total = statsList.size();
         if (page < 1) page = 1;
@@ -1321,6 +1238,53 @@ public class AdminController {
         return result;
     }
 
+    // ========== 系统设置（安全） ==========
+
+    /**
+     * 获取安全设置
+     * 返回: { "success": true, "data": { "ipBindingEnabled": true } }
+     */
+    @GetMapping("/settings/security")
+    public Map<String, Object> getSecuritySettings(HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("ipBindingEnabled", storageService.getIpBindingEnabled());
+        result.put("success", true);
+        result.put("data", data);
+        return result;
+    }
+
+    /**
+     * 设置安全选项（IP绑定校验：登录后IP变更强制下线）
+     * 请求体: { "ipBindingEnabled": true }
+     */
+    @PutMapping("/settings/security")
+    public Map<String, Object> setSecuritySettings(@RequestBody Map<String, Object> body,
+                                                    HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> result = new HashMap<>();
+        if (!checkAdmin(request, response)) {
+            result.put("success", false);
+            result.put("message", "无权限");
+            return result;
+        }
+        Object raw = body == null ? null : body.get("ipBindingEnabled");
+        if (!(raw instanceof Boolean enabled)) {
+            result.put("success", false);
+            result.put("message", "请指定 ipBindingEnabled 参数（布尔值）");
+            return result;
+        }
+        storageService.setIpBindingEnabled(enabled);
+        log.info("IP绑定校验已{}", enabled ? "开启" : "关闭");
+        result.put("success", true);
+        result.put("message", "保存成功");
+        return result;
+    }
+
     // ========== 分享管理 ==========
 
     /**
@@ -1336,8 +1300,16 @@ public class AdminController {
             return result;
         }
         List<ChatShare> shares = storageService.getAllChatShares();
-        // 按用户缓存会话历史，避免同一用户多条分享重复加载
-        Map<String, Map<String, Object>> historyCache = new HashMap<>();
+        // 按用户分组做一次性会话存在性检查（不加载消息正文）
+        Map<String, List<String>> chatIdsByUser = new HashMap<>();
+        for (ChatShare s : shares) {
+            chatIdsByUser.computeIfAbsent(s.getUserId(), k -> new ArrayList<>()).add(s.getChatId());
+        }
+        Map<String, Set<String>> existingByUser = new HashMap<>();
+        for (Map.Entry<String, List<String>> entry : chatIdsByUser.entrySet()) {
+            existingByUser.put(entry.getKey(),
+                    chatHistoryService.filterExistingChats(entry.getKey(), entry.getValue()));
+        }
         List<Map<String, Object>> list = new ArrayList<>();
         for (ChatShare s : shares) {
             Map<String, Object> item = new LinkedHashMap<>();
@@ -1348,7 +1320,8 @@ public class AdminController {
             item.put("title", s.getTitle());
             item.put("createdAt", s.getCreatedAt());
             item.put("expiresAt", s.getExpiresAt());
-            item.put("status", resolveShareStatus(s, historyCache));
+            item.put("status", resolveShareStatus(s,
+                    existingByUser.getOrDefault(s.getUserId(), Collections.emptySet())));
             list.add(item);
         }
         result.put("success", true);
@@ -1388,8 +1361,9 @@ public class AdminController {
 
     /**
      * 判定分享状态：已过期 > 源会话已删 > 有效（过期口径与 ShareController.view 一致）
+     * @param existingChatIds 该用户名下仍存在的会话ID集合
      */
-    private String resolveShareStatus(ChatShare s, Map<String, Map<String, Object>> historyCache) {
+    private String resolveShareStatus(ChatShare s, Set<String> existingChatIds) {
         if (s.getExpiresAt() != null && !s.getExpiresAt().isEmpty()) {
             try {
                 LocalDateTime expiry = LocalDateTime.parse(s.getExpiresAt(),
@@ -1399,12 +1373,7 @@ public class AdminController {
                 // 时间解析失败视为未设置过期
             }
         }
-        Map<String, Object> history = historyCache.computeIfAbsent(s.getUserId(), chatHistoryService::loadChatHistory);
-        Object chats = history.get("chats");
-        if (!(chats instanceof Map) || !(((Map<?, ?>) chats).get(s.getChatId()) instanceof List)) {
-            return "orphaned";
-        }
-        return "valid";
+        return existingChatIds.contains(s.getChatId()) ? "valid" : "orphaned";
     }
 
     // ========== 工具方法 ==========

@@ -74,6 +74,38 @@ public class ChatHistoryService {
     }
 
     /**
+     * 过滤出用户名下仍存在的会话ID集合（分享状态判定等轻量场景用，
+     * SQLite 模式下仅查会话ID列，不加载消息内容）
+     * @param userId 用户ID
+     * @param chatIds 待检查的会话ID集合
+     * @return 实际存在的会话ID集合
+     */
+    public Set<String> filterExistingChats(String userId, Collection<String> chatIds) {
+        Set<String> existing = new HashSet<>();
+        if (chatIds == null || chatIds.isEmpty()) return existing;
+        try {
+            if (storageManager.isUseSqlite()) {
+                ensureSessionMigrated(userId);
+                Set<String> all = new HashSet<>(sqliteStorage.listChatSessionIds(userId));
+                for (String id : chatIds) {
+                    if (all.contains(id)) existing.add(id);
+                }
+            } else {
+                Map<String, Object> history = loadChatHistoryFromFiles(userId);
+                Object chats = history.get("chats");
+                if (chats instanceof Map<?, ?> map) {
+                    for (String id : chatIds) {
+                        if (map.get(id) instanceof List) existing.add(id);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.error("检查会话存在性失败: userId={}", userId, e);
+        }
+        return existing;
+    }
+
+    /**
      * 从 SQLite 加载用户会话历史（由按会话行装配，导出/全文搜索等全量场景用）
      * @param userId 用户ID
      * @return 会话数据 Map
