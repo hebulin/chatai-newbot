@@ -1135,6 +1135,43 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
 .ai-vid-btn:hover { border-color: var(--primary); color: var(--primary); }
 
 /* ============================================
+   KATEX 数学公式 / 化学式
+   ============================================ */
+/* 行内公式：字号跟随正文，避免默认 1.21em 破坏行高 */
+.answer-content .katex,
+.thinking-body .katex {
+    font-size: 1.05em;
+    color: inherit;
+}
+/* 块级公式：居中并在超宽时横向滚动，避免撑破气泡 */
+.answer-content .katex-display,
+.thinking-body .katex-display {
+    margin: 12px 0;
+    padding: 4px 2px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+}
+.answer-content .katex-display > .katex,
+.thinking-body .katex-display > .katex {
+    white-space: nowrap;
+}
+/* 滚动条与代码块保持一致的纤细风格 */
+.answer-content .katex-display::-webkit-scrollbar,
+.thinking-body .katex-display::-webkit-scrollbar { height: 6px; }
+.answer-content .katex-display::-webkit-scrollbar-thumb,
+.thinking-body .katex-display::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 3px;
+}
+/* 渲染出错时的红色提示（throwOnError:false 时 KaTeX 输出 .katex-error） */
+.answer-content .katex-error,
+.thinking-body .katex-error {
+    color: #e5484d;
+    white-space: pre-wrap;
+}
+
+/* ============================================
    MERMAID DIAGRAMS
    ============================================ */
 .mermaid-container {

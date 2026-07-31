@@ -4,6 +4,10 @@ import DOMPurify from 'dompurify'
 // 未收录语言会回退到无高亮纯文本展示，不影响内容可读
 import hljs from 'highlight.js/lib/common'
 import 'highlight.js/styles/atom-one-dark.css'
+import katex from 'katex'
+import 'katex/dist/katex.min.css'
+// mhchem 扩展：支持化学方程式 \ce{...} 与物理单位 \pu{...}（以副作用注册到 katex 实例）
+import 'katex/dist/contrib/mhchem.mjs'
 
 // ===== Mermaid 懒加载与渲染 =====
 let mermaidModule = null
@@ -983,6 +987,117 @@ export function escapeHtml(str) {
   return div.innerHTML
 }
 
+// ===== 数学公式（KaTeX）渲染 =====
+// 将 LaTeX 公式（$...$ / $$...$$ / \(...\) / \[...\]）与化学式（\ce{...}）渲染为 HTML。
+// 采用“占位符 + 后置回填”策略：在 marked 解析前抽取公式并渲染为 KaTeX HTML，
+// 用占位符替换原文避免被 marked/mermaid 处理；DOMPurify 清洗后再回填 KaTeX HTML
+// （KaTeX 以 throwOnError:false + trust:false 运行，输出为纯数学标记不含脚本，回填安全）。
+function renderMathToHtml(tex, displayMode) {
+  const src = (tex || '').trim()
+  if (!src) return ''
+  try {
+    return katex.renderToString(src, {
+      displayMode,
+      throwOnError: false,   // 语法错误不抛异常，改为红色错误提示，避免打断整条消息渲染
+      strict: false,
+      trust: false,          // 禁用 \href 等命令，杜绝注入
+      output: 'htmlAndMathml'
+    })
+  } catch (e) {
+    return null
+  }
+}
+
+// 抽取一段公式并渲染，返回占位符；渲染失败则回退原始带定界符文本
+function pushMath(store, tex, displayMode, rawFallback) {
+  const rendered = renderMathToHtml(tex, displayMode)
+  if (rendered == null) return rawFallback
+  const idx = store.length
+  store.push(rendered)
+  return '%%KMATH' + idx + '%%'
+}
+
+// 在 $...$ 起始处寻找有效的行内公式结束 $（借鉴 KaTeX auto-render 规则，尽量规避货币金额误判）
+function findInlineDollarEnd(text, openIdx) {
+  const next = text[openIdx + 1]
+  if (next === undefined || next === '$' || /\s/.test(next)) return -1
+  let i = openIdx + 1
+  while (i < text.length) {
+    const c = text[i]
+    if (c === '\\') { i += 2; continue }              // 跳过转义序列（如 \$、\}）
+    if (c === '\n' && text[i + 1] === '\n') return -1  // 行内公式不跨空行
+    if (c === '$') {
+      const prev = text[i - 1]
+      const after = text[i + 1]
+      // 结束 $ 前不能是空白，后不能紧跟数字（规避 "$5 ... $10" 这类金额）
+      if (prev !== ' ' && prev !== '\t' && prev !== '\n' && !(after && /\d/.test(after))) return i
+      return -1
+    }
+    i++
+  }
+  return -1
+}
+
+// 抽取文本中的数学公式为占位符，跳过代码块/行内代码区域（避免误伤代码里的 $ 与反引号）
+function extractMathBlocks(text, store) {
+  let result = ''
+  let i = 0
+  const n = text.length
+  while (i < n) {
+    const ch = text[i]
+    // 代码围栏 ``` ：整段跳过不处理
+    if (ch === '`') {
+      if (text.startsWith('```', i)) {
+        const end = text.indexOf('```', i + 3)
+        if (end === -1) { result += text.slice(i); break }
+        result += text.slice(i, end + 3); i = end + 3; continue
+      }
+      // 行内代码 `...` / ``...`` ：按相同数量反引号配对跳过
+      let run = 0
+      while (text[i + run] === '`') run++
+      const fence = '`'.repeat(run)
+      const end = text.indexOf(fence, i + run)
+      if (end === -1) { result += text.slice(i, i + run); i += run; continue }
+      result += text.slice(i, end + run); i = end + run; continue
+    }
+    // 块级公式 $$...$$
+    if (text.startsWith('$$', i)) {
+      const end = text.indexOf('$$', i + 2)
+      if (end !== -1) {
+        result += pushMath(store, text.slice(i + 2, end), true, text.slice(i, end + 2))
+        i = end + 2; continue
+      }
+    }
+    // 块级公式 \[...\]
+    if (ch === '\\' && text[i + 1] === '[') {
+      const end = text.indexOf('\\]', i + 2)
+      if (end !== -1) {
+        result += pushMath(store, text.slice(i + 2, end), true, text.slice(i, end + 2))
+        i = end + 2; continue
+      }
+    }
+    // 行内公式 \(...\)
+    if (ch === '\\' && text[i + 1] === '(') {
+      const end = text.indexOf('\\)', i + 2)
+      if (end !== -1) {
+        result += pushMath(store, text.slice(i + 2, end), false, text.slice(i, end + 2))
+        i = end + 2; continue
+      }
+    }
+    // 行内公式 $...$
+    if (ch === '$') {
+      const end = findInlineDollarEnd(text, i)
+      if (end !== -1) {
+        result += pushMath(store, text.slice(i + 1, end), false, text.slice(i, end + 1))
+        i = end + 1; continue
+      }
+    }
+    result += ch
+    i++
+  }
+  return result
+}
+
 export function renderMarkdown(text) {
   if (!text) return ''
 
@@ -1001,6 +1116,10 @@ export function renderMarkdown(text) {
     mermaidBlocks.push(code.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim())
     return '%%MERMAID_' + idx + '%%'
   })
+
+  // 抽取数学公式/化学式为占位符（在 mermaid 抽取之后、marked 解析之前，避免被 marked 转义）
+  const mathBlocks = []
+  text = extractMathBlocks(text, mathBlocks)
 
   let html = marked.parse(text)
 
@@ -1049,7 +1168,15 @@ export function renderMarkdown(text) {
   // XSS 防护：marked 默认原样输出 Markdown 中的裸 HTML，AI 回复内容经 v-html 渲染，
   // 若含 <script>/onerror 等会造成 XSS（分享页为公开场景，风险尤甚）。用 DOMPurify
   // 清洗，剥离脚本与事件处理器，同时保留 mermaid 工具栏所需的 data-* 属性与内联 SVG。
-  return DOMPurify.sanitize(html, { ADD_ATTR: ['target'], ADD_TAGS: ['use'] })
+  let clean = DOMPurify.sanitize(html, { ADD_ATTR: ['target'], ADD_TAGS: ['use'] })
+
+  // 回填 KaTeX 公式 HTML（清洗后插入：KaTeX 以 trust:false 运行，输出为纯数学标记，安全）
+  if (mathBlocks.length) {
+    mathBlocks.forEach((h, idx) => {
+      clean = clean.replaceAll('%%KMATH' + idx + '%%', h)
+    })
+  }
+  return clean
 }
 
 // 下载媒体文件（图片/视频）：fetch 转 blob 触发下载，跨域失败回退直接打开链接
