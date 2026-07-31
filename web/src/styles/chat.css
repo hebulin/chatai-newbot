@@ -1568,6 +1568,7 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
 .input-row { display: flex; gap: 8px; align-items: flex-end; }
 .input-textarea-wrap {
     flex: 1;
+    min-width: 0; /* 允许随窄屏收缩，阻止内部工具栏（长模型名）把输入框撑宽 */
     position: relative;
     background: var(--surface);
     border: 1px solid var(--border-2);
@@ -1789,6 +1790,26 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
 }
 
 /* 窄屏单列模型下拉：触发器透明化，与级联触发器视觉一致 */
+/* 关键：JS 动态宽度（最大300px）必须被父容器剩余空间钳制，长模型名靠省略号截断而非撑宽布局 */
+.model-select-area .el-select {
+    max-width: 100%;
+    min-width: 0;
+}
+.model-select-area .el-select .el-select__wrapper {
+    max-width: 100%;
+    min-width: 0;
+}
+/* 选中项文本单行省略号：EP 默认 flex-wrap 会让长名撑开最小宽度或换行 */
+.model-select-area .el-select__selection {
+    flex-wrap: nowrap;
+}
+.model-select-area .el-select__selected-item {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 .model-select-area .el-select__wrapper,
 .model-select-area .el-select__wrapper:hover,
 .model-select-area .el-select__wrapper.is-focused {
@@ -2747,8 +2768,14 @@ textarea.settings-textarea {
     /* 输入框：工具栏按钮缩小、textarea padding 收紧（字号保持 16px 防 iOS 聚焦缩放） */
     .think-icon-btn, .upload-image-btn { width: 26px; height: 26px; }
     .input-textarea-wrap textarea { padding: 8px 14px; }
-    .input-inner-toolbar { gap: 6px; padding: 5px 8px 7px; }
+    .input-inner-toolbar { gap: 4px; padding: 5px 8px 7px; }
+    /* 窄屏隐藏分隔线：为模型名腾出横向空间，无边框简约风下不影响辨识 */
+    .toolbar-divider { display: none; }
+    .model-select-area { gap: 2px; }
     .model-select-area .el-cascader .el-input__inner { font-size: 11.5px; }
+    .model-select-area .el-select__placeholder,
+    .model-select-area .el-select__selected-item { font-size: 11px; }
+    .model-select-area .el-select__wrapper { padding: 0 4px; }
 }
 
 @media (max-width: 480px) {
@@ -2764,6 +2791,13 @@ textarea.settings-textarea {
     .input-footer .foot-c { order: 1; }
     .input-footer .foot-r { order: 2; min-width: 0; }
     .input-footer .foot-l { display: none; }
+    /* 超窄屏工具栏进一步收紧：按钮 24px、发送 30px，保证模型名可视宽度 */
+    .input-inner-toolbar { gap: 3px; padding: 4px 6px 6px; }
+    .think-icon-btn, .upload-image-btn { width: 24px; height: 24px; }
+    .send-btn { width: 30px; height: 30px; margin-left: 2px; }
+    .model-area-icon { width: 14px; height: 14px; }
+    .model-select-area .el-select__placeholder,
+    .model-select-area .el-select__selected-item { font-size: 10.5px; }
 }
 
 /* Reduce motion */
