@@ -165,8 +165,8 @@ const attachInputRef = ref(null)
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024
 const MAX_DOC_SIZE = 3 * 1024 * 1024
-// 支持的文本类文档类型（与后端 DocumentParseService 白名单一致），暂不支持 pdf
-const DOC_EXTS = ['txt', 'log', 'md', 'markdown', 'csv', 'json', 'xml', 'yml', 'yaml', 'properties', 'doc', 'docx', 'xls', 'xlsx']
+// 支持的文档类型（与后端 DocumentParseService 白名单一致），pdf 由服务端提取文本层
+const DOC_EXTS = ['txt', 'log', 'md', 'markdown', 'csv', 'json', 'xml', 'yml', 'yaml', 'properties', 'doc', 'docx', 'xls', 'xlsx', 'pdf']
 const DOC_ACCEPT = DOC_EXTS.map(ext => '.' + ext).join(',')
 // 附件选择器同时接受图片与文本文档，选中后按类型分流处理
 const ATTACH_ACCEPT = 'image/*,' + DOC_ACCEPT

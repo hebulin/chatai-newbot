@@ -10,6 +10,9 @@ import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.apache.poi.xwpf.extractor.XWPFWordExtractor;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.text.PDFTextStripper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -27,6 +30,7 @@ import java.util.Set;
  * - 纯文本类（txt/log/md/csv/json/xml 等）：按 UTF-8 优先、GBK 兜底解码
  * - Word（doc/docx）：Apache POI 提取正文文本
  * - 表格（xls/xlsx/csv）：逐行提取单元格，制表符分隔，保留行列结构供模型理解
+ * - PDF（pdf）：Apache PDFBox 提取文本层（扫描件/纯图片 PDF 无文本层，会提取为空而报错）
  * 解析结果为纯文本后交由 {@link FileStorageService} 落盘，模型调用时直接读取，
  * 无需模型具备多模态能力，也避免每轮对话重复解析原始文档。
  */
@@ -42,7 +46,7 @@ public class DocumentParseService {
     /** 支持的扩展名（小写） */
     private static final Set<String> SUPPORTED_EXTS = Set.of(
             "txt", "log", "md", "markdown", "csv", "json", "xml",
-            "yml", "yaml", "properties", "doc", "docx", "xls", "xlsx"
+            "yml", "yaml", "properties", "doc", "docx", "xls", "xlsx", "pdf"
     );
 
     /**
@@ -72,6 +76,7 @@ public class DocumentParseService {
                 case "doc" -> extractDoc(bytes);
                 case "docx" -> extractDocx(bytes);
                 case "xls", "xlsx" -> extractWorkbook(bytes);
+                case "pdf" -> extractPdf(bytes);
                 default -> decodePlainText(bytes);
             };
         } catch (IllegalArgumentException e) {
@@ -94,6 +99,26 @@ public class DocumentParseService {
         int dot = filename.lastIndexOf('.');
         if (dot < 0 || dot == filename.length() - 1) return "";
         return filename.substring(dot + 1).toLowerCase();
+    }
+
+    /**
+     * PDF 文档（.pdf）：PDFBox 提取文本层；扫描件/纯图片 PDF 无文本层，
+     * 提取结果为空时由 parse 统一按“未能提取到文本内容”报错
+     */
+    private String extractPdf(byte[] bytes) throws Exception {
+        try (PDDocument doc = Loader.loadPDF(bytes)) {
+            PDFTextStripper stripper = new PDFTextStripper();
+            // 限制单次提取量：达到截断阈值所需页数后即停，避免超大 PDF 全量提取耗时
+            StringBuilder sb = new StringBuilder();
+            int pages = doc.getNumberOfPages();
+            for (int p = 1; p <= pages; p++) {
+                stripper.setStartPage(p);
+                stripper.setEndPage(p);
+                sb.append(stripper.getText(doc));
+                if (sb.length() > MAX_TEXT_CHARS) break;
+            }
+            return sb.toString();
+        }
     }
 
     /**
