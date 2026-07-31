@@ -83,6 +83,26 @@ public class FileStorageService {
     }
 
     /**
+     * 保存服务端生成的图片字节（如 PDF 渲染出的页面图），落盘规则与 {@link #saveImage} 一致
+     * @param bytes 图片字节
+     * @param ext 扩展名（不含点，如 jpg/png）
+     * @return 图片访问 URL（/api/files/img/{yyyyMM}/{filename}）
+     * @throws IOException 落盘失败
+     */
+    public String saveImageBytes(byte[] bytes, String ext) throws IOException {
+        if (bytes == null || bytes.length == 0) {
+            throw new IllegalArgumentException("图片内容为空");
+        }
+        String safeExt = (ext == null || !SAFE_NAME.matcher(ext).matches()) ? "png" : ext.toLowerCase();
+        String month = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMM"));
+        Path monthDir = uploadDir.resolve(month);
+        Files.createDirectories(monthDir);
+        String filename = UUID.randomUUID().toString().replace("-", "") + "." + safeExt;
+        Files.write(monthDir.resolve(filename), bytes);
+        return IMG_URL_PREFIX + month + "/" + filename;
+    }
+
+    /**
      * 读取已上传的图片内容
      * @param month 月份目录（yyyyMM）
      * @param filename 文件名

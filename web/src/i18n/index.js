@@ -134,7 +134,14 @@ const zh = {
     imageTooLarge: '图片超过5MB限制',
     imageUploadFailed: '图片上传失败',
     docTooLarge: '附件「{name}」超过3MB限制',
-    docUploadFailed: '附件上传失败'
+    docUploadFailed: '附件上传失败',
+    pdfNeedMultimodal: 'PDF 将转为图片交模型识别，请先切换到支持图像理解的多模态模型',
+    pdfTooLarge: 'PDF「{name}」超过6MB限制',
+    pdfConverting: '转换中...',
+    pdfPages: '{n} 页',
+    pdfConverted: 'PDF 已转为 {n} 张图片',
+    pdfTruncated: 'PDF 页数较多，仅转换前 {n} 页（共 {total} 页）',
+    pdfFailed: 'PDF 转换失败'
   },
   chat: {
     sidebarAria: '侧栏',
@@ -492,7 +499,14 @@ const en = {
     imageTooLarge: 'Image exceeds the 5MB limit',
     imageUploadFailed: 'Image upload failed',
     docTooLarge: 'Attachment "{name}" exceeds the 3MB limit',
-    docUploadFailed: 'Attachment upload failed'
+    docUploadFailed: 'Attachment upload failed',
+    pdfNeedMultimodal: 'PDF will be converted to images for the model; switch to a multimodal model that supports image understanding first',
+    pdfTooLarge: 'PDF "{name}" exceeds the 6MB limit',
+    pdfConverting: 'Converting...',
+    pdfPages: '{n} pages',
+    pdfConverted: 'PDF converted to {n} image(s)',
+    pdfTruncated: 'PDF has many pages; only the first {n} of {total} were converted',
+    pdfFailed: 'PDF conversion failed'
   },
   chat: {
     sidebarAria: 'Sidebar',

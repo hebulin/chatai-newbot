@@ -14,7 +14,7 @@
       <div v-for="(f, idx) in pendingFiles" :key="idx" class="file-preview-item" :class="{ uploading: f.uploading }">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
         <span class="file-preview-name" :title="f.name">{{ f.name }}</span>
-        <span class="file-preview-meta">{{ f.uploading ? t('input.parsing') : t('input.chars', { n: f.chars }) }}</span>
+        <span class="file-preview-meta">{{ f.uploading ? (f.isPdf ? t('input.pdfConverting') : t('input.parsing')) : (f.isPdf ? t('input.pdfPages', { n: f.pages }) : t('input.chars', { n: f.chars })) }}</span>
         <button class="file-preview-remove" @click="removeFile(idx)" :title="t('input.delete')">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
@@ -137,7 +137,7 @@ import { useChatStore } from '@/stores/chat'
 import { useTheme } from '@/composables/useTheme'
 import { ElMessage, ElNotification } from 'element-plus'
 import { APP_VERSION } from '@/config/version'
-import { uploadChatImage, uploadChatDocument } from '@/api/chat'
+import { uploadChatImage, uploadChatDocument, uploadChatPdf } from '@/api/chat'
 import { getPromptPresets } from '@/api/user'
 
 const props = defineProps({
@@ -165,11 +165,12 @@ const attachInputRef = ref(null)
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024
 const MAX_DOC_SIZE = 3 * 1024 * 1024
-// 支持的文档类型（与后端 DocumentParseService 白名单一致），pdf 由服务端提取文本层
-const DOC_EXTS = ['txt', 'log', 'md', 'markdown', 'csv', 'json', 'xml', 'yml', 'yaml', 'properties', 'doc', 'docx', 'xls', 'xlsx', 'pdf']
+const MAX_PDF_SIZE = 6 * 1024 * 1024
+// 支持的文本文档类型（与后端 DocumentParseService 白名单一致，服务端解析为纯文本）
+const DOC_EXTS = ['txt', 'log', 'md', 'markdown', 'csv', 'json', 'xml', 'yml', 'yaml', 'properties', 'doc', 'docx', 'xls', 'xlsx']
 const DOC_ACCEPT = DOC_EXTS.map(ext => '.' + ext).join(',')
-// 附件选择器同时接受图片与文本文档，选中后按类型分流处理
-const ATTACH_ACCEPT = 'image/*,' + DOC_ACCEPT
+// 附件选择器同时接受图片、PDF 与文本文档；选中后按类型分流（PDF 走服务端逐页渲染为图片）
+const ATTACH_ACCEPT = 'image/*,.pdf,' + DOC_ACCEPT
 
 function extOf(filename) {
   const idx = (filename || '').lastIndexOf('.')
@@ -446,8 +447,9 @@ function doSend() {
 function handlePaste(e) {
   const items = e.clipboardData?.items
   if (!items) return
-  // 粘贴内容分流：图片走图片上传，白名单文档走附件解析，其余文件类型直接拦截不上传
+  // 粘贴内容分流：图片走图片上传，PDF 走服务端渲染为图片，白名单文档走附件解析，其余拦截
   const imageFiles = []
+  const pdfFiles = []
   const docFiles = []
   const unsupported = []
   for (let i = 0; i < items.length; i++) {
@@ -457,6 +459,8 @@ function handlePaste(e) {
     if (!file) continue
     if (item.type.includes('image')) {
       imageFiles.push(file)
+    } else if (extOf(file.name) === 'pdf') {
+      pdfFiles.push(file)
     } else if (DOC_EXTS.includes(extOf(file.name))) {
       docFiles.push(file)
     } else {
@@ -464,12 +468,13 @@ function handlePaste(e) {
     }
   }
   // 未粘贴任何文件（纯文本粘贴）时不拦截默认行为
-  if (imageFiles.length === 0 && docFiles.length === 0 && unsupported.length === 0) return
+  if (imageFiles.length === 0 && pdfFiles.length === 0 && docFiles.length === 0 && unsupported.length === 0) return
   e.preventDefault()
   if (unsupported.length > 0) {
     ElMessage.warning(t('input.unsupportedAttach', { names: unsupported.join('、') }))
   }
   imageFiles.forEach(file => addImageFile(file))
+  pdfFiles.forEach(file => addPdfFile(file))
   docFiles.forEach(file => addDocFile(file))
 }
 
@@ -488,6 +493,8 @@ function handleAttachUpload(e) {
   Array.from(files).forEach(file => {
     if (file.type.includes('image')) {
       addImageFile(file)
+    } else if (extOf(file.name) === 'pdf') {
+      addPdfFile(file)
     } else if (DOC_EXTS.includes(extOf(file.name))) {
       addDocFile(file)
     } else {
@@ -586,6 +593,40 @@ async function addDocFile(file) {
 
 function removeFile(idx) {
   pendingFiles.value.splice(idx, 1)
+}
+
+// ===== PDF 附件（服务端逐页渲染为图片，作为多模态图片发送，仅多模态模型可用） =====
+// 先占位展示“转换中”，成功后移除占位并将各页图片入 pendingImages，失败则仅提示
+async function addPdfFile(file) {
+  if (!props.supportsMultimodal) {
+    ElMessage.warning(t('input.pdfNeedMultimodal'))
+    return
+  }
+  if (file.size > MAX_PDF_SIZE) {
+    ElMessage.warning(t('input.pdfTooLarge', { name: file.name }))
+    return
+  }
+  const item = { name: file.name, url: '', pages: 0, uploading: true, isPdf: true }
+  pendingFiles.value.push(item)
+  try {
+    const res = await uploadChatPdf(file)
+    const i = pendingFiles.value.indexOf(item)
+    if (i >= 0) pendingFiles.value.splice(i, 1)
+    if (res && res.success && Array.isArray(res.images) && res.images.length) {
+      res.images.forEach(u => pendingImages.value.push(u))
+      if (res.truncated) {
+        ElMessage.warning(t('input.pdfTruncated', { n: res.pages, total: res.totalPages }))
+      } else {
+        ElMessage.success(t('input.pdfConverted', { n: res.pages }))
+      }
+    } else {
+      ElMessage.error((res && res.message) || t('input.pdfFailed'))
+    }
+  } catch (e) {
+    const i = pendingFiles.value.indexOf(item)
+    if (i >= 0) pendingFiles.value.splice(i, 1)
+    // 错误提示已由 request 拦截器统一处理
+  }
 }
 
 // 外部回填输入框（如空会话引导的建议提问）：填入后自适应高度并聚焦便于直接编辑/发送

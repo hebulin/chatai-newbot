@@ -2,6 +2,7 @@ package com.chatai.newbot.controller;
 
 import com.chatai.newbot.service.DocumentParseService;
 import com.chatai.newbot.service.FileStorageService;
+import com.chatai.newbot.service.PdfRenderService;
 import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -17,6 +18,8 @@ import java.util.concurrent.TimeUnit;
  * - POST /api/upload/image：登录用户上传聊天图片，返回访问 URL
  * - POST /api/upload/document：登录用户上传附件文档（txt/doc/docx/xls等），
  *   服务端解析为纯文本后落盘，返回引用 URL（无需模型多模态能力）
+ * - POST /api/upload/pdf：登录用户上传 PDF，服务端逐页渲染为图片，
+ *   返回图片 URL 列表（交多模态模型识别）
  * - GET /api/files/img/{month}/{filename}：读取图片（拦截器已豁免，
  *   因 img 标签无法携带 Authorization 头，且分享页匿名查看也需访问；文件名为 UUID 不可枚举）
  */
@@ -25,10 +28,14 @@ public class FileController {
 
     private final FileStorageService fileStorageService;
     private final DocumentParseService documentParseService;
+    private final PdfRenderService pdfRenderService;
 
-    public FileController(FileStorageService fileStorageService, DocumentParseService documentParseService) {
+    public FileController(FileStorageService fileStorageService,
+                          DocumentParseService documentParseService,
+                          PdfRenderService pdfRenderService) {
         this.fileStorageService = fileStorageService;
         this.documentParseService = documentParseService;
+        this.pdfRenderService = pdfRenderService;
     }
 
     /**
@@ -70,6 +77,31 @@ public class FileController {
         } catch (Exception e) {
             result.put("success", false);
             result.put("message", "附件保存失败");
+        }
+        return result;
+    }
+
+    /**
+     * 上传 PDF（最大6MB）：服务端逐页渲染为图片，返回图片 URL 列表，
+     * 前端将其作为多模态图片附件发给模型
+     */
+    @PostMapping("/api/upload/pdf")
+    public Map<String, Object> uploadPdf(@RequestParam("file") MultipartFile file) {
+        Map<String, Object> result = new HashMap<>();
+        try {
+            PdfRenderService.RenderResult r = pdfRenderService.render(file);
+            result.put("success", true);
+            result.put("images", r.images());
+            result.put("name", file.getOriginalFilename());
+            result.put("pages", r.images().size());
+            result.put("totalPages", r.totalPages());
+            result.put("truncated", r.truncated());
+        } catch (IllegalArgumentException e) {
+            result.put("success", false);
+            result.put("message", e.getMessage());
+        } catch (Exception e) {
+            result.put("success", false);
+            result.put("message", "PDF 转换失败");
         }
         return result;
     }

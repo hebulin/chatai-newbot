@@ -63,3 +63,12 @@ export function uploadChatDocument(file) {
     headers: { 'Content-Type': 'multipart/form-data' }
   })
 }
+
+// 上传 PDF（服务端逐页渲染为图片，返回图片 URL 列表，交多模态模型识别）
+export function uploadChatPdf(file) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return request.post('/upload/pdf', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  })
+}
