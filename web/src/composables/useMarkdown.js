@@ -18,6 +18,28 @@ let renderQueue = []
 let isRendering = false
 let uidCounter = 0
 
+// ===== 已渲染 mermaid SVG 缓存 =====
+// 流式输出时整条消息每次 tick 都会经 v-html 全量重建，已完成的 mermaid 图表 DOM
+// 被销毁重建、反复回到“渲染中”占位而闪烁。以 主题+代码 为键缓存裁剪后的最终 SVG，
+// 后续重建时命中缓存直接回填已渲染结果，跳过重复渲染，消除闪烁。
+const mermaidSvgCache = new Map()
+const MERMAID_SVG_CACHE_MAX = 200
+function mermaidCacheKey(theme, code) {
+  return (theme || 'default') + '\u0000' + code
+}
+function getCachedMermaidSvg(code) {
+  return mermaidSvgCache.get(mermaidCacheKey(getCurrentMermaidTheme(), code))
+}
+function setCachedMermaidSvg(theme, code, svg) {
+  const key = mermaidCacheKey(theme, code)
+  // 简单 FIFO 淘汰，避免长会话缓存无限增长
+  if (!mermaidSvgCache.has(key) && mermaidSvgCache.size >= MERMAID_SVG_CACHE_MAX) {
+    const oldest = mermaidSvgCache.keys().next().value
+    if (oldest !== undefined) mermaidSvgCache.delete(oldest)
+  }
+  mermaidSvgCache.set(key, svg)
+}
+
 // Mermaid 主题列表（与旧版一致，支持单图独立切换并持久化到 localStorage）
 const MERMAID_THEMES = [
   { key: 'default', name: '默认' },
@@ -176,8 +198,8 @@ function quoteMermaidLabels(line) {
   })
 }
 
-function enqueueRender(el, text) {
-  renderQueue.push({ el, text })
+function enqueueRender(el, text, rawCode) {
+  renderQueue.push({ el, text, rawCode })
   drainQueue()
 }
 
@@ -186,7 +208,7 @@ function enqueueRender(el, text) {
 // 初次渲染与主题切换重渲染共用此逻辑，保证两者行为一致。
 // 两者均 parse 失败时标记 mermaid-parse-failed（退出视图模式 loading 占位，回退显示原始代码）
 function parseAndEnqueueRender(el, normalized, raw) {
-  const renderWith = (code) => { if (el.isConnected) enqueueRender(el, code) }
+  const renderWith = (code) => { if (el.isConnected) enqueueRender(el, code, raw) }
   const markFailed = () => { if (el.isConnected) el.classList.add('mermaid-parse-failed') }
   if (!mermaidModule) { renderWith(normalized); return }
   try {
@@ -213,7 +235,7 @@ function drainQueue() {
   if (isRendering) return
   const item = renderQueue.shift()
   if (!item) return
-  const { el, text } = item
+  const { el, text, rawCode } = item
   if (!el.isConnected) { drainQueue(); return }
   isRendering = true
 
@@ -233,6 +255,11 @@ function drainQueue() {
       const renderedSvg = el.querySelector('svg')
       if (renderedSvg) cropSvgViewBox(renderedSvg)
       attachInlinePanZoom(el)
+      // 缓存裁剪后的 SVG：流式全量重建时命中缓存直接回填，避免已完成图表反复闪烁；
+      // 未闭合的流式块代码仍会变化，不缓存
+      if (rawCode && !el.closest('.mermaid-container.streaming')) {
+        setCachedMermaidSvg(themeToUse, rawCode, el.innerHTML)
+      }
     }
   }).catch(err => {
     console.warn('[useMarkdown] mermaid render failed:', err?.message || err)
@@ -1124,10 +1151,17 @@ export function renderMarkdown(text) {
   let html = marked.parse(text)
 
   // 还原mermaid块（带工具栏卡片）
+  // 命中已渲染缓存的图表：用占位符承载已渲染 SVG，DOMPurify 后回填（绕过清洗，SVG 为可信自产输出），
+  // 避免流式全量重建时已完成图表被销毁重建而反复回到“渲染中”闪烁
+  const renderedMermaidSvgs = []
   mermaidBlocks.forEach((code, idx) => {
     const escaped = escapeHtml(code)
     const typeKey = detectDiagramType(code)
     const typeLabel = typeKey.replace(/diagram$/i, '').toUpperCase()
+    const cachedSvg = getCachedMermaidSvg(code)
+    const viewPre = cachedSvg != null
+      ? `<pre class="mermaid mermaid-rendered" data-processed="true">%%MERMAIDSVG${renderedMermaidSvgs.push(cachedSvg) - 1}%%</pre>`
+      : `<pre class="mermaid">${escaped}</pre>`
     const mermaidHtml = `<div class="mermaid-container" data-mermaid-raw="${escaped.replace(/"/g, '&quot;')}">` +
       `<div class="mermaid-toolbar">` +
         `<div class="mermaid-toolbar-left">` +
@@ -1144,7 +1178,7 @@ export function renderMarkdown(text) {
           `<button class="mermaid-action" data-act="toggleTheme" title="切换主题"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg></button>` +
         `</div>` +
       `</div>` +
-      `<div class="mermaid-scroll-wrapper"><div class="mermaid-view"><pre class="mermaid">${escaped}</pre></div></div>` +
+      `<div class="mermaid-scroll-wrapper"><div class="mermaid-view">${viewPre}</div></div>` +
       `<div class="mermaid-code" style="display:none"><pre><code class="language-mermaid">${escaped}</code></pre></div>` +
     `</div>`
     html = html.replace('%%MERMAID_' + idx + '%%', mermaidHtml)
@@ -1174,6 +1208,12 @@ export function renderMarkdown(text) {
   if (mathBlocks.length) {
     mathBlocks.forEach((h, idx) => {
       clean = clean.replaceAll('%%KMATH' + idx + '%%', h)
+    })
+  }
+  // 回填已渲染 mermaid SVG（同为清洗后插入：SVG 为本地 mermaid 渲染的可信输出）
+  if (renderedMermaidSvgs.length) {
+    renderedMermaidSvgs.forEach((svg, idx) => {
+      clean = clean.replaceAll('%%MERMAIDSVG' + idx + '%%', svg)
     })
   }
   return clean
@@ -1381,6 +1421,12 @@ export function processSpecialContent(container) {
       downloadMedia(video.src, 'ai-video-' + Date.now())
     })
     wrapper.appendChild(toolbar)
+  })
+
+  // 已渲染的 mermaid 图（含流式重建命中缓存回填的）重新绑定缩放/拖拽：
+  // v-html 全量重建后 wrapper 为新 DOM，panzoom 绑定丢失，attachInlinePanZoom 幂等可安全重挂
+  container.querySelectorAll('.mermaid-view pre.mermaid.mermaid-rendered').forEach(pre => {
+    attachInlinePanZoom(pre)
   })
 }
 
