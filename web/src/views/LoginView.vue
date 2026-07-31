@@ -397,15 +397,16 @@ async function handleLogin() {
         safeRemove('rememberedUsername')
       }
       authStore.setAuth(data)
-      router.push('/')
-    } else {
-      ElMessage.error(data.message || t('login.loginFailed'))
+      // 跳转期间（含 ChatView 懒加载 chunk）保持 loading，防止重复点击；
+      // 导航完成后本组件卸载，若被守卫中断则复位按钮可重试
+      router.push('/').finally(() => { loginLoading.value = false })
+      return
     }
+    ElMessage.error(data.message || t('login.loginFailed'))
   } catch (e) {
     ElMessage.error(t('login.networkError'))
-  } finally {
-    loginLoading.value = false
   }
+  loginLoading.value = false
 }
 
 async function handleRegister() {
@@ -415,15 +416,15 @@ async function handleRegister() {
     const data = await register({ username: regForm.value.username, password: regForm.value.password })
     if (data.success) {
       authStore.setAuth(data)
-      router.push('/')
-    } else {
-      ElMessage.error(data.message || t('login.registerFailed'))
+      // 同 handleLogin：跳转完成前保持 loading，防止重复提交
+      router.push('/').finally(() => { regLoading.value = false })
+      return
     }
+    ElMessage.error(data.message || t('login.registerFailed'))
   } catch (e) {
     ElMessage.error(t('login.networkError'))
-  } finally {
-    regLoading.value = false
   }
+  regLoading.value = false
 }
 </script>
 

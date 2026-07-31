@@ -45,6 +45,7 @@
                   value-format="YYYY-MM-DD"
                   :shortcuts="dateShortcuts"
                   class="us-date-range"
+                  popper-class="us-date-popper"
                   size="small"
                 />
               </div>
@@ -119,6 +120,7 @@
                   value-format="YYYY-MM-DD"
                   :shortcuts="dateShortcuts"
                   class="us-date-range"
+                  popper-class="us-date-popper"
                   size="small"
                 />
               </div>
@@ -1162,20 +1164,58 @@ function buildGroupedBarSvg(labels, series, metric) {
     position: static !important;
     width: 100% !important;
     height: auto !important;
-    padding: 6px 0 !important;
+    padding: 8px 10px !important;
     display: flex !important;
+    gap: 6px !important;
     overflow-x: auto !important;
     border-right: none !important;
     border-bottom: 1px solid var(--el-datepicker-inner-border-color, var(--el-border-color-light)) !important;
   }
+  /* 快捷项默认是 width:100% 的块级文字行，横排后会每个撑满一行宽；
+     重置为自适应宽度的胶囊按钮，带边框/背景以体现可点击 */
   .el-picker-panel__shortcut {
+    width: auto !important;
+    line-height: 1 !important;
+    padding: 6px 12px !important;
+    font-size: 12px !important;
     white-space: nowrap !important;
     flex-shrink: 0 !important;
+    border: 1px solid var(--el-border-color) !important;
+    border-radius: 999px !important;
+    background: var(--el-fill-color-light) !important;
+    color: var(--el-text-color-regular) !important;
+    cursor: pointer !important;
+  }
+  .el-picker-panel__shortcut:active,
+  .el-picker-panel__shortcut:hover {
+    color: var(--el-color-primary) !important;
+    border-color: var(--el-color-primary) !important;
+    background: var(--el-color-primary-light-9, rgba(99,102,241,0.1)) !important;
   }
   /* body 不再为左侧快捷栏让出 110px 左边距 */
   .el-picker-panel__sidebar + .el-picker-panel__body,
   .el-picker-panel [slot=sidebar] + .el-picker-panel__body {
     margin-left: 0 !important;
+  }
+
+  /* 弹层改为固定居中：堆叠后面板高度超出视口时，popper 贴输入框定位会把下半月历
+     挤出屏幕外（横向贴边同理被遮挡）；!important 覆盖 popper 的内联定位样式 */
+  .us-date-popper.el-popper {
+    position: fixed !important;
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) !important;
+    margin: 0 !important;
+  }
+  .us-date-popper .el-popper__arrow {
+    display: none !important;
+  }
+  /* 面板限高 + 内部纵向滚动，兜底极矮视口（如横屏手机）下仍可完整操作 */
+  .us-date-popper .el-date-range-picker {
+    max-height: calc(100dvh - 24px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
 }
 </style>
