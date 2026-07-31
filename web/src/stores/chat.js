@@ -40,10 +40,14 @@ export const useChatStore = defineStore('chat', () => {
           if (msgs[i].role === 'user' && !first) first = msgs[i]
           if (msgs[i].time) lastTime = msgs[i].time
         }
-        autoTitle = first ? first.content.substring(0, 20) : '新会话'
-        fullContent = first ? first.content : ''
+        // 空会话（尚未发送过用户消息）不在侧边栏展示，发送首条消息后才出现
+        if (!first) return
+        autoTitle = first.content.substring(0, 20)
+        fullContent = first.content
       } else {
         const s = chatSummaries.value[id] || {}
+        // 未加载会话：服务端摘要显示无消息的空会话同样不展示
+        if ((s.count || 0) === 0) return
         autoTitle = s.title || '新会话'
         fullContent = s.preview || ''
         lastTime = s.lastTime || null
@@ -341,6 +345,14 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function newChat() {
+    // 已有空会话时直接复用，避免反复点击新建产生多个空会话
+    const emptyId = findEmptyChatId()
+    if (emptyId) {
+      if (chats.value[emptyId] === undefined) chats.value[emptyId] = []
+      currentChatId.value = emptyId
+      syncToServer()
+      return
+    }
     currentChatId.value = Date.now().toString()
     chats.value[currentChatId.value] = []
     syncToServer()

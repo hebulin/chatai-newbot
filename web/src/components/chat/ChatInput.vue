@@ -130,7 +130,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModelsStore } from '@/stores/models'
 import { useChatStore } from '@/stores/chat'
@@ -410,6 +410,11 @@ function handleSendClick() {
 }
 
 function doSend() {
+  // bot 输出未结束时不发送：仅提示不清空，保留输入内容供输出完成后再发送
+  if (props.isStreaming) {
+    ElMessage.warning(t('chat.stillStreaming'))
+    return
+  }
   const text = inputText.value.trim()
   const hasImages = pendingImages.value.length > 0
   const hasFiles = pendingFiles.value.length > 0
@@ -582,4 +587,15 @@ async function addDocFile(file) {
 function removeFile(idx) {
   pendingFiles.value.splice(idx, 1)
 }
+
+// 外部回填输入框（如空会话引导的建议提问）：填入后自适应高度并聚焦便于直接编辑/发送
+function setInput(text) {
+  inputText.value = text || ''
+  nextTick(() => {
+    autoResize()
+    textareaRef.value?.focus()
+  })
+}
+
+defineExpose({ setInput })
 </script>

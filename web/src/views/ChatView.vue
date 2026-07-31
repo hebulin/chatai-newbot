@@ -47,6 +47,15 @@
     <main class="main-content" :class="{ 'sidebar-collapsed': sidebarCollapsed && !isMobile }">
       <div class="chat-viewport">
         <div class="chat-container" ref="chatContainerRef">
+          <!-- 空会话引导：新会话未发送内容时展示，发出首条消息后自动消失 -->
+          <div v-if="showWelcome" class="chat-welcome">
+            <img class="chat-welcome-icon" :src="brandIconSrc" alt="AI" />
+            <div class="chat-welcome-title">{{ t('chat.welcomeTitle') }}</div>
+            <div class="chat-welcome-sub">{{ t('chat.welcomeSub') }}</div>
+            <div class="chat-welcome-tips">
+              <button v-for="(tip, i) in welcomeTips" :key="i" class="chat-welcome-tip" @click="applyWelcomeTip(tip)">{{ tip }}</button>
+            </div>
+          </div>
           <!-- 长会话性能：默认只渲染最近一窗口消息，更早的按需展开 -->
           <div v-if="hiddenCount > 0" class="load-earlier">
             <button class="load-earlier-btn" @click="loadEarlier">{{ t('chat.loadEarlier', { n: hiddenCount }) }}</button>
@@ -81,6 +90,7 @@
 
       <!-- 输入区 -->
       <ChatInput
+        ref="chatInputRef"
         :is-streaming="streamChat.isStreaming.value"
         :supports-thinking="modelsStore.currentModelSupportsThinking"
         :supports-multimodal="modelsStore.currentModelSupportsMultimodal"
@@ -171,6 +181,24 @@ const displayMessages = computed(() => {
 
 // 切换/新建会话时重置渲染窗口
 watch(() => chatStore.currentChatId, () => { visibleCount.value = RENDER_WINDOW })
+
+// ===== 空会话引导：无任何消息且未在流式输出时展示欢迎内容与建议提问 =====
+const chatInputRef = ref(null)
+const showWelcome = computed(() =>
+  chatStore.isChatHistoryLoaded &&
+  !streamChat.isStreaming.value &&
+  chatStore.currentMessages.length === 0
+)
+const welcomeTips = computed(() => [
+  t('chat.welcomeTip1'),
+  t('chat.welcomeTip2'),
+  t('chat.welcomeTip3'),
+  t('chat.welcomeTip4')
+])
+// 点击建议：回填到输入框供编辑后发送，不直接发出
+function applyWelcomeTip(tip) {
+  chatInputRef.value?.setInput(tip)
+}
 
 // 展开更早消息并保持当前阅读位置（补齐新增内容的高度差）
 async function loadEarlier() {

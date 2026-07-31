@@ -659,6 +659,75 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
 .chat-container:hover::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
 
 /* ============================================
+   EMPTY-STATE WELCOME（空会话引导：发出首条消息后自动消失）
+   ============================================ */
+.chat-welcome {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 24px;
+    pointer-events: none;
+    animation: welcomeIn 0.35s var(--ease);
+}
+.chat-welcome > * { pointer-events: auto; }
+@keyframes welcomeIn { from { opacity: 0; } to { opacity: 1; } }
+.chat-welcome-icon {
+    width: 56px; height: 56px;
+    border-radius: var(--radius-lg);
+    padding: 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    object-fit: contain;
+    margin-bottom: 20px;
+    opacity: 0.92;
+}
+.chat-welcome-title {
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 22px;
+    color: var(--fg);
+    letter-spacing: 0;
+    margin-bottom: 8px;
+}
+.chat-welcome-sub {
+    font-family: var(--sans);
+    font-size: 13.5px;
+    color: var(--fg-3);
+    max-width: 460px;
+    line-height: 1.6;
+    margin-bottom: 28px;
+}
+.chat-welcome-tips {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    max-width: 560px;
+}
+.chat-welcome-tip {
+    font-family: var(--sans);
+    font-size: 13px;
+    color: var(--fg-2);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xl);
+    padding: 9px 16px;
+    cursor: pointer;
+    transition: all 0.2s var(--ease);
+    letter-spacing: 0.01em;
+}
+.chat-welcome-tip:hover {
+    color: var(--primary);
+    border-color: var(--primary);
+    background: var(--primary-soft);
+    transform: translateY(-1px);
+}
+
+/* ============================================
    MESSAGES
    ============================================ */
 .msg-wrapper {
