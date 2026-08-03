@@ -121,7 +121,7 @@ const zh = {
     send: '发送',
     stop: '停止',
     footShortcut: '⌘/Ctrl+Enter · 新行',
-    footDisclaimer: '内容由 AI 生成 · 请仔细甄别',
+    footDisclaimer: 'AI生成 · 请注意甄别',
     selectModel: '选择模型',
     roleBound: '当前会话已绑定角色：{title}',
     roleReset: '已恢复默认提示词',
