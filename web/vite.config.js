@@ -14,6 +14,11 @@ export default defineConfig({
     })
   ],
   base: '/',
+  // 生产构建移除调试输出：console.log/info/debug 为开发噪音，console.warn/error 保留
+  // 用于线上问题排查（pure 标记为无副作用函数，被 tree-shaking 移除）
+  esbuild: {
+    pure: ['console.log', 'console.info', 'console.debug']
+  },
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src')

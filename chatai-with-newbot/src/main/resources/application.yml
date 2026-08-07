@@ -30,6 +30,9 @@ spring:
     max-in-memory-size: 16MB
   mvc:
     static-path-pattern: /**
+    async:
+      # 异步请求超时（PDF 渲染等 Callable 接口）：逐页渲染最多 15 页可能耗时较长，放宽到 120 秒
+      request-timeout: 120000
   resources:
     static-locations: classpath:/static/
 

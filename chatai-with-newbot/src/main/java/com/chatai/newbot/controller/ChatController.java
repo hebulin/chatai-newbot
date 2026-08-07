@@ -104,7 +104,9 @@ public class ChatController {
             }
         }
 
-        // 记录使用
+        // 记录使用（仅构建对象，不立即入库）：由 UnifiedChatService 在流终止阶段
+        // 按实际消耗情况写入——正常完成/客户端取消/已输出后失败才落库，
+        // 请求直接失败（未产生任何输出）不写入、不占每日配额
         UsageLog usageLog = new UsageLog();
         usageLog.setUserId(user.getId());
         usageLog.setUsername(user.getUsername());
@@ -112,7 +114,6 @@ public class ChatController {
         usageLog.setModelName(config.getDisplayName());
         usageLog.setTimestamp(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
         usageLog.setDeepThinking(request.isDeepThinking());
-        storageService.addUsageLog(usageLog);
 
         return chatService.chat(request, modelConfigId, usageLog);
     }

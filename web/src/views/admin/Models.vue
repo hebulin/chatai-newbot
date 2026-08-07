@@ -133,16 +133,10 @@
           </template>
         </el-table-column>
       </el-table>
-      <div class="admin-pager">
-        <select v-model.number="modelPageSize" class="admin-pager-size" @change="modelPage = 1">
-          <option :value="10">10条/页</option>
-          <option :value="20">20条/页</option>
-          <option :value="50">50条/页</option>
-        </select>
-        <button class="admin-pager-btn" :disabled="modelPage <= 1" @click="modelPage--">上一页</button>
-        <span class="admin-pager-info">第 {{ modelPage }} / {{ modelTotalPages }} 页 · 共 {{ filteredModels.length }} 条</span>
-        <button class="admin-pager-btn" :disabled="modelPage >= modelTotalPages" @click="modelPage++">下一页</button>
-      </div>
+      <!-- 统一分页组件（前端分页：切换条数重置页码，翻页由计算属性自动响应） -->
+      <AdminPager v-model:page="modelPage" v-model:page-size="modelPageSize"
+        :total="filteredModels.length" :total-pages="modelTotalPages"
+        @size-change="modelPage = 1" />
     </div>
 
     <!-- 编辑模型弹窗 -->
@@ -296,6 +290,7 @@ import { Plus, Edit, Delete, Star, StarFilled, Connection, Loading, ArrowUp, Arr
 import { getModels, addModel, updateModel, deleteModel, batchDeleteModels, testModel, setDefaultModel, clearDefaultModel } from '@/api/models'
 import { getProviders } from '@/api/providers'
 import { autoColWidth } from '@/composables/useTableAutoWidth'
+import AdminPager from '@/components/admin/AdminPager.vue'
 
 const providerIconMap = {
   deepseek: '/icons/deepseek-icon.svg',

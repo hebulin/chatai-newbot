@@ -39,16 +39,11 @@
         <el-table-column prop="detail" label="详情" min-width="240" show-overflow-tooltip />
         <el-table-column prop="ip" label="来源IP" width="140" show-overflow-tooltip />
       </el-table>
-      <div class="admin-pager">
-        <select v-model.number="pageSize" class="admin-pager-size" @change="reload">
-          <option :value="20">20条/页</option>
-          <option :value="50">50条/页</option>
-          <option :value="100">100条/页</option>
-        </select>
-        <button class="admin-pager-btn" :disabled="page <= 1" @click="page--; load()">上一页</button>
-        <span class="admin-pager-info">第 {{ page }} / {{ totalPages }} 页 · 共 {{ total }} 条</span>
-        <button class="admin-pager-btn" :disabled="page >= totalPages" @click="page++; load()">下一页</button>
-      </div>
+      <!-- 统一分页组件（服务端分页；审计日志每页选项为 20/50/100） -->
+      <AdminPager v-model:page="page" v-model:page-size="pageSize"
+        :total="total" :total-pages="totalPages"
+        :size-options="[20, 50, 100]"
+        @size-change="reload" @page-change="load" />
     </div>
   </div>
 </template>
@@ -57,6 +52,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getAuditLogs, getAuditActions, resetAuditLogs } from '@/api/audit'
+import AdminPager from '@/components/admin/AdminPager.vue'
 
 const loading = ref(false)
 const resetting = ref(false)

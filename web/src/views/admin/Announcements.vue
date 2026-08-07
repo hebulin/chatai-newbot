@@ -89,16 +89,10 @@
           </template>
         </el-table-column>
       </el-table>
-      <div class="admin-pager">
-        <select v-model.number="pageSize" class="admin-pager-size" @change="page = 1">
-          <option :value="10">10条/页</option>
-          <option :value="20">20条/页</option>
-          <option :value="50">50条/页</option>
-        </select>
-        <button class="admin-pager-btn" :disabled="page <= 1" @click="page--">上一页</button>
-        <span class="admin-pager-info">第 {{ page }} / {{ totalPages }} 页 · 共 {{ announcements.length }} 条</span>
-        <button class="admin-pager-btn" :disabled="page >= totalPages" @click="page++">下一页</button>
-      </div>
+      <!-- 统一分页组件（前端分页：切换条数重置页码，翻页由计算属性自动响应） -->
+      <AdminPager v-model:page="page" v-model:page-size="pageSize"
+        :total="announcements.length" :total-pages="totalPages"
+        @size-change="page = 1" />
     </div>
 
     <!-- 重新生效 / 更改公告期 -->
@@ -153,6 +147,7 @@ import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { listAnnouncements, publishAnnouncement, republishAnnouncement, offlineAnnouncement, deleteAnnouncement } from '@/api/settings'
 import { autoColWidth } from '@/composables/useTableAutoWidth'
+import AdminPager from '@/components/admin/AdminPager.vue'
 
 const loading = ref(false)
 const announcements = ref([])

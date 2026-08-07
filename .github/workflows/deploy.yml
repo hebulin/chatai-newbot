@@ -46,7 +46,7 @@ jobs:
 
       - name: Build Spring Boot JAR
         working-directory: ./chatai-with-newbot
-        run: mvn -B clean package -DskipTests
+        run: mvn -B clean package
 
       - name: Get JAR filename
         id: jar

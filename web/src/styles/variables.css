@@ -24,8 +24,8 @@
   --radius: 8px;
   --radius-sm: 6px;
   --radius-lg: 12px;
-  --sans: 'DM Sans', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  --mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --mono: 'SF Mono', Menlo, Consolas, monospace;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   /* 别名变量：部分组件引用了 -1 后缀命名，指向现有主题变量，随深浅主题自动切换 */
   --ink-1: var(--ink);

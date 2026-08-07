@@ -11,6 +11,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -83,27 +84,36 @@ public class FileController {
 
     /**
      * 上传 PDF（最大6MB）：服务端逐页渲染为图片，返回图片 URL 列表，
-     * 前端将其作为多模态图片附件发给模型
+     * 前端将其作为多模态图片附件发给模型。
+     * 返回 Callable 使 Spring MVC 异步执行：逐页渲染（最多 15 页）为 CPU 密集操作，
+     * 若在 Servlet 请求线程同步执行会长时间占用 Tomcat 工作线程，高并发上传可能耗尽线程池；
+     * 异步化后 Servlet 线程立即释放，渲染在 MVC 异步任务线程上执行
+     * （超时时长由 application.yml 的 spring.mvc.async.request-timeout 控制）。
+     * 注意：MultipartFile 的内容在异步执行前已由容器缓存于内存/临时文件，异步读取安全。
      */
     @PostMapping("/api/upload/pdf")
-    public Map<String, Object> uploadPdf(@RequestParam("file") MultipartFile file) {
-        Map<String, Object> result = new HashMap<>();
-        try {
-            PdfRenderService.RenderResult r = pdfRenderService.render(file);
-            result.put("success", true);
-            result.put("images", r.images());
-            result.put("name", file.getOriginalFilename());
-            result.put("pages", r.images().size());
-            result.put("totalPages", r.totalPages());
-            result.put("truncated", r.truncated());
-        } catch (IllegalArgumentException e) {
-            result.put("success", false);
-            result.put("message", e.getMessage());
-        } catch (Exception e) {
-            result.put("success", false);
-            result.put("message", "PDF 转换失败");
-        }
-        return result;
+    public Callable<Map<String, Object>> uploadPdf(@RequestParam("file") MultipartFile file) {
+        // 提前读取文件名（异步阶段请求上下文可能已失效）
+        String originalName = file.getOriginalFilename();
+        return () -> {
+            Map<String, Object> result = new HashMap<>();
+            try {
+                PdfRenderService.RenderResult r = pdfRenderService.render(file);
+                result.put("success", true);
+                result.put("images", r.images());
+                result.put("name", originalName);
+                result.put("pages", r.images().size());
+                result.put("totalPages", r.totalPages());
+                result.put("truncated", r.truncated());
+            } catch (IllegalArgumentException e) {
+                result.put("success", false);
+                result.put("message", e.getMessage());
+            } catch (Exception e) {
+                result.put("success", false);
+                result.put("message", "PDF 转换失败");
+            }
+            return result;
+        };
     }
 
     /**

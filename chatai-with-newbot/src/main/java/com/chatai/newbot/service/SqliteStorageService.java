@@ -45,9 +45,18 @@ public class SqliteStorageService implements StorageService {
     private volatile List<ModelConfig> modelConfigsCache;
     // 当前启用公告缓存：null=未加载，Optional.empty=确认无启用公告；公告写操作后置空
     private volatile Optional<Announcement> enabledAnnouncementCache;
+    // 用户对象失效式缓存（userId -> User）：认证拦截器每次请求都会按 token 查用户，
+    // 缓存避免每个 API 请求都产生一次 SELECT t_user；任何用户写操作后失效对应条目。
+    // getUserById 对外返回防御性副本，调用方修改不会污染缓存对象
+    private final Map<String, User> userCache = new ConcurrentHashMap<>();
 
     private static final String ADMIN_USERNAME = "admin";
-    private static final String ADMIN_DEFAULT_PASSWORD = "admin123";
+    /** 首次安装内置 admin 的兜底密码：仅当未通过环境变量/系统属性指定时使用的回退值。
+     *  优先读取 CHATAI_ADMIN_PASSWORD 环境变量或 chatai.admin.password 系统属性（部署时显式指定），
+     *  都未配置时使用本兜底值并输出醒目告警，提示管理员立即修改 */
+    private static final String ADMIN_FALLBACK_PASSWORD = "admin123";
+    /** 使用记录全量兜底查询的安全上限条数（主路径均为分页查询，此处仅防内存溢出） */
+    private static final int USAGE_LOG_FETCH_LIMIT = 10000;
 
     public SqliteStorageService(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
@@ -167,6 +176,11 @@ public class SqliteStorageService implements StorageService {
                 ")");
         jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_usage_user ON t_usage_log(user_id)");
         jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_usage_time ON t_usage_log(timestamp)");
+        // 复合索引：个人配额统计（user_id + timestamp 范围/前缀查询）与用户维度时间筛选
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_usage_user_time ON t_usage_log(user_id, timestamp)");
+        // 单列筛选索引：后台使用记录按用户名/模型名下拉筛选（buildUsageWhere 的等值条件）
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_usage_username ON t_usage_log(username)");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_usage_model_name ON t_usage_log(model_name)");
 
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_chat_history (" +
                 "user_id TEXT PRIMARY KEY," +
@@ -478,20 +492,48 @@ public class SqliteStorageService implements StorageService {
         return u;
     };
 
-    /** 确保内置 admin 用户存在 */
+    /**
+     * 确保内置 admin 用户存在。
+     * 初始密码策略：优先读取 CHATAI_ADMIN_PASSWORD 环境变量 / chatai.admin.password 系统属性，
+     * 都未配置时使用兜底弱密码并输出醒目告警（部署文档应提示尽快修改或改用环境变量注入强密码）。
+     * 仅对全新安装的库生效，已有 admin 用户的库不会触碰其密码。
+     */
     private void ensureAdminUser() {
         Integer count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_user WHERE username = ?", Integer.class, ADMIN_USERNAME);
         if (count == null || count == 0) {
+            String initialPassword = resolveAdminInitialPassword();
             User admin = new User();
             admin.setId(UUID.randomUUID().toString());
             admin.setUsername(ADMIN_USERNAME);
-            admin.setPassword(PasswordHasher.hash(ADMIN_DEFAULT_PASSWORD));
+            admin.setPassword(PasswordHasher.hash(initialPassword));
             admin.setRole("admin");
             admin.setCreatedAt(nowString());
             insertUser(admin);
-            log.info("SQLite: 已创建内置admin账户");
+            if (ADMIN_FALLBACK_PASSWORD.equals(initialPassword)) {
+                log.warn("SQLite: 已创建内置admin账户（使用兜底初始密码 {}）。安全提示：请尽快在后台修改密码，" +
+                        "或通过环境变量 CHATAI_ADMIN_PASSWORD / 系统属性 chatai.admin.password 指定强密码后重新初始化",
+                        ADMIN_FALLBACK_PASSWORD);
+            } else {
+                log.info("SQLite: 已创建内置admin账户（使用外部指定的初始密码）");
+            }
         }
+    }
+
+    /**
+     * 解析首次安装 admin 的初始密码：环境变量 CHATAI_ADMIN_PASSWORD > 系统属性 chatai.admin.password > 兜底弱密码
+     * @return 初始密码（非空）
+     */
+    private String resolveAdminInitialPassword() {
+        String fromEnv = System.getenv("CHATAI_ADMIN_PASSWORD");
+        if (fromEnv != null && !fromEnv.trim().isEmpty()) {
+            return fromEnv.trim();
+        }
+        String fromProp = System.getProperty("chatai.admin.password");
+        if (fromProp != null && !fromProp.trim().isEmpty()) {
+            return fromProp.trim();
+        }
+        return ADMIN_FALLBACK_PASSWORD;
     }
 
     /**
@@ -559,6 +601,8 @@ public class SqliteStorageService implements StorageService {
             user.setPassword(PasswordHasher.hash(password));
             jdbcTemplate.update("UPDATE t_user SET password = ? WHERE id = ?",
                     user.getPassword(), user.getId());
+            // 密码哈希变更：失效该用户缓存，避免缓存副本保留旧哈希
+            userCache.remove(user.getId());
         }
         return user;
     }
@@ -641,9 +685,44 @@ public class SqliteStorageService implements StorageService {
 
     @Override
     public User getUserById(String id) {
+        if (id == null) return null;
+        User cached = userCache.get(id);
+        if (cached != null) {
+            return copyUser(cached);
+        }
         List<User> users = jdbcTemplate.query(
                 "SELECT * FROM t_user WHERE id = ?", userRowMapper, id);
-        return users.isEmpty() ? null : users.get(0);
+        if (users.isEmpty()) return null;
+        User user = users.get(0);
+        userCache.put(user.getId(), user);
+        return copyUser(user);
+    }
+
+    /**
+     * 用户对象防御性深拷贝：getUserById 对外一律返回副本，
+     * 调用方对返回对象的字段修改（如后台编辑页先改内存再保存）不会污染缓存对象
+     * @param src 缓存中的用户对象
+     * @return 字段一致的副本（列表字段为独立列表实例）
+     */
+    private User copyUser(User src) {
+        User c = new User();
+        c.setId(src.getId());
+        c.setUsername(src.getUsername());
+        c.setPassword(src.getPassword());
+        c.setRole(src.getRole());
+        c.setCreatedAt(src.getCreatedAt());
+        c.setLastLoginAt(src.getLastLoginAt());
+        c.setLastLoginIp(src.getLastLoginIp());
+        c.setLastLoginBrowser(src.getLastLoginBrowser());
+        c.setAllowedModelIds(src.getAllowedModelIds() == null
+                ? new ArrayList<>() : new ArrayList<>(src.getAllowedModelIds()));
+        c.setSystemPrompt(src.getSystemPrompt());
+        c.setPromptPresets(src.getPromptPresets() == null
+                ? new ArrayList<>() : new ArrayList<>(src.getPromptPresets()));
+        c.setDisabled(src.isDisabled());
+        c.setDailyLimitType(src.getDailyLimitType());
+        c.setDailyLimitValue(src.getDailyLimitValue());
+        return c;
     }
 
     @Override
@@ -652,6 +731,7 @@ public class SqliteStorageService implements StorageService {
         User user = getUserById(userId);
         if (user == null || "admin".equals(user.getRole())) return false;
         int deleted = jdbcTemplate.update("DELETE FROM t_user WHERE id = ?", userId);
+        userCache.remove(userId);
         return deleted > 0;
     }
 
@@ -663,6 +743,7 @@ public class SqliteStorageService implements StorageService {
                 user.getLastLoginAt(), user.getLastLoginIp(), user.getLastLoginBrowser(),
                 toJsonArray(user.getAllowedModelIds()), user.getSystemPrompt(), user.isDisabled() ? 1 : 0,
                 user.getDailyLimitType(), user.getDailyLimitValue(), toPromptPresetsJson(user.getPromptPresets()), user.getId());
+        userCache.remove(user.getId());
     }
 
     @Override
@@ -672,6 +753,7 @@ public class SqliteStorageService implements StorageService {
         if (!PasswordHasher.matches(oldPassword, user.getPassword())) return 2;
         jdbcTemplate.update("UPDATE t_user SET password = ? WHERE id = ?",
                 PasswordHasher.hash(newPassword), userId);
+        userCache.remove(userId);
         return 0;
     }
 
@@ -739,9 +821,14 @@ public class SqliteStorageService implements StorageService {
 
     @Override
     public ModelConfig getModelConfigById(String id) {
-        List<ModelConfig> list = jdbcTemplate.query(
-                "SELECT * FROM t_model_config WHERE id = ?", modelConfigRowMapper, id);
-        return list.isEmpty() ? null : list.get(0);
+        // 走模型配置列表缓存（失效式缓存由写操作维护），避免每次聊天请求单独查库；
+        // 缓存未命中时 getAllModelConfigs 会重建并回填，与直查 DB 结果一致
+        for (ModelConfig m : getAllModelConfigs()) {
+            if (id != null && id.equals(m.getId())) {
+                return m;
+            }
+        }
+        return null;
     }
 
     @Override
@@ -1072,31 +1159,62 @@ public class SqliteStorageService implements StorageService {
                 logEntry.isDeepThinking() ? 1 : 0);
     }
 
+    /**
+     * 获取使用记录（带安全上限的全量兜底查询）。
+     * 主查询路径均为分页接口（queryUsageLogs/aggregateUsageStats），
+     * 本方法仅作兼容保留，限制最多返回最近 {@value #USAGE_LOG_FETCH_LIMIT} 条，
+     * 防止数据量增长后一次性装载全部记录导致内存溢出。
+     * @return 最近的使用记录列表（时间降序）
+     */
     @Override
     public List<UsageLog> getAllUsageLogs() {
-        return jdbcTemplate.query("SELECT * FROM t_usage_log", usageLogRowMapper);
+        return jdbcTemplate.query(
+                "SELECT * FROM t_usage_log ORDER BY timestamp DESC LIMIT " + USAGE_LOG_FETCH_LIMIT,
+                usageLogRowMapper);
     }
 
+    /**
+     * 获取指定用户的使用记录（带安全上限，最近 {@value #USAGE_LOG_FETCH_LIMIT} 条）
+     * @param userId 用户ID
+     * @return 该用户最近的使用记录列表（时间降序）
+     */
     @Override
     public List<UsageLog> getUsageLogsByUser(String userId) {
         return jdbcTemplate.query(
-                "SELECT * FROM t_usage_log WHERE user_id = ?", usageLogRowMapper, userId);
+                "SELECT * FROM t_usage_log WHERE user_id = ? ORDER BY timestamp DESC LIMIT " + USAGE_LOG_FETCH_LIMIT,
+                usageLogRowMapper, userId);
     }
 
     @Override
     public int countUsageByUserAndDay(String userId, String day) {
+        // 范围比较替代 LIKE 前缀，可命中 idx_usage_user_time 复合索引
         Integer count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM t_usage_log WHERE user_id = ? AND timestamp LIKE ?",
-                Integer.class, userId, day + "%");
+                "SELECT COUNT(*) FROM t_usage_log WHERE user_id = ? AND timestamp >= ? AND timestamp < ?",
+                Integer.class, userId, day, nextDay(day));
         return count == null ? 0 : count;
     }
 
     @Override
     public long sumTokensByUserAndDay(String userId, String day) {
+        // 范围比较替代 LIKE 前缀，可命中 idx_usage_user_time 复合索引
         Long sum = jdbcTemplate.queryForObject(
-                "SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) FROM t_usage_log WHERE user_id = ? AND timestamp LIKE ?",
-                Long.class, userId, day + "%");
+                "SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) FROM t_usage_log WHERE user_id = ? AND timestamp >= ? AND timestamp < ?",
+                Long.class, userId, day, nextDay(day));
         return sum == null ? 0L : sum;
+    }
+
+    /**
+     * 计算指定日期的下一天字符串（yyyy-MM-dd），供 timestamp 范围比较的上界使用
+     * （timestamp 为 yyyy-MM-dd HH:mm:ss 文本，字典序比较即时间比较）
+     * @param day 日期字符串
+     * @return 下一天日期字符串，解析失败返回 day 原值（退化为单日 LIKE 语义也不抛错）
+     */
+    private String nextDay(String day) {
+        try {
+            return LocalDate.parse(day).plusDays(1).toString();
+        } catch (Exception e) {
+            return day;
+        }
     }
 
     @Override
@@ -1118,13 +1236,14 @@ public class SqliteStorageService implements StorageService {
     }
 
     /**
-     * 删除指定日期之前的使用记录（定期清理过期日志用）
+     * 删除指定日期之前的使用记录（定期清理过期日志用）。
+     * 范围比较替代 SUBSTR 列函数包裹，可命中 idx_usage_time 索引。
      * @param day 截止日期（yyyy-MM-dd，不含当天）
      * @return 删除条数
      */
     public int deleteUsageLogsBefore(String day) {
         return jdbcTemplate.update(
-                "DELETE FROM t_usage_log WHERE SUBSTR(timestamp, 1, 10) < ?", day);
+                "DELETE FROM t_usage_log WHERE timestamp < ?", day);
     }
 
     // ========== 使用记录查询下推（筛选/分页/聚合在 SQL 层完成） ==========
@@ -1422,6 +1541,22 @@ public class SqliteStorageService implements StorageService {
     public List<String> listChatSessionIds(String userId) {
         return jdbcTemplate.queryForList(
                 "SELECT chat_id FROM t_chat_session WHERE user_id = ?", String.class, userId);
+    }
+
+    /**
+     * 按关键字粗筛消息正文命中的会话行（SQL LIKE 下推，跨会话全文搜索用）。
+     * 仅做候选集收窄：LIKE 命中的是消息 JSON 全文（可能误命中字段名等非内容文本），
+     * 调用方需对消息内容做精确二次匹配。按最近更新时间倒序，限定候选会话数防止重度用户全表解析。
+     * @param userId 用户ID
+     * @param keyword 关键字（不含 %/_ 通配符语义，原样作为子串匹配）
+     * @param sessionLimit 候选会话数上限
+     * @return 每条记录含 chat_id/title/messages，按 updated_at_ts 降序
+     */
+    public List<Map<String, Object>> searchChatSessionsByKeyword(String userId, String keyword, int sessionLimit) {
+        return jdbcTemplate.queryForList(
+                "SELECT chat_id, title, messages FROM t_chat_session " +
+                "WHERE user_id = ? AND messages LIKE ? ORDER BY updated_at_ts DESC LIMIT ?",
+                userId, "%" + keyword + "%", sessionLimit);
     }
 
     /**

@@ -84,16 +84,10 @@
           </template>
         </el-table-column>
       </el-table>
-      <div class="admin-pager">
-        <select v-model.number="userPageSize" class="admin-pager-size" @change="reloadUsers">
-          <option :value="10">10条/页</option>
-          <option :value="20">20条/页</option>
-          <option :value="50">50条/页</option>
-        </select>
-        <button class="admin-pager-btn" :disabled="userPage <= 1" @click="userPage--; loadUsers()">上一页</button>
-        <span class="admin-pager-info">第 {{ userPage }} / {{ userTotalPages }} 页 · 共 {{ userTotal }} 条</span>
-        <button class="admin-pager-btn" :disabled="userPage >= userTotalPages" @click="userPage++; loadUsers()">下一页</button>
-      </div>
+      <!-- 统一分页组件（服务端分页：切换条数/翻页均回到加载逻辑） -->
+      <AdminPager v-model:page="userPage" v-model:page-size="userPageSize"
+        :total="userTotal" :total-pages="userTotalPages"
+        @size-change="reloadUsers" @page-change="loadUsers" />
     </div>
 
     <!-- 添加用户弹窗 -->
@@ -198,6 +192,7 @@ import { Plus, Edit, Delete, Key, Lock, Unlock } from '@element-plus/icons-vue'
 import { getUsers, addUser, updateUser, deleteUser, batchDeleteUsers, updateUserPermissions } from '@/api/users'
 import { getModels } from '@/api/models'
 import { autoColWidth } from '@/composables/useTableAutoWidth'
+import AdminPager from '@/components/admin/AdminPager.vue'
 
 const providerIconMap = {
   deepseek: '/icons/deepseek-icon.svg',

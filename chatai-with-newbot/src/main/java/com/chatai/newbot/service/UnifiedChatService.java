@@ -15,9 +15,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.SignalType;
+import reactor.util.retry.Retry;
 
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -42,6 +45,9 @@ public class UnifiedChatService {
                     .defaultCodecs()
                     .maxInMemorySize(16 * 1024 * 1024))
             .build();
+
+    /** 流式响应无数据超时：连续该时长未收到任何 chunk 时主动中断，避免厂商 API 卡死导致连接无限挂起 */
+    private static final Duration STREAM_IDLE_TIMEOUT = Duration.ofMinutes(5);
 
     public UnifiedChatService(StorageManager storageService, FileStorageService fileStorageService,
                               WebSearchService webSearchService) {
@@ -272,7 +278,7 @@ public class UnifiedChatService {
         // 用于从流式响应中提取 usage token 数据
         AtomicReference<Map<String, Object>> usageRef = new AtomicReference<>();
 
-        return sharedWebClient
+        Flux<String> stream = sharedWebClient
                 .post()
                 .uri(fullUrl)
                 .header("Authorization", "Bearer " + apiKey)
@@ -290,8 +296,9 @@ public class UnifiedChatService {
                     if (usageLog != null && usageRef.get() != null) {
                         updateUsageLog(usageLog, usageRef.get());
                     }
-                })
-                .onErrorResume(e -> handleError(e));
+                });
+        // 统一装饰：无数据超时 + 未输出内容前瞬态重试 + 错误兜底 + 客户端取消日志
+        return decorateStream(stream, usageLog, usageRef);
     }
 
     // ==================== Anthropic 协议 ====================
@@ -413,7 +420,7 @@ public class UnifiedChatService {
         AtomicReference<Map<String, Object>> usageRef = new AtomicReference<>();
 
         // Anthropic 使用 x-api-key 头认证
-        return sharedWebClient
+        Flux<String> stream = sharedWebClient
                 .post()
                 .uri(fullUrl)
                 .header("x-api-key", apiKey)
@@ -431,8 +438,99 @@ public class UnifiedChatService {
                     if (usageLog != null && usageRef.get() != null) {
                         updateUsageLog(usageLog, usageRef.get());
                     }
-                })
-                .onErrorResume(e -> handleError(e));
+                });
+        // 统一装饰：无数据超时 + 未输出内容前瞬态重试 + 错误兜底 + 客户端取消日志
+        return decorateStream(stream, usageLog, usageRef);
+    }
+
+    /**
+     * 统一流式装饰器（OpenAI 与 Anthropic 共用）：
+     * <ul>
+     *   <li>无数据超时：连续 {@link #STREAM_IDLE_TIMEOUT} 未收到 chunk 时以 TimeoutException 中断，
+     *       避免厂商 API 卡死（不断开连接也不发数据）导致 SSE 连接与服务端资源无限挂起</li>
+     *   <li>瞬态重试：仅当尚未向客户端输出过任何内容时，对连接级瞬态错误（5xx/连接重置/超时）
+     *       做有限退避重试（2 次，1s 起步）；已输出内容后不重试（避免内容重复）</li>
+     *   <li>使用记录延迟写入：仅在流正常完成、客户端取消、或已输出内容后失败时才写入 UsageLog
+     *       （这些场景厂商 API 已实际消耗）；请求直接失败（未产生任何输出）不写入、不占每日配额</li>
+     *   <li>错误兜底：onErrorResume 转为前端可识别的 error JSON chunk</li>
+     *   <li>取消日志：doOnCancel 记录客户端主动断开（前端中断/页面关闭），上游请求随之取消，
+     *       不再继续消耗厂商 API 配额</li>
+     * </ul>
+     * 注意：doFinally 必须置于 retryWhen 之后、onErrorResume 之前——
+     * 置于 retryWhen 之前会把重试用到的上游取消误判为终止信号；
+     * 置于 onErrorResume 之后则错误已被转换为正常完成，无法区分成功与失败。
+     * @param stream 原始厂商 SSE 流（含 doOnComplete 日志）
+     * @param usageLog 本次调用的使用记录（由调用方构建但尚未入库；可为 null）
+     * @param usageRef 累计 usage 数据引用
+     * @return 装饰后的流
+     */
+    private Flux<String> decorateStream(Flux<String> stream, UsageLog usageLog,
+                                        AtomicReference<Map<String, Object>> usageRef) {
+        AtomicBoolean emitted = new AtomicBoolean(false);
+        return stream
+                .doOnNext(chunk -> emitted.set(true))
+                .timeout(STREAM_IDLE_TIMEOUT)
+                .retryWhen(Retry.backoff(2, Duration.ofSeconds(1))
+                        .filter(e -> !emitted.get() && isRetryable(e)))
+                .doFinally(signal -> persistUsageOnTerminate(signal, usageLog, usageRef, emitted.get()))
+                .onErrorResume(this::handleError)
+                .doOnCancel(() -> log.info("客户端已断开SSE连接，上游请求已取消"));
+    }
+
+    /**
+     * 流终止时按终止类型决定是否写入使用记录：
+     * <ul>
+     *   <li>ON_COMPLETE：正常完成，写入并回填 token 数据</li>
+     *   <li>CANCEL：客户端取消（API 已实际消耗），写入并尽力回填已收到的部分 usage</li>
+     *   <li>ON_ERROR 且已输出过内容：部分消耗已发生，写入并回填</li>
+     *   <li>ON_ERROR 且未输出：请求失败未消耗，不写入、不占每日配额</li>
+     * </ul>
+     * @param signal 终止信号类型
+     * @param usageLog 使用记录（null 时跳过）
+     * @param usageRef 累计 usage 数据
+     * @param emitted 是否已向客户端输出过内容
+     */
+    private void persistUsageOnTerminate(SignalType signal, UsageLog usageLog,
+                                         AtomicReference<Map<String, Object>> usageRef, boolean emitted) {
+        if (usageLog == null) {
+            return;
+        }
+        boolean shouldPersist = signal == SignalType.ON_COMPLETE
+                || signal == SignalType.CANCEL
+                || (signal == SignalType.ON_ERROR && emitted);
+        if (!shouldPersist) {
+            log.info("流式请求失败且未产生输出，使用记录不写入（不占每日配额）: signal={}", signal);
+            return;
+        }
+        try {
+            storageService.addUsageLog(usageLog);
+            if (usageRef.get() != null) {
+                updateUsageLog(usageLog, usageRef.get());
+            }
+        } catch (Exception e) {
+            log.error("终止阶段写入使用记录失败: signal={}", signal, e);
+        }
+    }
+
+    /**
+     * 判定异常是否为可安全重试的瞬态错误：
+     * 5xx 响应、连接类异常（重置/拒绝/超时）；4xx 业务错误（鉴权失败/参数错误/限流）不重试
+     * @param e 异常
+     * @return true=可重试
+     */
+    private boolean isRetryable(Throwable e) {
+        Throwable cause = e;
+        while (cause != null) {
+            if (cause instanceof WebClientResponseException wce) {
+                return wce.getStatusCode().is5xxServerError();
+            }
+            if (cause instanceof java.io.IOException
+                    || cause instanceof java.util.concurrent.TimeoutException) {
+                return true;
+            }
+            cause = cause.getCause();
+        }
+        return false;
     }
 
     /**
@@ -960,30 +1058,24 @@ public class UnifiedChatService {
     }
 
     /**
-     * 统一错误处理
+     * 统一错误处理：厂商错误详情仅记录日志，返回给用户的消息做脱敏处理，
+     * 避免泄露内部 API 地址、Key 片段等配置信息；流式超时给出友好提示
      */
     private Flux<String> handleError(Throwable e) {
+        if (e instanceof java.util.concurrent.TimeoutException) {
+            log.error("模型响应超时（{} 秒无数据），流已中断", STREAM_IDLE_TIMEOUT.getSeconds());
+            return Flux.just("{\"error\":{\"message\":\"模型响应超时，请稍后重试或更换模型\",\"type\":\"timeout_error\"}}");
+        }
         String errorMsg = e.getMessage();
-        String displayMsg = errorMsg;
+        String displayMsg;
         if (e instanceof WebClientResponseException) {
             WebClientResponseException wce = (WebClientResponseException) e;
             String responseBody = wce.getResponseBodyAsString();
             log.error("API调用错误: {} | 状态码: {} | 响应体: {}", errorMsg, wce.getStatusCode(), responseBody);
-            try {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> parsed = objectMapper.readValue(responseBody, Map.class);
-                @SuppressWarnings("unchecked")
-                Map<String, Object> errorObj = (Map<String, Object>) parsed.get("error");
-                if (errorObj != null && errorObj.get("message") != null) {
-                    displayMsg = wce.getStatusCode().value() + " - " + errorObj.get("message");
-                } else {
-                    displayMsg = wce.getStatusCode().value() + " " + wce.getStatusText();
-                }
-            } catch (Exception parseEx) {
-                displayMsg = wce.getStatusCode().value() + " " + wce.getStatusText();
-            }
+            displayMsg = "模型服务异常（HTTP " + wce.getStatusCode().value() + "），请稍后重试或更换模型";
         } else {
             log.error("API调用错误: {}", errorMsg);
+            displayMsg = "模型服务暂时不可用，请稍后重试或更换模型";
         }
         return Flux.just(String.format(
                 "{\"error\":{\"message\":\"%s\",\"type\":\"api_error\"}}",

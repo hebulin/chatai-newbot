@@ -12,8 +12,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.security.SecureRandom;
 import java.util.Base64;
+import java.util.Set;
 
 /**
  * API Key 对称加密工具（AES-256-GCM）
@@ -116,6 +119,14 @@ public final class ApiKeyCrypto {
                         Files.createDirectories(keyPath.getParent());
                         Files.writeString(keyPath, Base64.getEncoder().encodeToString(newKey.getEncoded()),
                                 StandardCharsets.UTF_8);
+                        // 收紧密钥文件权限为 600（仅属主可读写）：多用户 Linux 服务器上防止其他账户读取。
+                        // Windows 不支持 POSIX 权限视图，抛异常时忽略（NTFS ACL 由部署环境自行管控）
+                        try {
+                            Set<PosixFilePermission> perms = PosixFilePermissions.fromString("rw-------");
+                            Files.setPosixFilePermissions(keyPath, perms);
+                        } catch (UnsupportedOperationException | java.io.IOException ignore) {
+                            // 非 POSIX 文件系统（Windows）或权限设置失败，不影响功能
+                        }
                         key = newKey;
                         log.info("已生成 API Key 加密密钥: {}（请与数据文件一同备份，丢失后已存 Key 无法解密）", keyPath);
                     }
