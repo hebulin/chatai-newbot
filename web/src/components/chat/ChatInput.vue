@@ -293,13 +293,22 @@ const currentIcon = computed(() => {
 const currentIconIsImg = computed(() => currentIcon.value.startsWith('/'))
 
 // 根据模型名长度动态计算输入框宽度，避免长名称被截断
+// 用 canvas measureText 按真实字体精确测量文本宽度，替代按字符估算：
+// 估算值系统性偏大时，多出的宽度会在 flex 布局里堆积为名称与箭头之间的空隙
+// 后缀预留 22px：下拉箭头图标(14px) + 与名称间距(2px) + wrapper 右 padding(6px) = 22px，
+// 与实际占用完全一致，配合下面 el-input__inner min-width:0 可正常收缩
+let measureCtx = null
+function measureTextWidth(text, font) {
+  if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d')
+  measureCtx.font = font
+  return measureCtx.measureText(text).width
+}
 const modelInputWidth = computed(() => {
   const name = String(modelsStore.currentModelName || t('input.selectModel'))
-  let w = 0
-  for (const ch of name) {
-    w += /[\u2e80-\u9fff\uf900-\ufaff\uff00-\uffef]/.test(ch) ? 12.5 : 7
-  }
-  return Math.min(Math.max(Math.round(w) + 26, 72), 300) + 'px'
+  // 字体需与触发器实际渲染一致：桌面级联 12px、窄屏下拉 11px（chat.css 移动端媒体查询）
+  const fontSize = isMobile.value ? 11 : 12
+  const textW = measureTextWidth(name, `${fontSize}px "Helvetica Neue", Helvetica, "PingFang SC", "Microsoft YaHei", Arial, sans-serif`)
+  return Math.min(Math.max(Math.ceil(textW) + 22, 72), 300) + 'px'
 })
 
 // 同步当前选中模型到 cascader 显示

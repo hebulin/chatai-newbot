@@ -1827,9 +1827,22 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
     font-family: var(--sans);
     cursor: pointer;
     caret-color: transparent; /* 隐藏点击时闪烁的文本光标 */
+    text-overflow: ellipsis;
+    min-width: 0; /* 允许 input 收缩到 0，配合精确宽度不被箭头撑爆 */
 }
+/* 收紧名称与下拉箭头间距：去掉 EP suffix 默认 margin/padding 造成的多余空隙 */
 .model-select-area .el-cascader .el-input__suffix {
     color: var(--fg-4);
+    margin-left: 2px;
+    padding-left: 0;
+    flex-shrink: 0;
+}
+.model-select-area .el-cascader .el-input__suffix .el-input__suffix-inner {
+    margin-right: 0;
+}
+.model-select-area .el-cascader .el-input__icon {
+    margin-left: 0;
+    width: 14px;
 }
 /* 级联浮层主题适配 */
 .model-cascader-popper {
@@ -1906,8 +1919,12 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
     min-width: 0;
 }
 /* 选中项文本单行省略号：EP 默认 flex-wrap 会让长名撑开最小宽度或换行 */
+/* gap:0 消除 EP 默认 selection 内 6px 间隙，避免名称与箭头之间出现过大空隙 */
+/* min-width:0 允许 selection 在容器缩小时被压缩（默认 min-width:auto 会让内容撑出省略号） */
 .model-select-area .el-select__selection {
     flex-wrap: nowrap;
+    gap: 0;
+    min-width: 0;
 }
 .model-select-area .el-select__selected-item {
     display: block;
@@ -1922,6 +1939,7 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
     background: transparent !important;
     box-shadow: none !important;
     padding: 0 6px;
+    gap: 0; /* 消除 EP 默认 wrapper 内 6px 间隙 */
     min-height: 28px;
     height: 28px;
     cursor: pointer;
@@ -1938,6 +1956,9 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
 }
 .model-select-area .el-select__suffix {
     color: var(--fg-4);
+    margin-left: 2px;
+    gap: 0; /* 消除 EP 默认 suffix 内 6px/4px 间隙 */
+    flex-shrink: 0;
 }
 /* 窄屏单列模型下拉浮层：主题适配 + 厂商分组标题 + 触摸友好行高 */
 .model-select-popper-mobile.el-popper {
