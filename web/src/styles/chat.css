@@ -2976,13 +2976,13 @@ textarea.settings-textarea {
     width: 1px;
     background: var(--border, rgba(0,0,0,.1));
 }
-/* 刻度按钮：透明热区横向占满直尺全宽、垂直高度 12px 便于点中；
+/* 刻度按钮：透明热区横向占满直尺全宽、垂直高度 24px 便于点中；
    视觉刻度线由 ::before 伪元素绘制 */
 .ruler-tick {
     position: absolute;
     right: 0;
     width: 36px;
-    height: 12px;
+    height: 24px;
     transform: translateY(-50%);
     background: transparent;
     border: none;
@@ -2997,20 +2997,21 @@ textarea.settings-textarea {
     right: 10px;
     top: 50%;
     width: 12px;
-    height: 2px;
+    height: 4px;
     transform: translateY(-50%);
     background: var(--border-strong, rgba(0,0,0,.22));
+    border-radius: 99px;
     transition: width 0.15s var(--ease), background 0.15s var(--ease), height 0.15s var(--ease);
 }
 .ruler-tick:hover::before {
     width: 18px;
-    height: 3px;
+    height: 6px;
     background: var(--primary, #4a7dff);
 }
 /* 当前视口中心对应的刻度高亮 */
 .ruler-tick.is-current::before {
     width: 16px;
-    height: 3px;
+    height: 6px;
     background: var(--primary, #4a7dff);
 }
 
@@ -3029,8 +3030,8 @@ textarea.settings-textarea {
     }
     /* 移动端直尺热区同步放大，保持足够点中面积 */
     .message-ruler { width: 28px; }
-    .ruler-tick { width: 28px; height: 12px; }
-    .ruler-tick::before { width: 10px; }
-    .ruler-tick:hover::before { width: 15px; }
-    .ruler-tick.is-current::before { width: 13px; }
+    .ruler-tick { width: 28px; height: 24px; }
+    .ruler-tick::before { width: 10px; height: 3px; }
+    .ruler-tick:hover::before { width: 15px; height: 5px; }
+    .ruler-tick.is-current::before { width: 13px; height: 5px; }
 }
