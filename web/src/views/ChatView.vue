@@ -47,6 +47,15 @@
     <main class="main-content" :class="{ 'sidebar-collapsed': sidebarCollapsed && !isMobile }">
       <div class="chat-viewport">
         <div class="chat-container" ref="chatContainerRef">
+          <!-- 空会话引导：新会话未发送内容时展示，发出首条消息后自动消失 -->
+          <div v-if="showWelcome" class="chat-welcome">
+            <img class="chat-welcome-icon" :src="brandIconSrc" alt="AI" />
+            <div class="chat-welcome-title">{{ t('chat.welcomeTitle') }}</div>
+            <div class="chat-welcome-sub">{{ t('chat.welcomeSub') }}</div>
+            <div class="chat-welcome-tips">
+              <button v-for="(tip, i) in welcomeTips" :key="i" class="chat-welcome-tip" @click="applyWelcomeTip(tip)">{{ tip }}</button>
+            </div>
+          </div>
           <!-- 长会话性能：默认只渲染最近一窗口消息，更早的按需展开 -->
           <div v-if="hiddenCount > 0" class="load-earlier">
             <button class="load-earlier-btn" @click="loadEarlier">{{ t('chat.loadEarlier', { n: hiddenCount }) }}</button>
@@ -55,12 +64,23 @@
             :messages="displayMessages"
             :is-streaming="streamChat.isStreaming.value"
             :streaming-msg="streamingMsg"
+            :start-index="hiddenCount"
+            :highlight-id="highlightMsgId"
             @copy="copyMsgContent"
             @lightbox="lightboxSrc = $event"
             @regenerate="handleRegenerate"
             @edit-resend="handleEditResend"
           />
         </div>
+
+        <!-- 消息锚点直尺刻度：贴在滚动容器右侧边缘，按用户消息在文档中的比例位置排布刻度，
+             悬停预览完整内容，点击平滑滚动定位并高亮 -->
+        <MessageRuler
+          :scroll-container-ref="chatContainerRef"
+          :messages="chatStore.currentMessages"
+          :hidden-count="hiddenCount"
+          @jump="handleJumpToMessage"
+        />
 
         <!-- 滚动导航（对话区域右下角，不遮挡输入框） -->
         <div class="scroll-nav" v-show="scrollFollow.showScrollToBottom.value">
@@ -81,6 +101,7 @@
 
       <!-- 输入区 -->
       <ChatInput
+        ref="chatInputRef"
         :is-streaming="streamChat.isStreaming.value"
         :supports-thinking="modelsStore.currentModelSupportsThinking"
         :supports-multimodal="modelsStore.currentModelSupportsMultimodal"
@@ -122,6 +143,7 @@ import { createShare } from '@/api/share'
 import ChatSidebar from '@/components/chat/ChatSidebar.vue'
 import ChatMessages from '@/components/chat/ChatMessages.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
+import MessageRuler from '@/components/chat/MessageRuler.vue'
 import SettingsModal from '@/components/chat/SettingsModal.vue'
 import AboutModal from '@/components/chat/AboutModal.vue'
 import UsageStatsModal from '@/components/chat/UsageStatsModal.vue'
@@ -152,6 +174,8 @@ const pendingImages = ref([])
 
 const streamingMsg = ref(null)
 const syncTipVisible = ref(false)
+// 当前需高亮的用户消息锚点 ID（点击侧边栏锚点跳转后置位，动画结束后清除）
+const highlightMsgId = ref('')
 // 切换会话加载缓冲层（懒加载拉取正文期间显示）
 const chatSwitchLoading = ref(false)
 // 快速切换会话竞态控制：仅最新一次切换生效，切换时中断上一会话尚未完成的正文加载，
@@ -169,8 +193,29 @@ const displayMessages = computed(() => {
   return hiddenCount.value > 0 ? msgs.slice(hiddenCount.value) : msgs
 })
 
-// 切换/新建会话时重置渲染窗口
-watch(() => chatStore.currentChatId, () => { visibleCount.value = RENDER_WINDOW })
+// 切换/新建会话时重置渲染窗口与高亮标记
+watch(() => chatStore.currentChatId, () => {
+  visibleCount.value = RENDER_WINDOW
+  highlightMsgId.value = ''
+})
+
+// ===== 空会话引导：无任何消息且未在流式输出时展示欢迎内容与建议提问 =====
+const chatInputRef = ref(null)
+const showWelcome = computed(() =>
+  chatStore.isChatHistoryLoaded &&
+  !streamChat.isStreaming.value &&
+  chatStore.currentMessages.length === 0
+)
+const welcomeTips = computed(() => [
+  t('chat.welcomeTip1'),
+  t('chat.welcomeTip2'),
+  t('chat.welcomeTip3'),
+  t('chat.welcomeTip4')
+])
+// 点击建议：回填到输入框供编辑后发送，不直接发出
+function applyWelcomeTip(tip) {
+  chatInputRef.value?.setInput(tip)
+}
 
 // 展开更早消息并保持当前阅读位置（补齐新增内容的高度差）
 async function loadEarlier() {
@@ -216,14 +261,38 @@ onMounted(async () => {
 
   window.addEventListener('resize', handleResize)
 
+  // 侧边栏多端自动同步：切回标签页/窗口聚焦时立即检测一次，前台期间低频轮询；
+  // 页面隐藏时轮询自然跳过，版本未变化时仅一次轻量版本查询，开销可忽略
+  window.addEventListener('focus', handleAutoSync)
+  document.addEventListener('visibilitychange', handleAutoSync)
+  autoSyncTimer = setInterval(handleAutoSync, AUTO_SYNC_INTERVAL_MS)
+
   // 拉取系统公告（异步不阻塞首屏）
   checkAnnouncement()
 })
 
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
+  window.removeEventListener('focus', handleAutoSync)
+  document.removeEventListener('visibilitychange', handleAutoSync)
+  if (autoSyncTimer) clearInterval(autoSyncTimer)
   scrollFollow.unbindEvents()
 })
+
+// 侧边栏自动同步轮询间隔（仅前台生效）
+const AUTO_SYNC_INTERVAL_MS = 30000
+let autoSyncTimer = null
+
+// 检测并合并其他端的会话变更：bot 输出中不刷新（store 内部还有待上传/上传中守卫）；
+// 当前会话被合并进其他端新消息时请求贴底（尊重用户已主动上滑的状态）
+async function handleAutoSync() {
+  if (document.hidden || streamChat.isStreaming.value || chatSwitchLoading.value) return
+  const currentMerged = await chatStore.refreshFromServer()
+  if (currentMerged) {
+    await nextTick()
+    scrollFollow.requestScrollToBottom()
+  }
+}
 
 // 拉取公告并弹窗展示：勾选“以后不再提示”后该公告不再弹出（localStorage 永久记录）；
 // 未勾选则每次登录都会提示（登录时清除 sessionStorage 标记，见 stores/auth.js），直到公告失效；
@@ -391,6 +460,37 @@ async function handleSwitchChat(id) {
     // 仅最新一次切换负责收起 loading，防止旧切换提前撤销缓冲层
     if (mySeq === switchSeq) chatSwitchLoading.value = false
   }
+}
+
+// 点击消息锚点直尺刻度：跳转定位到主聊天区对应用户消息并高亮
+// 若目标消息在渲染窗口外（被裁剪的更早消息），先展开渲染窗口确保 DOM 存在，再滚动定位
+async function handleJumpToMessage(domId) {
+  if (streamChat.isStreaming.value) {
+    ElMessage.warning(t('chat.waitAnswer'))
+    return
+  }
+  // 解析目标消息在完整列表中的绝对下标
+  const match = /^msg-anchor-(\d+)$/.exec(domId)
+  if (!match) return
+  const targetIdx = parseInt(match[1], 10)
+  // 若目标落在被裁剪的更早消息区间，逐步展开渲染窗口直至覆盖目标下标
+  if (targetIdx < hiddenCount.value) {
+    while (targetIdx < hiddenCount.value && hiddenCount.value > 0) {
+      visibleCount.value += RENDER_BATCH
+    }
+  }
+  await nextTick()
+  // 等待 mermaid/图片等异步内容渲染稳定后定位
+  await nextTick()
+  const el = document.getElementById(domId)
+  if (!el) return
+  // 暂停滚动跟随，避免跳转后被自动贴底逻辑覆盖
+  scrollFollow.autoFollowEnabled.value = false
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  // 触发高亮动画
+  highlightMsgId.value = domId
+  // 动画结束后清除高亮标记（保留 class 直至动画完成）
+  setTimeout(() => { highlightMsgId.value = '' }, 2000)
 }
 
 function handleDeleteChat(id) {

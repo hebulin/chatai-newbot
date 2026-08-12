@@ -33,13 +33,22 @@ sudo /usr/bin/systemctl daemon-reload
 sudo /usr/bin/systemctl restart "${SERVICE_NAME}"
 sleep 8
 
-if sudo /usr/bin/systemctl is-active --quiet "${SERVICE_NAME}"; then
+health_ok=false
+for _ in {1..12}; do
+  if curl --fail --silent --max-time 3 "http://127.0.0.1:9092/api/heartbeat" >/dev/null; then
+    health_ok=true
+    break
+  fi
+  sleep 2
+done
+
+if sudo /usr/bin/systemctl is-active --quiet "${SERVICE_NAME}" && [[ "${health_ok}" == "true" ]]; then
   echo "Deploy success: ${NEW_RELEASE}"
   ls -1t "${RELEASES_DIR}"/*.jar 2>/dev/null | tail -n +6 | xargs -r rm -f
   exit 0
 fi
 
-echo "Deploy failed, printing service status..."
+echo "Deploy failed: service inactive or HTTP health check failed; printing service status..."
 sudo /usr/bin/systemctl status "${SERVICE_NAME}" --no-pager || true
 
 echo "Trying rollback..."

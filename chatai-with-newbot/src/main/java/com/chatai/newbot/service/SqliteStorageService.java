@@ -45,9 +45,18 @@ public class SqliteStorageService implements StorageService {
     private volatile List<ModelConfig> modelConfigsCache;
     // 当前启用公告缓存：null=未加载，Optional.empty=确认无启用公告；公告写操作后置空
     private volatile Optional<Announcement> enabledAnnouncementCache;
+    // 用户对象失效式缓存（userId -> User）：认证拦截器每次请求都会按 token 查用户，
+    // 缓存避免每个 API 请求都产生一次 SELECT t_user；任何用户写操作后失效对应条目。
+    // getUserById 对外返回防御性副本，调用方修改不会污染缓存对象
+    private final Map<String, User> userCache = new ConcurrentHashMap<>();
 
     private static final String ADMIN_USERNAME = "admin";
-    private static final String ADMIN_DEFAULT_PASSWORD = "admin123";
+    /** 首次安装内置 admin 的兜底密码：仅当未通过环境变量/系统属性指定时使用的回退值。
+     *  优先读取 CHATAI_ADMIN_PASSWORD 环境变量或 chatai.admin.password 系统属性（部署时显式指定），
+     *  都未配置时使用本兜底值并输出醒目告警，提示管理员立即修改 */
+    private static final String ADMIN_FALLBACK_PASSWORD = "admin123";
+    /** 使用记录全量兜底查询的安全上限条数（主路径均为分页查询，此处仅防内存溢出） */
+    private static final int USAGE_LOG_FETCH_LIMIT = 10000;
 
     public SqliteStorageService(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
@@ -146,11 +155,17 @@ public class SqliteStorageService implements StorageService {
                 "created_at TEXT," +
                 "test_latency_ms INTEGER," +
                 "test_speed REAL," +
-                "tested_at TEXT" +
+                "tested_at TEXT," +
+                "input_price_cny REAL DEFAULT 0," +
+                "output_price_cny REAL DEFAULT 0," +
+                "cached_price_cny REAL DEFAULT 0," +
+                "reasoning_price_cny REAL DEFAULT 0" +
                 ")");
 
         // 老数据库补充连通测试指标列（幂等迁移）
         ensureModelTestColumns();
+        // 老数据库补充人民币计费单价列（幂等迁移）
+        ensureModelPricingColumns();
 
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_usage_log (" +
                 "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -163,10 +178,18 @@ public class SqliteStorageService implements StorageService {
                 "completion_tokens INTEGER DEFAULT 0," +
                 "cached_tokens INTEGER DEFAULT 0," +
                 "reasoning_tokens INTEGER DEFAULT 0," +
-                "deep_thinking INTEGER DEFAULT 0" +
+                "deep_thinking INTEGER DEFAULT 0," +
+                "cost_cny REAL" +
                 ")");
+        // 老数据库补充人民币成本快照列（幂等迁移）
+        ensureUsageCostColumn();
         jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_usage_user ON t_usage_log(user_id)");
         jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_usage_time ON t_usage_log(timestamp)");
+        // 复合索引：个人配额统计（user_id + timestamp 范围/前缀查询）与用户维度时间筛选
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_usage_user_time ON t_usage_log(user_id, timestamp)");
+        // 单列筛选索引：后台使用记录按用户名/模型名下拉筛选（buildUsageWhere 的等值条件）
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_usage_username ON t_usage_log(username)");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_usage_model_name ON t_usage_log(model_name)");
 
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_chat_history (" +
                 "user_id TEXT PRIMARY KEY," +
@@ -305,6 +328,42 @@ public class SqliteStorageService implements StorageService {
             jdbcTemplate.execute("ALTER TABLE t_model_config ADD COLUMN test_speed REAL");
             jdbcTemplate.execute("ALTER TABLE t_model_config ADD COLUMN tested_at TEXT");
             log.info("SQLite: t_model_config 表已补充连通测试指标列");
+        }
+    }
+
+    /**
+     * 为 t_model_config 补充人民币计费单价列（幂等迁移）。
+     * 所有单价统一使用“人民币元/百万 Token”，汇率仅用于展示换算。
+     */
+    private void ensureModelPricingColumns() {
+        Set<String> columns = jdbcTemplate.queryForList("PRAGMA table_info(t_model_config)").stream()
+                .map(c -> String.valueOf(c.get("name")))
+                .collect(Collectors.toSet());
+        if (!columns.contains("input_price_cny")) {
+            jdbcTemplate.execute("ALTER TABLE t_model_config ADD COLUMN input_price_cny REAL DEFAULT 0");
+        }
+        if (!columns.contains("output_price_cny")) {
+            jdbcTemplate.execute("ALTER TABLE t_model_config ADD COLUMN output_price_cny REAL DEFAULT 0");
+        }
+        if (!columns.contains("cached_price_cny")) {
+            jdbcTemplate.execute("ALTER TABLE t_model_config ADD COLUMN cached_price_cny REAL DEFAULT 0");
+        }
+        if (!columns.contains("reasoning_price_cny")) {
+            jdbcTemplate.execute("ALTER TABLE t_model_config ADD COLUMN reasoning_price_cny REAL DEFAULT 0");
+        }
+    }
+
+    /**
+     * 为 t_usage_log 补充人民币成本快照列（幂等迁移）。
+     * NULL 表示旧数据，查询时按模型当前价格估算；新数据在 usage 回传后写入快照。
+     */
+    private void ensureUsageCostColumn() {
+        List<Map<String, Object>> columns = jdbcTemplate.queryForList("PRAGMA table_info(t_usage_log)");
+        boolean hasColumn = columns.stream()
+                .anyMatch(c -> "cost_cny".equals(String.valueOf(c.get("name"))));
+        if (!hasColumn) {
+            jdbcTemplate.execute("ALTER TABLE t_usage_log ADD COLUMN cost_cny REAL");
+            log.info("SQLite: t_usage_log 表已补充 cost_cny 列");
         }
     }
 
@@ -478,20 +537,48 @@ public class SqliteStorageService implements StorageService {
         return u;
     };
 
-    /** 确保内置 admin 用户存在 */
+    /**
+     * 确保内置 admin 用户存在。
+     * 初始密码策略：优先读取 CHATAI_ADMIN_PASSWORD 环境变量 / chatai.admin.password 系统属性，
+     * 都未配置时使用兜底弱密码并输出醒目告警（部署文档应提示尽快修改或改用环境变量注入强密码）。
+     * 仅对全新安装的库生效，已有 admin 用户的库不会触碰其密码。
+     */
     private void ensureAdminUser() {
         Integer count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_user WHERE username = ?", Integer.class, ADMIN_USERNAME);
         if (count == null || count == 0) {
+            String initialPassword = resolveAdminInitialPassword();
             User admin = new User();
             admin.setId(UUID.randomUUID().toString());
             admin.setUsername(ADMIN_USERNAME);
-            admin.setPassword(PasswordHasher.hash(ADMIN_DEFAULT_PASSWORD));
+            admin.setPassword(PasswordHasher.hash(initialPassword));
             admin.setRole("admin");
             admin.setCreatedAt(nowString());
             insertUser(admin);
-            log.info("SQLite: 已创建内置admin账户");
+            if (ADMIN_FALLBACK_PASSWORD.equals(initialPassword)) {
+                log.warn("SQLite: 已创建内置admin账户（使用兜底初始密码 {}）。安全提示：请尽快在后台修改密码，" +
+                        "或通过环境变量 CHATAI_ADMIN_PASSWORD / 系统属性 chatai.admin.password 指定强密码后重新初始化",
+                        ADMIN_FALLBACK_PASSWORD);
+            } else {
+                log.info("SQLite: 已创建内置admin账户（使用外部指定的初始密码）");
+            }
         }
+    }
+
+    /**
+     * 解析首次安装 admin 的初始密码：环境变量 CHATAI_ADMIN_PASSWORD > 系统属性 chatai.admin.password > 兜底弱密码
+     * @return 初始密码（非空）
+     */
+    private String resolveAdminInitialPassword() {
+        String fromEnv = System.getenv("CHATAI_ADMIN_PASSWORD");
+        if (fromEnv != null && !fromEnv.trim().isEmpty()) {
+            return fromEnv.trim();
+        }
+        String fromProp = System.getProperty("chatai.admin.password");
+        if (fromProp != null && !fromProp.trim().isEmpty()) {
+            return fromProp.trim();
+        }
+        return ADMIN_FALLBACK_PASSWORD;
     }
 
     /**
@@ -559,6 +646,8 @@ public class SqliteStorageService implements StorageService {
             user.setPassword(PasswordHasher.hash(password));
             jdbcTemplate.update("UPDATE t_user SET password = ? WHERE id = ?",
                     user.getPassword(), user.getId());
+            // 密码哈希变更：失效该用户缓存，避免缓存副本保留旧哈希
+            userCache.remove(user.getId());
         }
         return user;
     }
@@ -641,9 +730,44 @@ public class SqliteStorageService implements StorageService {
 
     @Override
     public User getUserById(String id) {
+        if (id == null) return null;
+        User cached = userCache.get(id);
+        if (cached != null) {
+            return copyUser(cached);
+        }
         List<User> users = jdbcTemplate.query(
                 "SELECT * FROM t_user WHERE id = ?", userRowMapper, id);
-        return users.isEmpty() ? null : users.get(0);
+        if (users.isEmpty()) return null;
+        User user = users.get(0);
+        userCache.put(user.getId(), user);
+        return copyUser(user);
+    }
+
+    /**
+     * 用户对象防御性深拷贝：getUserById 对外一律返回副本，
+     * 调用方对返回对象的字段修改（如后台编辑页先改内存再保存）不会污染缓存对象
+     * @param src 缓存中的用户对象
+     * @return 字段一致的副本（列表字段为独立列表实例）
+     */
+    private User copyUser(User src) {
+        User c = new User();
+        c.setId(src.getId());
+        c.setUsername(src.getUsername());
+        c.setPassword(src.getPassword());
+        c.setRole(src.getRole());
+        c.setCreatedAt(src.getCreatedAt());
+        c.setLastLoginAt(src.getLastLoginAt());
+        c.setLastLoginIp(src.getLastLoginIp());
+        c.setLastLoginBrowser(src.getLastLoginBrowser());
+        c.setAllowedModelIds(src.getAllowedModelIds() == null
+                ? new ArrayList<>() : new ArrayList<>(src.getAllowedModelIds()));
+        c.setSystemPrompt(src.getSystemPrompt());
+        c.setPromptPresets(src.getPromptPresets() == null
+                ? new ArrayList<>() : new ArrayList<>(src.getPromptPresets()));
+        c.setDisabled(src.isDisabled());
+        c.setDailyLimitType(src.getDailyLimitType());
+        c.setDailyLimitValue(src.getDailyLimitValue());
+        return c;
     }
 
     @Override
@@ -652,6 +776,7 @@ public class SqliteStorageService implements StorageService {
         User user = getUserById(userId);
         if (user == null || "admin".equals(user.getRole())) return false;
         int deleted = jdbcTemplate.update("DELETE FROM t_user WHERE id = ?", userId);
+        userCache.remove(userId);
         return deleted > 0;
     }
 
@@ -663,6 +788,7 @@ public class SqliteStorageService implements StorageService {
                 user.getLastLoginAt(), user.getLastLoginIp(), user.getLastLoginBrowser(),
                 toJsonArray(user.getAllowedModelIds()), user.getSystemPrompt(), user.isDisabled() ? 1 : 0,
                 user.getDailyLimitType(), user.getDailyLimitValue(), toPromptPresetsJson(user.getPromptPresets()), user.getId());
+        userCache.remove(user.getId());
     }
 
     @Override
@@ -672,6 +798,7 @@ public class SqliteStorageService implements StorageService {
         if (!PasswordHasher.matches(oldPassword, user.getPassword())) return 2;
         jdbcTemplate.update("UPDATE t_user SET password = ? WHERE id = ?",
                 PasswordHasher.hash(newPassword), userId);
+        userCache.remove(userId);
         return 0;
     }
 
@@ -704,6 +831,10 @@ public class SqliteStorageService implements StorageService {
         double speed = rs.getDouble("test_speed");
         m.setTestSpeed(rs.wasNull() ? null : speed);
         m.setTestedAt(rs.getString("tested_at"));
+        m.setInputPriceCny(rs.getDouble("input_price_cny"));
+        m.setOutputPriceCny(rs.getDouble("output_price_cny"));
+        m.setCachedPriceCny(rs.getDouble("cached_price_cny"));
+        m.setReasoningPriceCny(rs.getDouble("reasoning_price_cny"));
         return m;
     };
 
@@ -739,9 +870,14 @@ public class SqliteStorageService implements StorageService {
 
     @Override
     public ModelConfig getModelConfigById(String id) {
-        List<ModelConfig> list = jdbcTemplate.query(
-                "SELECT * FROM t_model_config WHERE id = ?", modelConfigRowMapper, id);
-        return list.isEmpty() ? null : list.get(0);
+        // 走模型配置列表缓存（失效式缓存由写操作维护），避免每次聊天请求单独查库；
+        // 缓存未命中时 getAllModelConfigs 会重建并回填，与直查 DB 结果一致
+        for (ModelConfig m : getAllModelConfigs()) {
+            if (id != null && id.equals(m.getId())) {
+                return m;
+            }
+        }
+        return null;
     }
 
     @Override
@@ -764,7 +900,7 @@ public class SqliteStorageService implements StorageService {
     /** 插入模型配置记录 */
     private void insertModelConfig(ModelConfig m) {
         jdbcTemplate.update(
-                "INSERT INTO t_model_config (id, provider_id, provider_name, provider_icon, model_id, display_name, api_key, api_url, protocol, thinking_param_type, supports_thinking, supports_multimodal, enabled, visible_to_all, built_in, created_at, test_latency_ms, test_speed, tested_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO t_model_config (id, provider_id, provider_name, provider_icon, model_id, display_name, api_key, api_url, protocol, thinking_param_type, supports_thinking, supports_multimodal, enabled, visible_to_all, built_in, created_at, test_latency_ms, test_speed, tested_at, input_price_cny, output_price_cny, cached_price_cny, reasoning_price_cny) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 m.getId(), m.getProviderId(), m.getProviderName(), m.getProviderIcon(),
                 m.getModelId(), m.getDisplayName(), ApiKeyCrypto.encrypt(m.getApiKey()), m.getApiUrl(),
                 m.getProtocol(), m.getThinkingParamType(),
@@ -772,14 +908,16 @@ public class SqliteStorageService implements StorageService {
                 m.isEnabled() ? 1 : 0,
                 m.getVisibleToAll() == null ? 1 : (m.getVisibleToAll() ? 1 : 0),
                 m.isBuiltIn() ? 1 : 0, m.getCreatedAt(),
-                m.getTestLatencyMs(), m.getTestSpeed(), m.getTestedAt());
+                m.getTestLatencyMs(), m.getTestSpeed(), m.getTestedAt(),
+                nonNegative(m.getInputPriceCny()), nonNegative(m.getOutputPriceCny()),
+                nonNegative(m.getCachedPriceCny()), nonNegative(m.getReasoningPriceCny()));
     }
 
     @Override
     public void updateModelConfig(ModelConfig config) {
         fillProviderInfo(config);
         jdbcTemplate.update(
-                "UPDATE t_model_config SET provider_id=?, provider_name=?, provider_icon=?, model_id=?, display_name=?, api_key=?, api_url=?, protocol=?, thinking_param_type=?, supports_thinking=?, supports_multimodal=?, enabled=?, visible_to_all=?, built_in=?, created_at=?, test_latency_ms=?, test_speed=?, tested_at=? WHERE id=?",
+                "UPDATE t_model_config SET provider_id=?, provider_name=?, provider_icon=?, model_id=?, display_name=?, api_key=?, api_url=?, protocol=?, thinking_param_type=?, supports_thinking=?, supports_multimodal=?, enabled=?, visible_to_all=?, built_in=?, created_at=?, test_latency_ms=?, test_speed=?, tested_at=?, input_price_cny=?, output_price_cny=?, cached_price_cny=?, reasoning_price_cny=? WHERE id=?",
                 config.getProviderId(), config.getProviderName(), config.getProviderIcon(),
                 config.getModelId(), config.getDisplayName(), ApiKeyCrypto.encrypt(config.getApiKey()), config.getApiUrl(),
                 config.getProtocol(), config.getThinkingParamType(),
@@ -788,6 +926,8 @@ public class SqliteStorageService implements StorageService {
                 config.getVisibleToAll() == null ? 1 : (config.getVisibleToAll() ? 1 : 0),
                 config.isBuiltIn() ? 1 : 0, config.getCreatedAt(),
                 config.getTestLatencyMs(), config.getTestSpeed(), config.getTestedAt(),
+                nonNegative(config.getInputPriceCny()), nonNegative(config.getOutputPriceCny()),
+                nonNegative(config.getCachedPriceCny()), nonNegative(config.getReasoningPriceCny()),
                 config.getId());
         modelConfigsCache = null;
     }
@@ -1058,56 +1198,125 @@ public class SqliteStorageService implements StorageService {
         l.setCachedTokens(rs.getInt("cached_tokens"));
         l.setReasoningTokens(rs.getInt("reasoning_tokens"));
         l.setDeepThinking(rs.getInt("deep_thinking") == 1);
+        double cost = rs.getDouble("cost_cny");
+        l.setCostCny(rs.wasNull() ? null : cost);
         return l;
     };
 
     @Override
     public void addUsageLog(UsageLog logEntry) {
         jdbcTemplate.update(
-                "INSERT INTO t_usage_log (user_id, username, model_id, model_name, timestamp, prompt_tokens, completion_tokens, cached_tokens, reasoning_tokens, deep_thinking) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO t_usage_log (user_id, username, model_id, model_name, timestamp, prompt_tokens, completion_tokens, cached_tokens, reasoning_tokens, deep_thinking, cost_cny) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 logEntry.getUserId(), logEntry.getUsername(), logEntry.getModelId(),
                 logEntry.getModelName(), logEntry.getTimestamp(),
                 logEntry.getPromptTokens(), logEntry.getCompletionTokens(),
                 logEntry.getCachedTokens(), logEntry.getReasoningTokens(),
-                logEntry.isDeepThinking() ? 1 : 0);
+                logEntry.isDeepThinking() ? 1 : 0, logEntry.getCostCny());
     }
 
+    /**
+     * 获取使用记录（带安全上限的全量兜底查询）。
+     * 主查询路径均为分页接口（queryUsageLogs/aggregateUsageStats），
+     * 本方法仅作兼容保留，限制最多返回最近 {@value #USAGE_LOG_FETCH_LIMIT} 条，
+     * 防止数据量增长后一次性装载全部记录导致内存溢出。
+     * @return 最近的使用记录列表（时间降序）
+     */
     @Override
     public List<UsageLog> getAllUsageLogs() {
-        return jdbcTemplate.query("SELECT * FROM t_usage_log", usageLogRowMapper);
+        return jdbcTemplate.query(
+                "SELECT * FROM t_usage_log ORDER BY timestamp DESC LIMIT " + USAGE_LOG_FETCH_LIMIT,
+                usageLogRowMapper);
     }
 
+    /**
+     * 获取指定用户的使用记录（带安全上限，最近 {@value #USAGE_LOG_FETCH_LIMIT} 条）
+     * @param userId 用户ID
+     * @return 该用户最近的使用记录列表（时间降序）
+     */
     @Override
     public List<UsageLog> getUsageLogsByUser(String userId) {
         return jdbcTemplate.query(
-                "SELECT * FROM t_usage_log WHERE user_id = ?", usageLogRowMapper, userId);
+                "SELECT * FROM t_usage_log WHERE user_id = ? ORDER BY timestamp DESC LIMIT " + USAGE_LOG_FETCH_LIMIT,
+                usageLogRowMapper, userId);
     }
 
     @Override
     public int countUsageByUserAndDay(String userId, String day) {
+        // 范围比较替代 LIKE 前缀，可命中 idx_usage_user_time 复合索引
         Integer count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM t_usage_log WHERE user_id = ? AND timestamp LIKE ?",
-                Integer.class, userId, day + "%");
+                "SELECT COUNT(*) FROM t_usage_log WHERE user_id = ? AND timestamp >= ? AND timestamp < ?",
+                Integer.class, userId, day, nextDay(day));
         return count == null ? 0 : count;
     }
 
     @Override
     public long sumTokensByUserAndDay(String userId, String day) {
+        // 范围比较替代 LIKE 前缀，可命中 idx_usage_user_time 复合索引
         Long sum = jdbcTemplate.queryForObject(
-                "SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) FROM t_usage_log WHERE user_id = ? AND timestamp LIKE ?",
-                Long.class, userId, day + "%");
+                "SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) FROM t_usage_log WHERE user_id = ? AND timestamp >= ? AND timestamp < ?",
+                Long.class, userId, day, nextDay(day));
         return sum == null ? 0L : sum;
+    }
+
+    @Override
+    public double sumCostCnyByUserAndDay(String userId, String day) {
+        List<UsageLog> rows = jdbcTemplate.query(
+                "SELECT * FROM t_usage_log WHERE user_id = ? AND timestamp >= ? AND timestamp < ?",
+                usageLogRowMapper, userId, day, nextDay(day));
+        double total = 0D;
+        for (UsageLog row : rows) total += row.getCostCny() != null ? row.getCostCny() : calculateCostCny(row);
+        return total;
+    }
+
+    /**
+     * 计算指定日期的下一天字符串（yyyy-MM-dd），供 timestamp 范围比较的上界使用
+     * （timestamp 为 yyyy-MM-dd HH:mm:ss 文本，字典序比较即时间比较）
+     * @param day 日期字符串
+     * @return 下一天日期字符串，解析失败返回 day 原值（退化为单日 LIKE 语义也不抛错）
+     */
+    private String nextDay(String day) {
+        try {
+            return LocalDate.parse(day).plusDays(1).toString();
+        } catch (Exception e) {
+            return day;
+        }
     }
 
     @Override
     public void updateUsageLog(UsageLog updatedLog) {
         // 按 userId + timestamp + modelId 匹配更新
         jdbcTemplate.update(
-                "UPDATE t_usage_log SET prompt_tokens=?, completion_tokens=?, cached_tokens=?, reasoning_tokens=?, deep_thinking=? WHERE user_id=? AND timestamp=? AND model_id=?",
+                "UPDATE t_usage_log SET prompt_tokens=?, completion_tokens=?, cached_tokens=?, reasoning_tokens=?, deep_thinking=?, cost_cny=? WHERE user_id=? AND timestamp=? AND model_id=?",
                 updatedLog.getPromptTokens(), updatedLog.getCompletionTokens(),
                 updatedLog.getCachedTokens(), updatedLog.getReasoningTokens(),
-                updatedLog.isDeepThinking() ? 1 : 0,
+                updatedLog.isDeepThinking() ? 1 : 0, calculateCostCny(updatedLog),
                 updatedLog.getUserId(), updatedLog.getTimestamp(), updatedLog.getModelId());
+        updatedLog.setCostCny(calculateCostCny(updatedLog));
+    }
+
+    /**
+     * 按模型当前人民币单价计算使用成本。缓存和推理 Token 从普通输入/输出中扣除，避免重复计费。
+     * @param usage 使用记录
+     * @return 人民币元成本，保留至少 8 位计算精度
+     */
+    public double calculateCostCny(UsageLog usage) {
+        ModelConfig model = getModelConfigById(usage.getModelId());
+        if (model == null) return 0D;
+        long cached = Math.max(0, Math.min(usage.getCachedTokens(), usage.getPromptTokens()));
+        long reasoning = Math.max(0, Math.min(usage.getReasoningTokens(), usage.getCompletionTokens()));
+        long regularInput = Math.max(0, usage.getPromptTokens() - cached);
+        long regularOutput = Math.max(0, usage.getCompletionTokens() - reasoning);
+        double reasoningPrice = model.getReasoningPriceCny() > 0
+                ? model.getReasoningPriceCny() : model.getOutputPriceCny();
+        return (regularInput * nonNegative(model.getInputPriceCny())
+                + cached * nonNegative(model.getCachedPriceCny())
+                + regularOutput * nonNegative(model.getOutputPriceCny())
+                + reasoning * nonNegative(reasoningPrice)) / 1_000_000D;
+    }
+
+    /** 将非法或负数价格归零，防止管理端错误输入污染计费。 */
+    private double nonNegative(double value) {
+        return Double.isFinite(value) && value > 0 ? value : 0D;
     }
 
     @Override
@@ -1118,13 +1327,14 @@ public class SqliteStorageService implements StorageService {
     }
 
     /**
-     * 删除指定日期之前的使用记录（定期清理过期日志用）
+     * 删除指定日期之前的使用记录（定期清理过期日志用）。
+     * 范围比较替代 SUBSTR 列函数包裹，可命中 idx_usage_time 索引。
      * @param day 截止日期（yyyy-MM-dd，不含当天）
      * @return 删除条数
      */
     public int deleteUsageLogsBefore(String day) {
         return jdbcTemplate.update(
-                "DELETE FROM t_usage_log WHERE SUBSTR(timestamp, 1, 10) < ?", day);
+                "DELETE FROM t_usage_log WHERE timestamp < ?", day);
     }
 
     // ========== 使用记录查询下推（筛选/分页/聚合在 SQL 层完成） ==========
@@ -1214,16 +1424,23 @@ public class SqliteStorageService implements StorageService {
             "SELECT COALESCE(username,'未知') AS username, " +
             "COALESCE(SUBSTR(timestamp,1,10),'未知') AS date, " +
             "COALESCE(model_name,'未知') AS model_name, " +
+            "COALESCE(model_id,'') AS model_id, " +
             "COUNT(*) AS count, " +
             "COALESCE(SUM(prompt_tokens),0) AS prompt_tokens, " +
             "COALESCE(SUM(completion_tokens),0) AS completion_tokens, " +
             "COALESCE(SUM(cached_tokens),0) AS cached_tokens, " +
             "COALESCE(SUM(reasoning_tokens),0) AS reasoning_tokens, " +
+            "COALESCE(SUM(cost_cny),0) AS cost_cny, " +
+            "COUNT(cost_cny) AS cost_snapshots, " +
+            "COALESCE(SUM(CASE WHEN cost_cny IS NULL THEN prompt_tokens ELSE 0 END),0) AS unpriced_prompt_tokens, " +
+            "COALESCE(SUM(CASE WHEN cost_cny IS NULL THEN completion_tokens ELSE 0 END),0) AS unpriced_completion_tokens, " +
+            "COALESCE(SUM(CASE WHEN cost_cny IS NULL THEN cached_tokens ELSE 0 END),0) AS unpriced_cached_tokens, " +
+            "COALESCE(SUM(CASE WHEN cost_cny IS NULL THEN reasoning_tokens ELSE 0 END),0) AS unpriced_reasoning_tokens, " +
             "COALESCE(SUM(deep_thinking),0) AS thinking_count " +
             "FROM t_usage_log";
 
     private static final String USAGE_STATS_GROUP_ORDER =
-            " GROUP BY 1, 2, 3 ORDER BY date DESC, username ASC, model_name ASC";
+            " GROUP BY 1, 2, 3, 4 ORDER BY date DESC, username ASC, model_name ASC";
 
     @Override
     public List<Map<String, Object>> aggregateUsageStats(List<String> usernames, String modelName,
@@ -1256,7 +1473,7 @@ public class SqliteStorageService implements StorageService {
         String where = buildStatsWhere(usernames, modelName, startDate, endDate, args);
         Integer count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM (SELECT 1 FROM t_usage_log" + where + " GROUP BY " +
-                "COALESCE(username,'未知'), COALESCE(SUBSTR(timestamp,1,10),'未知'), COALESCE(model_name,'未知'))",
+                "COALESCE(username,'未知'), COALESCE(SUBSTR(timestamp,1,10),'未知'), COALESCE(model_name,'未知'), COALESCE(model_id,''))",
                 Integer.class, args.toArray());
         return count == null ? 0 : count;
     }
@@ -1269,11 +1486,18 @@ public class SqliteStorageService implements StorageService {
             item.put("username", row.get("username"));
             item.put("date", row.get("date"));
             item.put("modelName", row.get("model_name"));
+            item.put("modelId", row.get("model_id"));
             item.put("count", ((Number) row.get("count")).intValue());
             item.put("promptTokens", ((Number) row.get("prompt_tokens")).intValue());
             item.put("completionTokens", ((Number) row.get("completion_tokens")).intValue());
             item.put("cachedTokens", ((Number) row.get("cached_tokens")).intValue());
             item.put("reasoningTokens", ((Number) row.get("reasoning_tokens")).intValue());
+            item.put("costCny", ((Number) row.get("cost_cny")).doubleValue());
+            item.put("costSnapshots", ((Number) row.get("cost_snapshots")).longValue());
+            item.put("unpricedPromptTokens", ((Number) row.get("unpriced_prompt_tokens")).intValue());
+            item.put("unpricedCompletionTokens", ((Number) row.get("unpriced_completion_tokens")).intValue());
+            item.put("unpricedCachedTokens", ((Number) row.get("unpriced_cached_tokens")).intValue());
+            item.put("unpricedReasoningTokens", ((Number) row.get("unpriced_reasoning_tokens")).intValue());
             item.put("thinkingCount", ((Number) row.get("thinking_count")).longValue());
             statsList.add(item);
         }
@@ -1366,6 +1590,22 @@ public class SqliteStorageService implements StorageService {
     }
 
     /**
+     * 查询用户会话数据的版本号（会话行与全局状态行 updated_at_ts 的最大值），
+     * 供多端轻量变更检测：版本未变化时前端无需重拉摘要列表
+     * @param userId 用户ID
+     * @return 版本号（毫秒时间戳），无任何数据时返回 0
+     */
+    public long getChatHistoryVersion(String userId) {
+        Long v = jdbcTemplate.queryForObject(
+                "SELECT MAX(ts) FROM (" +
+                "SELECT MAX(updated_at_ts) AS ts FROM t_chat_session WHERE user_id = ? " +
+                "UNION ALL " +
+                "SELECT MAX(updated_at_ts) AS ts FROM t_chat_user_state WHERE user_id = ?)",
+                Long.class, userId, userId);
+        return v != null ? v : 0L;
+    }
+
+    /**
      * 加载用户全部会话行（含消息正文，导出/全文搜索等全量场景用）
      * @param userId 用户ID
      * @return 每条记录含 chat_id/messages/meta，按插入顺序返回
@@ -1406,6 +1646,22 @@ public class SqliteStorageService implements StorageService {
     public List<String> listChatSessionIds(String userId) {
         return jdbcTemplate.queryForList(
                 "SELECT chat_id FROM t_chat_session WHERE user_id = ?", String.class, userId);
+    }
+
+    /**
+     * 按关键字粗筛消息正文命中的会话行（SQL LIKE 下推，跨会话全文搜索用）。
+     * 仅做候选集收窄：LIKE 命中的是消息 JSON 全文（可能误命中字段名等非内容文本），
+     * 调用方需对消息内容做精确二次匹配。按最近更新时间倒序，限定候选会话数防止重度用户全表解析。
+     * @param userId 用户ID
+     * @param keyword 关键字（不含 %/_ 通配符语义，原样作为子串匹配）
+     * @param sessionLimit 候选会话数上限
+     * @return 每条记录含 chat_id/title/messages，按 updated_at_ts 降序
+     */
+    public List<Map<String, Object>> searchChatSessionsByKeyword(String userId, String keyword, int sessionLimit) {
+        return jdbcTemplate.queryForList(
+                "SELECT chat_id, title, messages FROM t_chat_session " +
+                "WHERE user_id = ? AND messages LIKE ? ORDER BY updated_at_ts DESC LIMIT ?",
+                userId, "%" + keyword + "%", sessionLimit);
     }
 
     /**

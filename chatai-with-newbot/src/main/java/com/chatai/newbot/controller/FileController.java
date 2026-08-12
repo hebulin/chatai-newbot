@@ -2,6 +2,7 @@ package com.chatai.newbot.controller;
 
 import com.chatai.newbot.service.DocumentParseService;
 import com.chatai.newbot.service.FileStorageService;
+import com.chatai.newbot.service.PdfRenderService;
 import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -10,6 +11,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -17,6 +19,8 @@ import java.util.concurrent.TimeUnit;
  * - POST /api/upload/image：登录用户上传聊天图片，返回访问 URL
  * - POST /api/upload/document：登录用户上传附件文档（txt/doc/docx/xls等），
  *   服务端解析为纯文本后落盘，返回引用 URL（无需模型多模态能力）
+ * - POST /api/upload/pdf：登录用户上传 PDF，服务端逐页渲染为图片，
+ *   返回图片 URL 列表（交多模态模型识别）
  * - GET /api/files/img/{month}/{filename}：读取图片（拦截器已豁免，
  *   因 img 标签无法携带 Authorization 头，且分享页匿名查看也需访问；文件名为 UUID 不可枚举）
  */
@@ -25,10 +29,14 @@ public class FileController {
 
     private final FileStorageService fileStorageService;
     private final DocumentParseService documentParseService;
+    private final PdfRenderService pdfRenderService;
 
-    public FileController(FileStorageService fileStorageService, DocumentParseService documentParseService) {
+    public FileController(FileStorageService fileStorageService,
+                          DocumentParseService documentParseService,
+                          PdfRenderService pdfRenderService) {
         this.fileStorageService = fileStorageService;
         this.documentParseService = documentParseService;
+        this.pdfRenderService = pdfRenderService;
     }
 
     /**
@@ -72,6 +80,40 @@ public class FileController {
             result.put("message", "附件保存失败");
         }
         return result;
+    }
+
+    /**
+     * 上传 PDF（最大6MB）：服务端逐页渲染为图片，返回图片 URL 列表，
+     * 前端将其作为多模态图片附件发给模型。
+     * 返回 Callable 使 Spring MVC 异步执行：逐页渲染（最多 15 页）为 CPU 密集操作，
+     * 若在 Servlet 请求线程同步执行会长时间占用 Tomcat 工作线程，高并发上传可能耗尽线程池；
+     * 异步化后 Servlet 线程立即释放，渲染在 MVC 异步任务线程上执行
+     * （超时时长由 application.yml 的 spring.mvc.async.request-timeout 控制）。
+     * 注意：MultipartFile 的内容在异步执行前已由容器缓存于内存/临时文件，异步读取安全。
+     */
+    @PostMapping("/api/upload/pdf")
+    public Callable<Map<String, Object>> uploadPdf(@RequestParam("file") MultipartFile file) {
+        // 提前读取文件名（异步阶段请求上下文可能已失效）
+        String originalName = file.getOriginalFilename();
+        return () -> {
+            Map<String, Object> result = new HashMap<>();
+            try {
+                PdfRenderService.RenderResult r = pdfRenderService.render(file);
+                result.put("success", true);
+                result.put("images", r.images());
+                result.put("name", originalName);
+                result.put("pages", r.images().size());
+                result.put("totalPages", r.totalPages());
+                result.put("truncated", r.truncated());
+            } catch (IllegalArgumentException e) {
+                result.put("success", false);
+                result.put("message", e.getMessage());
+            } catch (Exception e) {
+                result.put("success", false);
+                result.put("message", "PDF 转换失败");
+            }
+            return result;
+        };
     }
 
     /**

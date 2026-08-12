@@ -37,7 +37,7 @@ public final class IpUtils {
     }
 
     /** 是否显式配置为信任所有代理（系统属性优先，其次环境变量） */
-    private static boolean trustAllProxies() {
+    public static boolean trustAllProxies() {
         String v = System.getProperty("chatai.trust-all-proxies");
         if (v == null || v.isEmpty()) {
             v = System.getenv("CHATAI_TRUST_ALL_PROXIES");
@@ -49,7 +49,7 @@ public final class IpUtils {
      * 判断直连来源是否为可信代理：回环地址或私有/内网地址。
      * 典型反向代理（nginx 部署在本机或内网）均落在此范围内。
      */
-    private static boolean isTrustedProxy(String ip) {
+    public static boolean isTrustedProxy(String ip) {
         if (ip == null || ip.isEmpty()) return false;
         // 回环
         if (ip.equals("127.0.0.1") || ip.equals("::1") || ip.equals("0:0:0:0:0:0:0:1")

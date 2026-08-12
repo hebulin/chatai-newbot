@@ -70,16 +70,10 @@
           </template>
         </el-table-column>
       </el-table>
-      <div class="admin-pager">
-        <select v-model.number="providerPageSize" class="admin-pager-size" @change="providerPage = 1">
-          <option :value="10">10条/页</option>
-          <option :value="20">20条/页</option>
-          <option :value="50">50条/页</option>
-        </select>
-        <button class="admin-pager-btn" :disabled="providerPage <= 1" @click="providerPage--">上一页</button>
-        <span class="admin-pager-info">第 {{ providerPage }} / {{ providerTotalPages }} 页 · 共 {{ filteredProviders.length }} 条</span>
-        <button class="admin-pager-btn" :disabled="providerPage >= providerTotalPages" @click="providerPage++">下一页</button>
-      </div>
+      <!-- 统一分页组件（前端分页：切换条数重置页码，翻页由计算属性自动响应） -->
+      <AdminPager v-model:page="providerPage" v-model:page-size="providerPageSize"
+        :total="filteredProviders.length" :total-pages="providerTotalPages"
+        @size-change="providerPage = 1" />
     </div>
 
     <!-- 修改厂商弹窗 -->
@@ -132,6 +126,7 @@ import { Edit } from '@element-plus/icons-vue'
 import { getProviders, renameProvider } from '@/api/providers'
 import { getModels } from '@/api/models'
 import { autoColWidth } from '@/composables/useTableAutoWidth'
+import AdminPager from '@/components/admin/AdminPager.vue'
 
 const PRESET_ICONS = ['🔮','🟣','🌙','🟢','⚡','🫘','⭐','🚀','🤖','💎','🎨','🛠️']
 

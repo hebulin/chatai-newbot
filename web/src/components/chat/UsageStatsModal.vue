@@ -17,6 +17,13 @@
           <div class="us-subtab-nav">
             <div class="us-subtab-item" :class="{ active: subTab === 'usage' }" @click="subTab = 'usage'">{{ t('usage.tabUsage') }}</div>
             <div class="us-subtab-item" :class="{ active: subTab === 'stats' }" @click="switchToStats">{{ t('usage.tabStats') }}</div>
+            <div class="us-display-switch">
+              <button class="us-metric-btn" :class="{ active: displayMode === 'token' }" @click="displayMode = 'token'">Token</button>
+              <button class="us-metric-btn" :class="{ active: displayMode === 'currency' }" @click="displayMode = 'currency'">金额</button>
+              <select v-if="displayMode === 'currency'" v-model="currencyCode" class="us-page-size">
+                <option v-for="c in billing.currencies" :key="c.code" :value="c.code">{{ c.name }} ({{ c.code }})</option>
+              </select>
+            </div>
           </div>
 
           <!-- 使用记录 -->
@@ -45,6 +52,7 @@
                   value-format="YYYY-MM-DD"
                   :shortcuts="dateShortcuts"
                   class="us-date-range"
+                  popper-class="us-date-popper"
                   size="small"
                 />
               </div>
@@ -69,6 +77,9 @@
               </el-table-column>
               <el-table-column :label="t('usage.cachedTokens')" :width="usageColW.cached">
                 <template #default="{ row }">{{ fmt(row.cachedTokens) }}</template>
+              </el-table-column>
+              <el-table-column v-if="displayMode === 'currency'" :label="`费用 (${selectedCurrency.code})`" width="130">
+                <template #default="{ row }">{{ fmtMoney(row.costCny) }}</template>
               </el-table-column>
               <el-table-column :label="t('usage.thinkingMode')" :width="usageColW.thinking">
                 <template #default="{ row }">
@@ -119,6 +130,7 @@
                   value-format="YYYY-MM-DD"
                   :shortcuts="dateShortcuts"
                   class="us-date-range"
+                  popper-class="us-date-popper"
                   size="small"
                 />
               </div>
@@ -143,8 +155,8 @@
                 <div class="us-stat-label">{{ t('usage.cardOutput') }}</div>
               </div>
               <div class="us-stat-card" :class="{ tick: tickFlags.reasoningTokens }">
-                <div class="us-stat-num">{{ fmtShort(statsSummary.reasoningTokens) }}</div>
-                <div class="us-stat-label">{{ t('usage.cardReasoning') }}</div>
+                <div class="us-stat-num">{{ displayMode === 'currency' ? fmtMoney(statsSummary.costCny) : fmtShort(statsSummary.reasoningTokens) }}</div>
+                <div class="us-stat-label">{{ displayMode === 'currency' ? `总费用 · ${selectedCurrency.code}` : t('usage.cardReasoning') }}</div>
               </div>
             </div>
 
@@ -174,6 +186,9 @@
                 </el-table-column>
                 <el-table-column :label="t('usage.cachedTokens')" :width="statsColW.cached">
                   <template #default="{ row }">{{ fmt(row.cachedTokens) }}</template>
+                </el-table-column>
+                <el-table-column v-if="displayMode === 'currency'" :label="`费用 (${selectedCurrency.code})`" width="130">
+                  <template #default="{ row }">{{ fmtMoney(row.costCny) }}</template>
                 </el-table-column>
                 <el-table-column :label="t('usage.thinkingCount')" :width="statsColW.thinkingCount">
                   <template #default="{ row }">{{ row.thinkingCount || 0 }}</template>
@@ -248,6 +263,11 @@ const statsPage = ref(1)
 const statsPageSize = ref(10)
 const statsTotal = ref(0)
 const statsTotalPages = ref(1)
+const billing = ref({ displayMode: 'token', defaultCurrency: 'CNY', currencies: [{ code: 'CNY', name: '人民币', symbol: '¥', rate: 1 }] })
+const displayMode = ref('token')
+const currencyCode = ref('CNY')
+const billingInitialized = ref(false)
+const selectedCurrency = computed(() => billing.value.currencies.find(c => c.code === currencyCode.value) || billing.value.currencies[0])
 
 // 筛选下拉数据（来自 /usage/filters）
 const usernames = ref([])
@@ -283,6 +303,7 @@ const lineMetric = ref('count')
 const barMetric = ref('totalTokens')
 const lineMetrics = computed(() => [
   { key: 'count', label: t('usage.calls') },
+  ...(displayMode.value === 'currency' ? [{ key: 'costCny', label: `费用 (${selectedCurrency.value.code})` }] : []),
   { key: 'promptTokens', label: t('usage.promptTokens') },
   { key: 'completionTokens', label: t('usage.completionTokens') },
   { key: 'reasoningTokens', label: t('usage.reasoningTokens') },
@@ -290,6 +311,7 @@ const lineMetrics = computed(() => [
   { key: 'thinkingCount', label: t('usage.thinkingMode') }
 ])
 const barMetrics = computed(() => [
+  ...(displayMode.value === 'currency' ? [{ key: 'costCny', label: `费用 (${selectedCurrency.value.code})` }] : []),
   { key: 'totalTokens', label: t('usage.totalTokens') },
   { key: 'count', label: t('usage.calls') },
   { key: 'promptTokens', label: t('usage.promptTokens') },
@@ -310,6 +332,26 @@ function fmtShort(n) {
   if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'
   if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K'
   return String(n)
+}
+// 将人民币成本按当前汇率换算为选定币种并格式化展示
+function fmtMoney(costCny) {
+  const amount = Number(costCny || 0) * Number(selectedCurrency.value?.rate || 1)
+  return `${selectedCurrency.value?.symbol || ''}${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`
+}
+
+// 接收后端计费配置并应用全局默认展示方式与币种
+function applyBilling(config) {
+  if (!config?.currencies?.length) return
+  billing.value = config
+  if (!billingInitialized.value) {
+    displayMode.value = config.displayMode || 'token'
+    currencyCode.value = config.defaultCurrency || 'CNY'
+    billingInitialized.value = true
+    return
+  }
+  if (!config.currencies.some(currency => currency.code === currencyCode.value)) {
+    currencyCode.value = config.defaultCurrency || 'CNY'
+  }
 }
 function esc(v) {
   return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
@@ -381,12 +423,13 @@ function validateDateRange(dateRange) {
 
 // 汇总计数：直接从当前查询结果聚合，保证与列表/图表同口径
 const statsSummary = computed(() => {
-  const s = { count: 0, promptTokens: 0, completionTokens: 0, reasoningTokens: 0 }
+  const s = { count: 0, promptTokens: 0, completionTokens: 0, reasoningTokens: 0, costCny: 0 }
   chartData.value.forEach(r => {
     s.count += r.count || 0
     s.promptTokens += r.promptTokens || 0
     s.completionTokens += r.completionTokens || 0
     s.reasoningTokens += r.reasoningTokens || 0
+    s.costCny += Number(r.costCny || 0)
   })
   return s
 })
@@ -415,6 +458,7 @@ async function loadUsageLogs() {
       usageLogs.value = data.data || []
       usageTotal.value = data.total || 0
       usageTotalPages.value = data.totalPages || 1
+      applyBilling(data.billing)
     }
   } catch (e) { ElMessage.error(t('usage.loadUsageFailed')) }
 }
@@ -438,6 +482,7 @@ async function loadUserStats() {
       userStats.value = data.data || []
       statsTotal.value = data.total || 0
       statsTotalPages.value = data.totalPages || 1
+      applyBilling(data.billing)
     }
   } catch (e) { ElMessage.error(t('usage.loadStatsFailed')) }
 }
@@ -451,6 +496,7 @@ async function loadCharts() {
     const data = await getUserStats(params)
     if (data && data.success) {
       chartData.value = data.data || []
+      applyBilling(data.billing)
       // 记录本次搜索的用户维度，驱动图表多用户对比模式
       chartUserDim.value = [...statsFilter.value.usernames]
     }
@@ -510,6 +556,7 @@ const statsColW = computed(() => {
 
 /* ========== 图表渲染 (纯SVG) ========== */
 function metricValue(r, metric) {
+  if (metric === 'costCny') return Number(r.costCny || 0) * Number(selectedCurrency.value?.rate || 1)
   if (metric === 'totalTokens') return (r.promptTokens || 0) + (r.completionTokens || 0) + (r.reasoningTokens || 0)
   return r[metric] || 0
 }
@@ -562,6 +609,7 @@ const barChartSvg = computed(() => {
 
 // 指标展示名随语言切换，改为函数式取字典
 function metricName(metric) {
+  if (metric === 'costCny') return `费用 (${selectedCurrency.value.code})`
   const map = {
     count: t('usage.calls'),
     promptTokens: t('usage.promptTokens'),
@@ -1025,6 +1073,7 @@ function buildGroupedBarSvg(labels, series, metric) {
   gap: 4px;
   margin-bottom: 14px;
 }
+.us-display-switch { margin-left:auto; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
 .us-mini-tab-item {
   padding: 5px 14px;
   border-radius: 6px;
@@ -1162,20 +1211,58 @@ function buildGroupedBarSvg(labels, series, metric) {
     position: static !important;
     width: 100% !important;
     height: auto !important;
-    padding: 6px 0 !important;
+    padding: 8px 10px !important;
     display: flex !important;
+    gap: 6px !important;
     overflow-x: auto !important;
     border-right: none !important;
     border-bottom: 1px solid var(--el-datepicker-inner-border-color, var(--el-border-color-light)) !important;
   }
+  /* 快捷项默认是 width:100% 的块级文字行，横排后会每个撑满一行宽；
+     重置为自适应宽度的胶囊按钮，带边框/背景以体现可点击 */
   .el-picker-panel__shortcut {
+    width: auto !important;
+    line-height: 1 !important;
+    padding: 6px 12px !important;
+    font-size: 12px !important;
     white-space: nowrap !important;
     flex-shrink: 0 !important;
+    border: 1px solid var(--el-border-color) !important;
+    border-radius: 999px !important;
+    background: var(--el-fill-color-light) !important;
+    color: var(--el-text-color-regular) !important;
+    cursor: pointer !important;
+  }
+  .el-picker-panel__shortcut:active,
+  .el-picker-panel__shortcut:hover {
+    color: var(--el-color-primary) !important;
+    border-color: var(--el-color-primary) !important;
+    background: var(--el-color-primary-light-9, rgba(99,102,241,0.1)) !important;
   }
   /* body 不再为左侧快捷栏让出 110px 左边距 */
   .el-picker-panel__sidebar + .el-picker-panel__body,
   .el-picker-panel [slot=sidebar] + .el-picker-panel__body {
     margin-left: 0 !important;
+  }
+
+  /* 弹层改为固定居中：堆叠后面板高度超出视口时，popper 贴输入框定位会把下半月历
+     挤出屏幕外（横向贴边同理被遮挡）；!important 覆盖 popper 的内联定位样式 */
+  .us-date-popper.el-popper {
+    position: fixed !important;
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) !important;
+    margin: 0 !important;
+  }
+  .us-date-popper .el-popper__arrow {
+    display: none !important;
+  }
+  /* 面板限高 + 内部纵向滚动，兜底极矮视口（如横屏手机）下仍可完整操作 */
+  .us-date-popper .el-date-range-picker {
+    max-height: calc(100dvh - 24px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
 }
 </style>

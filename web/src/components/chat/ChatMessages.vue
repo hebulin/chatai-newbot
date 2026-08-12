@@ -5,7 +5,12 @@
       <div v-if="msg.role === 'divider'" class="context-divider">
         <span class="context-divider-label">{{ t('messages.contextCleared') }}</span>
       </div>
-      <div v-else class="msg-wrapper" :class="msg.role">
+      <div
+        v-else
+        class="msg-wrapper"
+        :class="[msg.role, { 'msg-highlight': highlightId === msgDomId(idx) }]"
+        :id="msg.role === 'user' ? msgDomId(idx) : undefined"
+      >
         <div v-if="msg.time" class="msg-time-top">{{ msg.time }}</div>
         <div class="msg-row">
           <div class="msg-avatar" :class="msg.role === 'user' ? 'user-av' : 'ai-av'">
@@ -104,7 +109,12 @@ import { useTheme } from '@/composables/useTheme'
 const props = defineProps({
   messages: { type: Array, default: () => [] },
   isStreaming: { type: Boolean, default: false },
-  streamingMsg: { type: Object, default: null }
+  streamingMsg: { type: Object, default: null },
+  // 列表起始下标：因长会话渲染窗口裁剪，此处 idx 为展示列表下标，
+  // 需加上 startIndex 换算回完整会话消息列表的绝对下标，用于生成全局唯一 DOM ID
+  startIndex: { type: Number, default: 0 },
+  // 当前需高亮的用户消息 DOM ID（点击侧边栏锚点跳转后置位，动画结束后清除）
+  highlightId: { type: String, default: '' }
 })
 
 const emit = defineEmits(['copy', 'lightbox', 'regenerate', 'edit-resend'])
@@ -119,6 +129,12 @@ const aiAvatarSrc = computed(() => getTheme() === 'dark' ? '/icons/AIBot_ss.svg'
 
 function renderMd(text) {
   return renderMarkdown(text)
+}
+
+// 生成用户消息的 DOM 锚点 ID：用于侧边栏点击跳转时 getElementById 定位
+// 形如 msg-anchor-3（3 为完整消息列表中的绝对下标，跨渲染窗口保持稳定）
+function msgDomId(displayIdx) {
+  return 'msg-anchor-' + (displayIdx + props.startIndex)
 }
 
 function formatUserContent(content) {

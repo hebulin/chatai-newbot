@@ -74,11 +74,69 @@ public class FileStorageService {
         if (file.getSize() > MAX_IMAGE_SIZE) {
             throw new IllegalArgumentException("图片超过5MB限制");
         }
+        // 魔数（magic bytes）校验：Content-Type 可被客户端伪造，读取文件头判定真实图片格式，
+        // 防止把非图片文件（如脚本/可执行文件）伪装成图片上传落盘
+        byte[] header = new byte[12];
+        int headerLen = 0;
+        try (java.io.InputStream is = file.getInputStream()) {
+            int read;
+            while (headerLen < header.length && (read = is.read(header, headerLen, header.length - headerLen)) > 0) {
+                headerLen += read;
+            }
+        }
+        if (!isKnownImageMagic(header, headerLen)) {
+            throw new IllegalArgumentException("文件内容不是有效的图片格式");
+        }
         String month = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMM"));
         Path monthDir = uploadDir.resolve(month);
         Files.createDirectories(monthDir);
         String filename = UUID.randomUUID().toString().replace("-", "") + "." + extOf(contentType);
         Files.write(monthDir.resolve(filename), file.getBytes());
+        return IMG_URL_PREFIX + month + "/" + filename;
+    }
+
+    /**
+     * 校验文件头魔数是否为已知图片格式（JPEG/PNG/GIF/WebP/BMP）。
+     * Content-Type 可伪造，以真实字节签名判定文件类型，防止恶意文件伪装上传。
+     * @param header 文件头字节（至少 12 字节，不足时为实际长度）
+     * @param len 实际读取到的文件头长度
+     * @return true=已知图片格式
+     */
+    private boolean isKnownImageMagic(byte[] header, int len) {
+        if (len < 4) return false;
+        // JPEG: FF D8 FF
+        if (header[0] == (byte) 0xFF && header[1] == (byte) 0xD8 && header[2] == (byte) 0xFF) return true;
+        // PNG: 89 50 4E 47
+        if (header[0] == (byte) 0x89 && header[1] == 0x50 && header[2] == 0x4E && header[3] == 0x47) return true;
+        // GIF: "GIF8"
+        if (header[0] == 'G' && header[1] == 'I' && header[2] == 'F' && header[3] == '8') return true;
+        // BMP: "BM"
+        if (header[0] == 'B' && header[1] == 'M') return true;
+        // WebP: "RIFF" .... "WEBP"（需完整 12 字节头）
+        if (len >= 12 && header[0] == 'R' && header[1] == 'I' && header[2] == 'F' && header[3] == 'F'
+                && header[8] == 'W' && header[9] == 'E' && header[10] == 'B' && header[11] == 'P') {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 保存服务端生成的图片字节（如 PDF 渲染出的页面图），落盘规则与 {@link #saveImage} 一致
+     * @param bytes 图片字节
+     * @param ext 扩展名（不含点，如 jpg/png）
+     * @return 图片访问 URL（/api/files/img/{yyyyMM}/{filename}）
+     * @throws IOException 落盘失败
+     */
+    public String saveImageBytes(byte[] bytes, String ext) throws IOException {
+        if (bytes == null || bytes.length == 0) {
+            throw new IllegalArgumentException("图片内容为空");
+        }
+        String safeExt = (ext == null || !SAFE_NAME.matcher(ext).matches()) ? "png" : ext.toLowerCase();
+        String month = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMM"));
+        Path monthDir = uploadDir.resolve(month);
+        Files.createDirectories(monthDir);
+        String filename = UUID.randomUUID().toString().replace("-", "") + "." + safeExt;
+        Files.write(monthDir.resolve(filename), bytes);
         return IMG_URL_PREFIX + month + "/" + filename;
     }
 

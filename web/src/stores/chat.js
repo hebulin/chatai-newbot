@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { loadChatHistory, loadChatSummaries, saveChatHistory, loadSingleChatHistory } from '@/api/chat'
+import { loadChatHistory, loadChatSummaries, loadChatVersion, saveChatHistory, loadSingleChatHistory } from '@/api/chat'
 
 export const useChatStore = defineStore('chat', () => {
   const chats = ref({})
@@ -18,6 +18,12 @@ export const useChatStore = defineStore('chat', () => {
   // 避免历史会话多的用户在发送时占用当前会话同步的网络开销
   let syncSuspended = false
   let pendingSyncWhileSuspended = false
+  // 上传请求进行中标记：自动同步刷新需避开上传窗口，防止服务端旧快照覆盖本地新变更
+  let syncInFlight = false
+  // 已知的服务端版本号（updated_at_ts 最大值）：多端自动同步的变更检测基准
+  let remoteVersion = 0
+  // 自动刷新进行中标记，防重入
+  let refreshing = false
 
   // 按日期分组的会话列表（已加载会话按消息实时推导，未加载会话用服务端摘要）
   const sortedChatList = computed(() => {
@@ -34,10 +40,14 @@ export const useChatStore = defineStore('chat', () => {
           if (msgs[i].role === 'user' && !first) first = msgs[i]
           if (msgs[i].time) lastTime = msgs[i].time
         }
-        autoTitle = first ? first.content.substring(0, 20) : '新会话'
-        fullContent = first ? first.content : ''
+        // 空会话（尚未发送过用户消息）不在侧边栏展示，发送首条消息后才出现
+        if (!first) return
+        autoTitle = first.content.substring(0, 20)
+        fullContent = first.content
       } else {
         const s = chatSummaries.value[id] || {}
+        // 未加载会话：服务端摘要显示无消息的空会话同样不展示
+        if ((s.count || 0) === 0) return
         autoTitle = s.title || '新会话'
         fullContent = s.preview || ''
         lastTime = s.lastTime || null
@@ -134,6 +144,7 @@ export const useChatStore = defineStore('chat', () => {
         chats.value = {}
         chatMeta.value = data.chatMeta || {}
         deletedChatIds.value = data.deletedChatIds || []
+        remoteVersion = data.version || 0
         const map = {}
         ;(data.summaries || []).forEach(s => { if (s && s.id) map[s.id] = s })
         chatSummaries.value = map
@@ -199,15 +210,23 @@ export const useChatStore = defineStore('chat', () => {
     }
     if (syncTimer) clearTimeout(syncTimer)
     syncTimer = setTimeout(async () => {
+      syncTimer = null
+      syncInFlight = true
       try {
-        await saveChatHistory({
+        const res = await saveChatHistory({
           lastChatId: currentChatId.value,
           chats: chats.value,
           chatMeta: chatMeta.value,
           deletedChatIds: deletedChatIds.value
         })
+        // 记住保存后的版本基准，自己的写入不触发下一轮自动同步重拉
+        if (res && res.success && res.version) {
+          remoteVersion = res.version
+        }
       } catch (e) {
         console.error('会话同步失败:', e)
+      } finally {
+        syncInFlight = false
       }
     }, 500)
   }
@@ -250,7 +269,90 @@ export const useChatStore = defineStore('chat', () => {
     return true
   }
 
+  // 侧边栏自动同步（多端）：先查版本号，有变更才重拉摘要并合并到本地。
+  // 本地存在待上传/上传中的变更时跳过本轮（上传完成后服务端即最新，
+  // 下轮再合并），确保应用服务端状态时服务端已包含本地全部变更，合并可以服务端为准。
+  // 返回当前会话正文是否被合并更新（调用方据此决定是否贴底滚动）
+  async function refreshFromServer() {
+    if (!isChatHistoryLoaded.value || syncSuspended || syncTimer || syncInFlight || refreshing) return false
+    refreshing = true
+    try {
+      const v = await loadChatVersion()
+      if (!v || !v.success || !v.version || v.version === remoteVersion) return false
+      const data = await loadChatSummaries()
+      if (!data || !data.success) return false
+      // 拉取期间本地可能产生了新变更，本轮放弃，避免服务端旧快照覆盖本地
+      if (syncSuspended || syncTimer || syncInFlight) return false
+      applyServerState(data)
+      remoteVersion = data.version || v.version
+      // 当前会话在其他端有新增消息：复用发送前同步逻辑合并正文
+      const curId = currentChatId.value
+      const curSummary = chatSummaries.value[curId]
+      if (curSummary && (curSummary.count || 0) > (chats.value[curId] || []).length) {
+        return await syncCurrentChatFromServer(curId, 0)
+      }
+      return false
+    } catch (e) {
+      console.error('会话列表自动同步失败:', e)
+      return false
+    } finally {
+      refreshing = false
+    }
+  }
+
+  // 将服务端摘要状态合并到本地（仅在本地无待上传变更时调用，服务端为准）
+  function applyServerState(data) {
+    const map = {}
+    ;(data.summaries || []).forEach(s => { if (s && s.id) map[s.id] = s })
+    // 本地已删除的会话不复活
+    deletedChatIds.value.forEach(id => { delete map[id] })
+
+    Object.keys(chats.value).forEach(id => {
+      if (id === currentChatId.value) return
+      if (!map[id]) {
+        // 其他端已删除：本地同步移除（当前会话除外，避免正在查看时被抽走）
+        delete chats.value[id]
+        delete chatMeta.value[id]
+        return
+      }
+      // 其他端更新过的已加载会话踢回未加载态，切换时按需重拉最新正文，
+      // 防止本地陈旧副本在下次全量同步时覆盖服务端新内容
+      const local = chats.value[id] || []
+      let localLast = null
+      for (let i = 0; i < local.length; i++) {
+        if (local[i].time) localLast = local[i].time
+      }
+      if ((map[id].count || 0) !== local.length || (map[id].lastTime || null) !== localLast) {
+        delete chats.value[id]
+      }
+    })
+
+    // 摘要与元信息以服务端为准；服务端未知的本地会话（如刚新建的当前会话）保留本地元信息
+    chatSummaries.value = map
+    const serverMeta = data.chatMeta || {}
+    const mergedMeta = {}
+    Object.keys(serverMeta).forEach(id => {
+      if (map[id]) mergedMeta[id] = serverMeta[id]
+    })
+    Object.keys(chatMeta.value).forEach(id => {
+      if (mergedMeta[id] === undefined && chats.value[id] !== undefined) {
+        mergedMeta[id] = chatMeta.value[id]
+      }
+    })
+    chatMeta.value = mergedMeta
+    // 已删除列表以服务端累积合并后的为准（本地待上传变更已被守卫排除）
+    deletedChatIds.value = data.deletedChatIds || []
+  }
+
   function newChat() {
+    // 已有空会话时直接复用，避免反复点击新建产生多个空会话
+    const emptyId = findEmptyChatId()
+    if (emptyId) {
+      if (chats.value[emptyId] === undefined) chats.value[emptyId] = []
+      currentChatId.value = emptyId
+      syncToServer()
+      return
+    }
     currentChatId.value = Date.now().toString()
     chats.value[currentChatId.value] = []
     syncToServer()
@@ -521,7 +623,7 @@ export const useChatStore = defineStore('chat', () => {
   return {
     chats, chatSummaries, chatMeta, currentChatId, deletedChatIds, isChatHistoryLoaded, searchKeyword,
     sortedChatList, currentMessages,
-    loadFromServer, syncToServer, suspendSync, resumeSync, syncCurrentChatFromServer,
+    loadFromServer, syncToServer, suspendSync, resumeSync, syncCurrentChatFromServer, refreshFromServer,
     ensureChatLoaded, ensureAllChatsLoaded,
     newChat, switchChat, switchChatLazy, deleteChat, deleteAllChats,
     addMessage, truncateMessages, updateLastAssistantMessage, exportChats, exportChatsJson, importChatsJson, countValidChats, findEmptyChatId,

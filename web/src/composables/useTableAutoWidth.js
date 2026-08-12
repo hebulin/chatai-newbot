@@ -16,7 +16,7 @@ const TABLE_FONT = '14px -apple-system, BlinkMacSystemFont, "Helvetica Neue", "P
 // el-table 表头为加粗字体，需单独测宽避免表头被截断
 const TABLE_HEADER_FONT = '600 14px -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", Arial, sans-serif'
 // 等宽字体列（模型ID/延迟/速度等 --mono 渲染的内容）
-const TABLE_MONO_FONT = '12px "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace'
+const TABLE_MONO_FONT = '12px "SF Mono", Menlo, Consolas, monospace'
 
 // 50 个汉字宽度上限（14px 字号）
 export const COL_MAX_WIDTH = 700

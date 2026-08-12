@@ -17,4 +17,6 @@ public class UsageLog {
     private int cachedTokens;
     private int reasoningTokens;
     private boolean deepThinking;
+    /** 本次调用的人民币成本快照；旧记录为空时按模型当前人民币单价动态估算 */
+    private Double costCny;
 }

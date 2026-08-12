@@ -108,6 +108,11 @@ public class StorageManager implements StorageService {
         return sqliteStorage.getSetting(key);
     }
 
+    /** 写入 SQLite t_setting 配置值。 */
+    public void setSetting(String key, String value) {
+        sqliteStorage.setSetting(key, value);
+    }
+
     // ========== Token 管理（内存缓存 + SQLite 持久化） ==========
 
     /**
@@ -761,8 +766,48 @@ public class StorageManager implements StorageService {
     }
 
     @Override
+    public double sumCostCnyByUserAndDay(String userId, String day) {
+        return sqliteStorage.sumCostCnyByUserAndDay(userId, day);
+    }
+
+    /** 获取全局普通用户每日 Token 限额，0 表示不限制。 */
+    public long getDailyTokenLimit() {
+        try {
+            String val = sqliteStorage.getSetting("daily_token_limit");
+            return val == null || val.isEmpty() ? 0L : Math.max(0L, Long.parseLong(val));
+        } catch (Exception e) {
+            return 0L;
+        }
+    }
+
+    /** 设置全局普通用户每日 Token 限额，0 表示不限制。 */
+    public void setDailyTokenLimit(long limit) {
+        sqliteStorage.setSetting("daily_token_limit", String.valueOf(Math.max(0L, limit)));
+    }
+
+    /** 获取全局普通用户每日人民币成本限额，0 表示不限制。 */
+    public double getDailyCostLimitCny() {
+        try {
+            String val = sqliteStorage.getSetting("daily_cost_limit_cny");
+            return val == null || val.isEmpty() ? 0D : Math.max(0D, Double.parseDouble(val));
+        } catch (Exception e) {
+            return 0D;
+        }
+    }
+
+    /** 设置全局普通用户每日人民币成本限额，0 表示不限制。 */
+    public void setDailyCostLimitCny(double limit) {
+        sqliteStorage.setSetting("daily_cost_limit_cny", String.valueOf(Math.max(0D, limit)));
+    }
+
+    @Override
     public void updateUsageLog(UsageLog logEntry) {
         sqliteStorage.updateUsageLog(logEntry);
+    }
+
+    /** 按模型当前人民币单价计算一条使用记录的成本。 */
+    public double calculateUsageCostCny(UsageLog logEntry) {
+        return sqliteStorage.calculateCostCny(logEntry);
     }
 
     @Override

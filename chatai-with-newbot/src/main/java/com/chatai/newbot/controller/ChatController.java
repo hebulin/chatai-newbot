@@ -101,10 +101,20 @@ public class ChatController {
                         return Flux.just("{\"error\":{\"message\":\"今日调用次数已达上限（" + limit + " 次），请明日再试\",\"type\":\"quota_error\"}}");
                     }
                 }
+                long tokenLimit = storageService.getDailyTokenLimit();
+                if (tokenLimit > 0 && storageService.sumTokensByUserAndDay(user.getId(), today) >= tokenLimit) {
+                    return Flux.just("{\"error\":{\"message\":\"今日 Token 用量已达全局上限，请明日再试\",\"type\":\"quota_error\"}}");
+                }
+                double costLimitCny = storageService.getDailyCostLimitCny();
+                if (costLimitCny > 0 && storageService.sumCostCnyByUserAndDay(user.getId(), today) >= costLimitCny) {
+                    return Flux.just("{\"error\":{\"message\":\"今日金额用量已达全局预算上限，请明日再试\",\"type\":\"quota_error\"}}");
+                }
             }
         }
 
-        // 记录使用
+        // 记录使用（仅构建对象，不立即入库）：由 UnifiedChatService 在流终止阶段
+        // 按实际消耗情况写入——正常完成/客户端取消/已输出后失败才落库，
+        // 请求直接失败（未产生任何输出）不写入、不占每日配额
         UsageLog usageLog = new UsageLog();
         usageLog.setUserId(user.getId());
         usageLog.setUsername(user.getUsername());
@@ -112,7 +122,6 @@ public class ChatController {
         usageLog.setModelName(config.getDisplayName());
         usageLog.setTimestamp(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
         usageLog.setDeepThinking(request.isDeepThinking());
-        storageService.addUsageLog(usageLog);
 
         return chatService.chat(request, modelConfigId, usageLog);
     }
@@ -193,8 +202,23 @@ public class ChatController {
     }
 
     /**
+     * 获取当前用户会话数据的版本号（多端自动同步的轻量变更检测）
+     * 前端轮询/聊天页重新聚焦时先调此接口，版本未变化则不重拉摘要列表
+     * 返回: { "success": true, "version": 1722300000000 }
+     */
+    @GetMapping("/chat/history/version")
+    public Map<String, Object> getChatHistoryVersion(HttpServletRequest request) {
+        User user = (User) request.getAttribute("currentUser");
+        Map<String, Object> result = new HashMap<>();
+        result.put("success", true);
+        result.put("version", chatHistoryService.getChatHistoryVersion(user.getId()));
+        return result;
+    }
+
+    /**
      * 保存当前用户的会话历史（增量合并：可只上传已加载的部分会话）
      * 请求体格式: { "lastChatId": "xxx", "chats": {...}, "chatMeta": {...}, "deletedChatIds": [...] }
+     * 返回体携带保存后的 version，前端据此更新本地基准，避免自己的写入触发重拉
      */
     @PostMapping("/chat/history")
     public Map<String, Object> saveChatHistory(@RequestBody Map<String, Object> body,
@@ -202,8 +226,9 @@ public class ChatController {
         User user = (User) request.getAttribute("currentUser");
         Map<String, Object> result = new HashMap<>();
         try {
-            chatHistoryService.saveChatHistory(user.getId(), body);
+            long version = chatHistoryService.saveChatHistory(user.getId(), body);
             result.put("success", true);
+            result.put("version", version);
         } catch (Exception e) {
             log.error("保存会话历史失败: userId={}", user.getId(), e);
             result.put("success", false);

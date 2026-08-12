@@ -246,7 +246,8 @@ const { t } = useI18n()
 const chatStore = useChatStore()
 const authStore = useAuthStore()
 
-const tab = ref('changePassword')
+// 默认展示"通用"页（个人设置弹窗打开后默认进入通用设置，而非修改密码）
+const tab = ref('general')
 
 // 通用：界面语言下拉（切换即时生效并持久化，见 @/i18n 的 setLocale）
 const uiLocale = ref(getLocale())

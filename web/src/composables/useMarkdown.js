@@ -1,9 +1,77 @@
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-// lib/common 仅含常用~40种语言，相比全量包（190+语言）大幅减小打包体积；
-// 未收录语言会回退到无高亮纯文本展示，不影响内容可读
-import hljs from 'highlight.js/lib/common'
+import { ref } from 'vue'
+// 样式文件体积很小，保留静态 import 保证主题样式在首屏就绪；
+// 体积较大的 hljs / katex JS 改为动态懒加载（首次遇到代码块/公式时才加载），大幅减小首屏 JS
 import 'highlight.js/styles/atom-one-dark.css'
+import 'katex/dist/katex.min.css'
+
+// ===== highlight.js 懒加载 =====
+// lib/common 仅含常用~40种语言，相比全量包（190+语言）大幅减小体积；
+// 未收录语言会回退到无高亮纯文本展示，不影响内容可读。
+// 懒加载：无代码块的消息无需付出加载成本
+let hljsModule = null
+let hljsLoading = null
+function loadHljs() {
+  if (hljsModule) return hljsModule
+  if (!hljsLoading) {
+    hljsLoading = import('highlight.js/lib/common').then(m => {
+      hljsModule = m.default || m
+      renderDepsVersion.value++ // 触发已渲染消息重渲染，补齐代码高亮
+      return hljsModule
+    }).catch(e => {
+      console.warn('[useMarkdown] highlight.js load failed:', e)
+      hljsLoading = null
+      return null
+    })
+  }
+  return hljsLoading
+}
+
+// ===== KaTeX 懒加载 =====
+// katex 主体 ~280KB + mhchem 扩展；仅当消息含公式时才加载。
+// mhchem 为副作用模块（向 katex 实例注册 \ce/\pu 命令），须在 katex 就绪后加载
+let katexModule = null
+let katexLoading = null
+function loadKatex() {
+  if (katexModule) return katexModule
+  if (!katexLoading) {
+    katexLoading = import('katex').then(async m => {
+      katexModule = m.default || m
+      try {
+        await import('katex/dist/contrib/mhchem.mjs')
+      } catch (e) {
+        console.warn('[useMarkdown] mhchem load failed:', e)
+      }
+      renderDepsVersion.value++ // 触发已渲染消息重渲染，补齐公式渲染
+      return katexModule
+    }).catch(e => {
+      console.warn('[useMarkdown] katex load failed:', e)
+      katexLoading = null
+      return null
+    })
+  }
+  return katexLoading
+}
+
+// 快速判定文本是否可能含公式定界符（避免对普通消息触发 katex 懒加载）
+function mayContainMath(text) {
+  return text.indexOf('$') !== -1 || text.indexOf('\\(') !== -1
+      || text.indexOf('\\[') !== -1 || text.indexOf('\\ce{') !== -1 || text.indexOf('\\pu{') !== -1
+}
+
+// 全局明暗主题标记（渲染入口在渲染前调用 setGlobalTheme 同步），
+// 供 getCurrentMermaidTheme() 无参调用时读取当前明暗，保持行为与传参一致
+let currentGlobalTheme = 'dark'
+export function setGlobalTheme(t) {
+  if (t === 'dark' || t === 'light') currentGlobalTheme = t
+}
+
+// ===== 懒加载依赖就绪信号（响应式） =====
+// renderMarkdown 在组件渲染期间读取该值建立响应式依赖；
+// hljs/katex 懒加载完成后递增，触发已渲染消息重新渲染完成公式/高亮补位。
+// 首屏未加载完成前公式回退原文、代码块无高亮，加载后自动补齐，不阻塞首屏
+export const renderDepsVersion = ref(0)
 
 // ===== Mermaid 懒加载与渲染 =====
 let mermaidModule = null
@@ -13,6 +81,28 @@ let lastInitTheme = null
 let renderQueue = []
 let isRendering = false
 let uidCounter = 0
+
+// ===== 已渲染 mermaid SVG 缓存 =====
+// 流式输出时整条消息每次 tick 都会经 v-html 全量重建，已完成的 mermaid 图表 DOM
+// 被销毁重建、反复回到“渲染中”占位而闪烁。以 主题+代码 为键缓存裁剪后的最终 SVG，
+// 后续重建时命中缓存直接回填已渲染结果，跳过重复渲染，消除闪烁。
+const mermaidSvgCache = new Map()
+const MERMAID_SVG_CACHE_MAX = 200
+function mermaidCacheKey(theme, code) {
+  return (theme || 'default') + '\u0000' + code
+}
+function getCachedMermaidSvg(code) {
+  return mermaidSvgCache.get(mermaidCacheKey(getCurrentMermaidTheme(), code))
+}
+function setCachedMermaidSvg(theme, code, svg) {
+  const key = mermaidCacheKey(theme, code)
+  // 简单 FIFO 淘汰，避免长会话缓存无限增长
+  if (!mermaidSvgCache.has(key) && mermaidSvgCache.size >= MERMAID_SVG_CACHE_MAX) {
+    const oldest = mermaidSvgCache.keys().next().value
+    if (oldest !== undefined) mermaidSvgCache.delete(oldest)
+  }
+  mermaidSvgCache.set(key, svg)
+}
 
 // Mermaid 主题列表（与旧版一致，支持单图独立切换并持久化到 localStorage）
 const MERMAID_THEMES = [
@@ -58,8 +148,10 @@ function ensureMermaidInit(themeKey) {
 
 // 获取 mermaid 默认主题：按全局明暗主题映射。不读 localStorage--
 // 切换主题仅影响当前图表本次会话，刷新后所有图回到跟随全局明暗的默认主题。
+// globalTheme 缺省时读取渲染入口同步的当前明暗（setGlobalTheme），行为与传参一致
 function getCurrentMermaidTheme(globalTheme) {
-  return globalTheme === 'dark' ? 'dark' : 'default'
+  const t = globalTheme || currentGlobalTheme
+  return t === 'dark' ? 'dark' : 'default'
 }
 
 /**
@@ -172,8 +264,8 @@ function quoteMermaidLabels(line) {
   })
 }
 
-function enqueueRender(el, text) {
-  renderQueue.push({ el, text })
+function enqueueRender(el, text, rawCode) {
+  renderQueue.push({ el, text, rawCode })
   drainQueue()
 }
 
@@ -182,7 +274,7 @@ function enqueueRender(el, text) {
 // 初次渲染与主题切换重渲染共用此逻辑，保证两者行为一致。
 // 两者均 parse 失败时标记 mermaid-parse-failed（退出视图模式 loading 占位，回退显示原始代码）
 function parseAndEnqueueRender(el, normalized, raw) {
-  const renderWith = (code) => { if (el.isConnected) enqueueRender(el, code) }
+  const renderWith = (code) => { if (el.isConnected) enqueueRender(el, code, raw) }
   const markFailed = () => { if (el.isConnected) el.classList.add('mermaid-parse-failed') }
   if (!mermaidModule) { renderWith(normalized); return }
   try {
@@ -209,7 +301,7 @@ function drainQueue() {
   if (isRendering) return
   const item = renderQueue.shift()
   if (!item) return
-  const { el, text } = item
+  const { el, text, rawCode } = item
   if (!el.isConnected) { drainQueue(); return }
   isRendering = true
 
@@ -229,6 +321,11 @@ function drainQueue() {
       const renderedSvg = el.querySelector('svg')
       if (renderedSvg) cropSvgViewBox(renderedSvg)
       attachInlinePanZoom(el)
+      // 缓存裁剪后的 SVG：流式全量重建时命中缓存直接回填，避免已完成图表反复闪烁；
+      // 未闭合的流式块代码仍会变化，不缓存
+      if (rawCode && !el.closest('.mermaid-container.streaming')) {
+        setCachedMermaidSvg(themeToUse, rawCode, el.innerHTML)
+      }
     }
   }).catch(err => {
     console.warn('[useMarkdown] mermaid render failed:', err?.message || err)
@@ -983,8 +1080,142 @@ export function escapeHtml(str) {
   return div.innerHTML
 }
 
+// ===== 数学公式（KaTeX）渲染 =====
+// 将 LaTeX 公式（$...$ / $$...$$ / \(...\) / \[...\]）与化学式（\ce{...}）渲染为 HTML。
+// 采用“占位符 + 后置回填”策略：在 marked 解析前抽取公式并渲染为 KaTeX HTML，
+// 用占位符替换原文避免被 marked/mermaid 处理；DOMPurify 清洗后再回填 KaTeX HTML
+// （KaTeX 以 throwOnError:false + trust:false 运行，输出为纯数学标记不含脚本，回填安全）。
+// katex 为懒加载模块，未加载完成时返回 null（回退原始文本显示）
+function renderMathToHtml(tex, displayMode) {
+  const src = (tex || '').trim()
+  if (!src || !katexModule) return null
+  try {
+    return katexModule.renderToString(src, {
+      displayMode,
+      throwOnError: false,   // 语法错误不抛异常，改为红色错误提示，避免打断整条消息渲染
+      strict: false,
+      trust: false,          // 禁用 \href 等命令，杜绝注入
+      output: 'htmlAndMathml'
+    })
+  } catch (e) {
+    return null
+  }
+}
+
+// 抽取一段公式并渲染，返回占位符；渲染失败则回退原始带定界符文本
+function pushMath(store, tex, displayMode, rawFallback) {
+  const rendered = renderMathToHtml(tex, displayMode)
+  if (rendered == null) return rawFallback
+  const idx = store.length
+  store.push(rendered)
+  return '%%KMATH' + idx + '%%'
+}
+
+// 在 $...$ 起始处寻找有效的行内公式结束 $（借鉴 KaTeX auto-render 规则，尽量规避货币金额误判）
+function findInlineDollarEnd(text, openIdx) {
+  const next = text[openIdx + 1]
+  if (next === undefined || next === '$' || /\s/.test(next)) return -1
+  let i = openIdx + 1
+  while (i < text.length) {
+    const c = text[i]
+    if (c === '\\') { i += 2; continue }              // 跳过转义序列（如 \$、\}）
+    if (c === '\n' && text[i + 1] === '\n') return -1  // 行内公式不跨空行
+    if (c === '$') {
+      const prev = text[i - 1]
+      const after = text[i + 1]
+      // 结束 $ 前不能是空白，后不能紧跟数字（规避 "$5 ... $10" 这类金额）
+      if (prev !== ' ' && prev !== '\t' && prev !== '\n' && !(after && /\d/.test(after))) return i
+      return -1
+    }
+    i++
+  }
+  return -1
+}
+
+// 抽取文本中的数学公式为占位符，跳过代码块/行内代码区域（避免误伤代码里的 $ 与反引号）
+function extractMathBlocks(text, store) {
+  let result = ''
+  let i = 0
+  const n = text.length
+  while (i < n) {
+    const ch = text[i]
+    // 代码围栏 ``` ：整段跳过不处理
+    if (ch === '`') {
+      if (text.startsWith('```', i)) {
+        const end = text.indexOf('```', i + 3)
+        if (end === -1) { result += text.slice(i); break }
+        result += text.slice(i, end + 3); i = end + 3; continue
+      }
+      // 行内代码 `...` / ``...`` ：按相同数量反引号配对跳过
+      let run = 0
+      while (text[i + run] === '`') run++
+      const fence = '`'.repeat(run)
+      const end = text.indexOf(fence, i + run)
+      if (end === -1) { result += text.slice(i, i + run); i += run; continue }
+      result += text.slice(i, end + run); i = end + run; continue
+    }
+    // 块级公式 $$...$$
+    if (text.startsWith('$$', i)) {
+      const end = text.indexOf('$$', i + 2)
+      if (end !== -1) {
+        result += pushMath(store, text.slice(i + 2, end), true, text.slice(i, end + 2))
+        i = end + 2; continue
+      }
+    }
+    // 块级公式 \[...\]
+    if (ch === '\\' && text[i + 1] === '[') {
+      const end = text.indexOf('\\]', i + 2)
+      if (end !== -1) {
+        result += pushMath(store, text.slice(i + 2, end), true, text.slice(i, end + 2))
+        i = end + 2; continue
+      }
+    }
+    // 行内公式 \(...\)
+    if (ch === '\\' && text[i + 1] === '(') {
+      const end = text.indexOf('\\)', i + 2)
+      if (end !== -1) {
+        result += pushMath(store, text.slice(i + 2, end), false, text.slice(i, end + 2))
+        i = end + 2; continue
+      }
+    }
+    // 行内公式 $...$
+    if (ch === '$') {
+      const end = findInlineDollarEnd(text, i)
+      if (end !== -1) {
+        result += pushMath(store, text.slice(i + 1, end), false, text.slice(i, end + 1))
+        i = end + 1; continue
+      }
+    }
+    result += ch
+    i++
+  }
+  return result
+}
+
+// ===== renderMarkdown 结果缓存 =====
+// 流式输出时每个 SSE tick 触发组件重渲染，v-html 会对全部历史消息重复执行
+// marked.parse + DOMPurify.sanitize（长会话 CPU 开销巨大且结果完全相同）。
+// 以 (依赖版本 + 明暗主题 + 文本) 为键缓存渲染结果，历史消息重渲染直接命中。
+// 依赖版本入键：katex/hljs 懒加载完成后版本号递增，缓存键自然失效，公式得以补齐渲染；
+// 主题入键：mermaid 图表缓存依赖明暗映射，主题切换后重新渲染
+const markdownCache = new Map()
+const MARKDOWN_CACHE_MAX = 200
+
+// 同步渲染 Markdown：KaTeX/hljs 懒加载就绪前调用时，公式回退原文、代码块稍后由异步补渲染。
+// 函数体读取 renderDepsVersion 建立响应式依赖：懒加载完成后触发已渲染消息重新渲染补位；
+// 同时按需触发懒加载并预热（首屏不再为不含公式/代码的消息付出加载成本）；
+// 渲染结果按 (依赖版本+主题+文本) 缓存，避免流式输出时历史消息重复全量渲染。
 export function renderMarkdown(text) {
+  // 依赖就绪信号：懒加载完成后触发 Vue 重渲染（此处读取即建立依赖，非死代码）
+  const depsVer = renderDepsVersion.value
   if (!text) return ''
+  // 预热懒加载：仅在内容可能用到时触发，避免为纯文本消息加载大体积依赖
+  if (mayContainMath(text)) loadKatex()
+  if (text.indexOf('```') !== -1 || text.indexOf('`') !== -1) loadHljs()
+  // 命中缓存直接返回（流式输出时历史消息不再重复解析）
+  const cacheKey = depsVer + '|' + currentGlobalTheme + '|' + text
+  const cached = markdownCache.get(cacheKey)
+  if (cached !== undefined) return cached
 
   // 处理流式输出中的mermaid块（未闭合的```mermaid/mer/mmd，兼容\r\n及尾部空格）
   const streamingMermaidBlocks = []
@@ -1002,13 +1233,24 @@ export function renderMarkdown(text) {
     return '%%MERMAID_' + idx + '%%'
   })
 
+  // 抽取数学公式/化学式为占位符（在 mermaid 抽取之后、marked 解析之前，避免被 marked 转义）
+  const mathBlocks = []
+  text = extractMathBlocks(text, mathBlocks)
+
   let html = marked.parse(text)
 
   // 还原mermaid块（带工具栏卡片）
+  // 命中已渲染缓存的图表：用占位符承载已渲染 SVG，DOMPurify 后回填（绕过清洗，SVG 为可信自产输出），
+  // 避免流式全量重建时已完成图表被销毁重建而反复回到“渲染中”闪烁
+  const renderedMermaidSvgs = []
   mermaidBlocks.forEach((code, idx) => {
     const escaped = escapeHtml(code)
     const typeKey = detectDiagramType(code)
     const typeLabel = typeKey.replace(/diagram$/i, '').toUpperCase()
+    const cachedSvg = getCachedMermaidSvg(code)
+    const viewPre = cachedSvg != null
+      ? `<pre class="mermaid mermaid-rendered" data-processed="true">%%MERMAIDSVG${renderedMermaidSvgs.push(cachedSvg) - 1}%%</pre>`
+      : `<pre class="mermaid">${escaped}</pre>`
     const mermaidHtml = `<div class="mermaid-container" data-mermaid-raw="${escaped.replace(/"/g, '&quot;')}">` +
       `<div class="mermaid-toolbar">` +
         `<div class="mermaid-toolbar-left">` +
@@ -1025,7 +1267,7 @@ export function renderMarkdown(text) {
           `<button class="mermaid-action" data-act="toggleTheme" title="切换主题"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg></button>` +
         `</div>` +
       `</div>` +
-      `<div class="mermaid-scroll-wrapper"><div class="mermaid-view"><pre class="mermaid">${escaped}</pre></div></div>` +
+      `<div class="mermaid-scroll-wrapper"><div class="mermaid-view">${viewPre}</div></div>` +
       `<div class="mermaid-code" style="display:none"><pre><code class="language-mermaid">${escaped}</code></pre></div>` +
     `</div>`
     html = html.replace('%%MERMAID_' + idx + '%%', mermaidHtml)
@@ -1049,7 +1291,30 @@ export function renderMarkdown(text) {
   // XSS 防护：marked 默认原样输出 Markdown 中的裸 HTML，AI 回复内容经 v-html 渲染，
   // 若含 <script>/onerror 等会造成 XSS（分享页为公开场景，风险尤甚）。用 DOMPurify
   // 清洗，剥离脚本与事件处理器，同时保留 mermaid 工具栏所需的 data-* 属性与内联 SVG。
-  return DOMPurify.sanitize(html, { ADD_ATTR: ['target'], ADD_TAGS: ['use'] })
+  let clean = DOMPurify.sanitize(html, { ADD_ATTR: ['target'], ADD_TAGS: ['use'] })
+
+  // 回填 KaTeX 公式 HTML（清洗后插入：KaTeX 以 trust:false 运行，输出为纯数学标记，安全）
+  if (mathBlocks.length) {
+    mathBlocks.forEach((h, idx) => {
+      clean = clean.replaceAll('%%KMATH' + idx + '%%', h)
+    })
+  }
+  // 回填已渲染 mermaid SVG（同为清洗后插入：SVG 为本地 mermaid 渲染的可信输出）
+  if (renderedMermaidSvgs.length) {
+    renderedMermaidSvgs.forEach((svg, idx) => {
+      clean = clean.replaceAll('%%MERMAIDSVG' + idx + '%%', svg)
+    })
+  }
+  // 写入结果缓存：含未闭合流式块的消息内容仍在增长、每次键都不同，跳过缓存避免内存膨胀；
+  // 其余消息缓存后，流式输出时历史消息重渲染直接命中
+  if (streamingMermaidBlocks.length === 0) {
+    if (!markdownCache.has(cacheKey) && markdownCache.size >= MARKDOWN_CACHE_MAX) {
+      const oldest = markdownCache.keys().next().value
+      if (oldest !== undefined) markdownCache.delete(oldest)
+    }
+    markdownCache.set(cacheKey, clean)
+  }
+  return clean
 }
 
 // 下载媒体文件（图片/视频）：fetch 转 blob 触发下载，跨域失败回退直接打开链接
@@ -1160,6 +1425,19 @@ async function downloadTableXlsx(rows) {
   }
 }
 
+// hljs 懒加载完成后补齐“待高亮”代码块（容器内未标记 pending 的说明已在同步阶段处理完）
+function flushPendingHljs(container) {
+  if (!hljsModule || !container) return
+  container.querySelectorAll('pre code[data-pending-hljs]').forEach(block => {
+    delete block.dataset.pendingHljs
+    if (block.dataset.processed) return
+    block.dataset.processed = 'true'
+    try {
+      hljsModule.highlightElement(block)
+    } catch (e) { /* ignore */ }
+  })
+}
+
 // 处理特殊内容：代码高亮、表格包裹、AI 图片/视频增强
 export function processSpecialContent(container) {
   if (!container) return
@@ -1182,15 +1460,23 @@ export function processSpecialContent(container) {
     attachTableDownload(wrapper, table)
   })
 
-  // 代码块高亮
+  // 代码块高亮（hljs 懒加载：未就绪时先挂复制头并标记待高亮，加载完成后统一补齐）
+  let needHljsLoad = false
   container.querySelectorAll('pre code').forEach(block => {
-    if (block.dataset.processed) return
-    block.dataset.processed = 'true'
     const lang = (block.className.match(/language-(\w+)/) || ['', ''])[1]
     if (lang === 'mermaid' || lang === 'mer' || lang === 'mmd') return
-    try {
-      hljs.highlightElement(block)
-    } catch (e) { /* ignore */ }
+    if (!block.dataset.processed) {
+      if (hljsModule) {
+        block.dataset.processed = 'true'
+        try {
+          hljsModule.highlightElement(block)
+        } catch (e) { /* ignore */ }
+      } else {
+        // hljs 尚未加载：标记待高亮，加载完成后由 flushPendingHljs 补齐
+        block.dataset.pendingHljs = 'true'
+        needHljsLoad = true
+      }
+    }
     const pre = block.parentElement
     if (pre.querySelector('.code-header')) return
     const header = document.createElement('div')
@@ -1206,6 +1492,9 @@ export function processSpecialContent(container) {
       }, () => { showToast('复制失败') })
     })
   })
+  if (needHljsLoad) {
+    loadHljs().then(() => flushPendingHljs(container))
+  }
 
   // AI 生成图片增强：点击放大 + 下载工具栏（点击放大派发 lightbox 事件由 ChatMessages 转发到灯箱）
   container.querySelectorAll('.msg-bubble img:not(.user-msg-img):not([data-img-enhanced])').forEach(img => {
@@ -1255,8 +1544,14 @@ export function processSpecialContent(container) {
     })
     wrapper.appendChild(toolbar)
   })
+
+  // 已渲染的 mermaid 图（含流式重建命中缓存回填的）重新绑定缩放/拖拽：
+  // v-html 全量重建后 wrapper 为新 DOM，panzoom 绑定丢失，attachInlinePanZoom 幂等可安全重挂
+  container.querySelectorAll('.mermaid-view pre.mermaid.mermaid-rendered').forEach(pre => {
+    attachInlinePanZoom(pre)
+  })
 }
 
 export function useMarkdown() {
-  return { renderMarkdown, processSpecialContent, escapeHtml }
+  return { renderMarkdown, processSpecialContent, escapeHtml, setGlobalTheme, renderDepsVersion }
 }

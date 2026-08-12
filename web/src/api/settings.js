@@ -15,6 +15,16 @@ export function setQuotaSettings(payload) {
   return request.put('/admin/settings/quota', payload)
 }
 
+// 获取计费展示、默认币种与汇率配置
+export function getBillingSettings() {
+  return request.get('/admin/settings/billing')
+}
+
+// 保存计费展示、默认币种与汇率配置
+export function setBillingSettings(payload) {
+  return request.put('/admin/settings/billing', payload)
+}
+
 // 获取安全设置（IP绑定校验开关）
 export function getSecuritySettings() {
   return request.get('/admin/settings/security')

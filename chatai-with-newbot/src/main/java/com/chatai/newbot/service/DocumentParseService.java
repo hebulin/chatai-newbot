@@ -27,6 +27,7 @@ import java.util.Set;
  * - 纯文本类（txt/log/md/csv/json/xml 等）：按 UTF-8 优先、GBK 兜底解码
  * - Word（doc/docx）：Apache POI 提取正文文本
  * - 表格（xls/xlsx/csv）：逐行提取单元格，制表符分隔，保留行列结构供模型理解
+ * （PDF 不走本文本解析链路，而是由 PdfRenderService 渲染为图片交多模态模型）
  * 解析结果为纯文本后交由 {@link FileStorageService} 落盘，模型调用时直接读取，
  * 无需模型具备多模态能力，也避免每轮对话重复解析原始文档。
  */
