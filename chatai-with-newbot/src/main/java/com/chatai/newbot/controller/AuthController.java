@@ -293,8 +293,12 @@ public class AuthController {
         if (request.isSecure()) {
             return true;
         }
+        if (!com.chatai.newbot.config.IpUtils.trustAllProxies()
+                && !com.chatai.newbot.config.IpUtils.isTrustedProxy(request.getRemoteAddr())) {
+            return false;
+        }
         String proto = request.getHeader("X-Forwarded-Proto");
-        return proto != null && proto.toLowerCase().contains("https");
+        return proto != null && "https".equalsIgnoreCase(proto.split(",")[0].trim());
     }
 
     /**

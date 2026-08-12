@@ -26,4 +26,12 @@ public class ModelConfig {
     private Integer testLatencyMs;  // 最近一次连通测试延迟（ms），null=未测试
     private Double testSpeed;       // 最近一次连通测试生成速度（token/s），null=未测试
     private String testedAt;        // 最近一次连通测试时间，null=未测试
+    /** 输入 Token 单价，单位：人民币元/百万 Token */
+    private double inputPriceCny;
+    /** 输出 Token 单价，单位：人民币元/百万 Token */
+    private double outputPriceCny;
+    /** 缓存命中 Token 单价，单位：人民币元/百万 Token */
+    private double cachedPriceCny;
+    /** 推理 Token 单价，单位：人民币元/百万 Token；为 0 时回退到输出单价 */
+    private double reasoningPriceCny;
 }

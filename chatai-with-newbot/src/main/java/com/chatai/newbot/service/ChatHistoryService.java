@@ -8,10 +8,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import jakarta.annotation.PostConstruct;
-import java.io.File;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -27,7 +23,6 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ChatHistoryService {
     private static final Logger log = LoggerFactory.getLogger(ChatHistoryService.class);
     private final ObjectMapper objectMapper;
-    private Path chatHistoryDir;
 
     private final SqliteStorageService sqliteStorage;
 
@@ -38,15 +33,6 @@ public class ChatHistoryService {
         this.sqliteStorage = sqliteStorage;
         this.objectMapper = new ObjectMapper();
         this.objectMapper.enable(SerializationFeature.INDENT_OUTPUT);
-    }
-
-    /**
-     * 初始化：定位旧版 JSON 存储目录（仅用于删除用户时清理残留文件）
-     */
-    @PostConstruct
-    public void init() {
-        String userDir = System.getProperty("user.dir");
-        this.chatHistoryDir = Paths.get(userDir, "data", "chat_history");
     }
 
     /**
@@ -489,18 +475,6 @@ public class ChatHistoryService {
         synchronized (lock) {
             sqliteStorage.deleteChatData(userId);
             log.info("已从SQLite删除会话历史: userId={}", userId);
-            // 清理旧版 JSON 存储时代的残留文件（如有）
-            File dir = chatHistoryDir.toFile();
-            File[] files = dir.listFiles((d, name) ->
-                    name.equals(userId + ".json") ||
-                    (name.startsWith(userId + "_") && name.endsWith(".json")));
-            if (files != null) {
-                for (File file : files) {
-                    if (file.delete()) {
-                        log.info("已删除会话历史文件: {}", file.getName());
-                    }
-                }
-            }
         }
     }
 }

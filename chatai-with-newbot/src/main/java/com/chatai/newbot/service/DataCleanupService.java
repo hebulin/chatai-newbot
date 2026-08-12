@@ -6,8 +6,6 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.io.File;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDate;
@@ -19,7 +17,7 @@ import java.util.regex.Pattern;
 
 /**
  * 数据定期清理服务（每日凌晨低峰期执行）：
- * - 使用记录：清理保留期之外的 usage_logs JSON 日志文件与 t_usage_log 旧行，
+ * - 使用记录：清理 t_usage_log 中保留期之外的旧行，
  *   保留天数由 t_setting 的 usage_log_retention_days 控制（默认 120 天，0=不清理）
  * - 上传文件：清理会话历史中已无引用的孤儿图片/附件解析文本
  *   （会话删除后对应的上传文件不会随之删除，长期运行会累积占用磁盘）
@@ -32,8 +30,6 @@ public class DataCleanupService {
     private static final int DEFAULT_RETENTION_DAYS = 120;
     /** 孤儿文件保护期：落盘不足该时长的文件不删除，防止误删刚上传、会话尚未同步的附件 */
     private static final long ORPHAN_GRACE_MS = 24L * 60 * 60 * 1000;
-    /** usage_logs 日志文件名：usage_logs_yyyy-MM-dd.json */
-    private static final Pattern USAGE_LOG_FILE = Pattern.compile("^usage_logs_(\\d{4}-\\d{2}-\\d{2})\\.json$");
     /** 消息中的上传文件引用：/api/files/img/{yyyyMM}/{file} 或 /api/files/doc/{yyyyMM}/{file} */
     private static final Pattern UPLOAD_REF = Pattern.compile("/api/files/(img|doc)/(\\d{6})/([a-zA-Z0-9._-]+)");
 
@@ -49,7 +45,7 @@ public class DataCleanupService {
     }
 
     /**
-     * 每天 04:00 清理保留期之外的使用记录（JSON 日志文件 + SQLite 表旧行）
+     * 每天 04:00 清理 SQLite 中保留期之外的使用记录。
      */
     @Scheduled(cron = "0 0 4 * * ?")
     public void cleanupUsageLogs() {
@@ -59,30 +55,14 @@ public class DataCleanupService {
         }
         String cutoff = LocalDate.now().minusDays(retentionDays)
                 .format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
-        int deletedFiles = 0;
-        try {
-            File dataDir = Paths.get(System.getProperty("user.dir"), "data").toFile();
-            File[] files = dataDir.listFiles((d, name) -> USAGE_LOG_FILE.matcher(name).matches());
-            if (files != null) {
-                for (File file : files) {
-                    Matcher m = USAGE_LOG_FILE.matcher(file.getName());
-                    if (m.matches() && m.group(1).compareTo(cutoff) < 0 && file.delete()) {
-                        deletedFiles++;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.warn("清理过期使用记录JSON文件失败", e);
-        }
         int deletedRows = 0;
         try {
             deletedRows = sqliteStorage.deleteUsageLogsBefore(cutoff);
         } catch (Exception e) {
             log.warn("清理过期使用记录SQLite行失败", e);
         }
-        if (deletedFiles > 0 || deletedRows > 0) {
-            log.info("使用记录清理完成: 保留{}天, 删除JSON文件{}个, 删除SQLite记录{}条",
-                    retentionDays, deletedFiles, deletedRows);
+        if (deletedRows > 0) {
+            log.info("使用记录清理完成: 保留{}天, 删除SQLite记录{}条", retentionDays, deletedRows);
         }
     }
 
@@ -104,7 +84,7 @@ public class DataCleanupService {
 
     /**
      * 每天 04:30 清理会话历史中已无引用的孤儿上传文件（图片与附件解析文本）。
-     * 引用收集覆盖 SQLite 按会话行/旧整文档备份与 JSON 模式历史文件，
+     * 引用收集覆盖 SQLite 按会话行与旧整文档备份，
      * 对原始 JSON 文本正则提取，任一来源读取失败则放弃本次清理，宁可漏删不可误删。
      */
     @Scheduled(cron = "0 30 4 * * ?")
@@ -145,15 +125,6 @@ public class DataCleanupService {
         Set<String> refs = new HashSet<>();
         for (String payload : sqliteStorage.listAllChatPayloads()) {
             extractRefs(payload, refs);
-        }
-        // JSON 模式历史文件（含归档），切换过存储模式的旧数据也一并纳入引用
-        Path chatDir = Paths.get(System.getProperty("user.dir"), "data", "chat_history");
-        File dir = chatDir.toFile();
-        File[] files = dir.exists() ? dir.listFiles((d, name) -> name.endsWith(".json")) : null;
-        if (files != null) {
-            for (File file : files) {
-                extractRefs(Files.readString(file.toPath(), StandardCharsets.UTF_8), refs);
-            }
         }
         return refs;
     }

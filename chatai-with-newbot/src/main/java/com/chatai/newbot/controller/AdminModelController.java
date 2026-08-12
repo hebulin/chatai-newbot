@@ -297,6 +297,10 @@ public class AdminModelController {
         copy.setTestLatencyMs(m.getTestLatencyMs());
         copy.setTestSpeed(m.getTestSpeed());
         copy.setTestedAt(m.getTestedAt());
+        copy.setInputPriceCny(m.getInputPriceCny());
+        copy.setOutputPriceCny(m.getOutputPriceCny());
+        copy.setCachedPriceCny(m.getCachedPriceCny());
+        copy.setReasoningPriceCny(m.getReasoningPriceCny());
         return copy;
     }
 }

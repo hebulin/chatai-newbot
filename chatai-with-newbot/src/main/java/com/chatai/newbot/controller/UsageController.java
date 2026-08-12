@@ -3,6 +3,7 @@ package com.chatai.newbot.controller;
 import com.chatai.newbot.model.UsageLog;
 import com.chatai.newbot.model.User;
 import com.chatai.newbot.service.StorageManager;
+import com.chatai.newbot.service.BillingSettingsService;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -23,9 +24,11 @@ import java.util.stream.Collectors;
 public class UsageController {
 
     private final StorageManager storageService;
+    private final BillingSettingsService billingSettingsService;
 
-    public UsageController(StorageManager storageService) {
+    public UsageController(StorageManager storageService, BillingSettingsService billingSettingsService) {
         this.storageService = storageService;
+        this.billingSettingsService = billingSettingsService;
     }
 
     /**
@@ -69,6 +72,7 @@ public class UsageController {
         int totalPages = Math.max(1, (int) Math.ceil((double) total / size));
         int offset = Math.min((page - 1) * size, total);
         List<UsageLog> logs = storageService.queryUsageLogs(effectiveUsername, modelName, startDate, endDate, offset, size);
+        enrichCosts(logs);
 
         result.put("success", true);
         result.put("data", logs);
@@ -77,6 +81,7 @@ public class UsageController {
         result.put("size", size);
         result.put("totalPages", totalPages);
         result.put("isAdmin", isAdmin(request));
+        result.put("billing", billingSettingsService.getConfig());
         return result;
     }
 
@@ -101,6 +106,7 @@ public class UsageController {
 
         result.put("success", true);
         result.put("data", data);
+        result.put("billing", billingSettingsService.getConfig());
         return result;
     }
 
@@ -167,6 +173,7 @@ public class UsageController {
         }
 
         List<Map<String, Object>> statsList = storageService.aggregateUsageStats(nameList, modelName, startDate, endDate);
+        enrichStatCosts(statsList);
 
         int total = statsList.size();
         if (page < 1) page = 1;
@@ -175,6 +182,7 @@ public class UsageController {
         result.put("success", true);
         result.put("total", total);
         result.put("isAdmin", isAdmin(request));
+        result.put("billing", billingSettingsService.getConfig());
 
         if (getAll) {
             result.put("data", statsList);
@@ -191,6 +199,32 @@ public class UsageController {
             result.put("totalPages", totalPages);
         }
         return result;
+    }
+
+    /** 为分页使用记录补齐旧数据的人民币成本估算。 */
+    private void enrichCosts(List<UsageLog> logs) {
+        for (UsageLog log : logs) {
+            if (log.getCostCny() == null) log.setCostCny(storageService.calculateUsageCostCny(log));
+        }
+    }
+
+    /** 为聚合统计按模型当前单价补充人民币成本，兼容没有成本快照的旧记录。 */
+    private void enrichStatCosts(List<Map<String, Object>> rows) {
+        for (Map<String, Object> row : rows) {
+            UsageLog usage = new UsageLog();
+            usage.setModelId(String.valueOf(row.getOrDefault("modelId", "")));
+            usage.setPromptTokens(number(row.get("unpricedPromptTokens")));
+            usage.setCompletionTokens(number(row.get("unpricedCompletionTokens")));
+            usage.setCachedTokens(number(row.get("unpricedCachedTokens")));
+            usage.setReasoningTokens(number(row.get("unpricedReasoningTokens")));
+            double snapshotCost = row.get("costCny") instanceof Number n ? n.doubleValue() : 0D;
+            row.put("costCny", snapshotCost + storageService.calculateUsageCostCny(usage));
+        }
+    }
+
+    /** 将聚合字段安全转换为 int。 */
+    private int number(Object value) {
+        return value instanceof Number ? ((Number) value).intValue() : 0;
     }
 
     private Map<String, Object> validateDateRange(String startDate, String endDate) {

@@ -165,6 +165,21 @@
           <el-input v-model="editForm.modelId" disabled />
         </el-form-item>
         <div class="form-section-divider"></div>
+        <el-form-item label="输入价格">
+          <el-input-number v-model="editForm.inputPriceCny" :min="0" :precision="6" :step="0.1" style="width:100%" />
+          <span class="pricing-hint">人民币元 / 百万 Token</span>
+        </el-form-item>
+        <el-form-item label="输出价格">
+          <el-input-number v-model="editForm.outputPriceCny" :min="0" :precision="6" :step="0.1" style="width:100%" />
+        </el-form-item>
+        <el-form-item label="缓存价格">
+          <el-input-number v-model="editForm.cachedPriceCny" :min="0" :precision="6" :step="0.1" style="width:100%" />
+        </el-form-item>
+        <el-form-item label="思考价格">
+          <el-input-number v-model="editForm.reasoningPriceCny" :min="0" :precision="6" :step="0.1" style="width:100%" />
+          <span class="pricing-hint">填 0 时按输出价格计算</span>
+        </el-form-item>
+        <div class="form-section-divider"></div>
         <el-form-item label="状态">
           <el-switch v-model="editForm.enabled" />
         </el-form-item>
@@ -232,6 +247,10 @@
           <el-form-item label="模型ID">
             <el-input v-model="addForm.modelId" disabled />
           </el-form-item>
+          <el-form-item label="输入价格"><el-input-number v-model="addForm.inputPriceCny" :min="0" :precision="6" :step="0.1" style="width:100%" /></el-form-item>
+          <el-form-item label="输出价格"><el-input-number v-model="addForm.outputPriceCny" :min="0" :precision="6" :step="0.1" style="width:100%" /></el-form-item>
+          <el-form-item label="缓存价格"><el-input-number v-model="addForm.cachedPriceCny" :min="0" :precision="6" :step="0.1" style="width:100%" /></el-form-item>
+          <el-form-item label="思考价格"><el-input-number v-model="addForm.reasoningPriceCny" :min="0" :precision="6" :step="0.1" style="width:100%" /></el-form-item>
           <div class="form-section-divider"></div>
           <el-form-item label="可见性">
             <el-switch v-model="addForm.visibleToAll" active-text="所有人" inactive-text="仅管理员" />
@@ -262,6 +281,10 @@
           <el-form-item label="模型ID">
             <el-input v-model="addForm.modelId" placeholder="如 gpt-4o" />
           </el-form-item>
+          <el-form-item label="输入价格"><el-input-number v-model="addForm.inputPriceCny" :min="0" :precision="6" :step="0.1" style="width:100%" /></el-form-item>
+          <el-form-item label="输出价格"><el-input-number v-model="addForm.outputPriceCny" :min="0" :precision="6" :step="0.1" style="width:100%" /></el-form-item>
+          <el-form-item label="缓存价格"><el-input-number v-model="addForm.cachedPriceCny" :min="0" :precision="6" :step="0.1" style="width:100%" /></el-form-item>
+          <el-form-item label="思考价格"><el-input-number v-model="addForm.reasoningPriceCny" :min="0" :precision="6" :step="0.1" style="width:100%" /></el-form-item>
           <div class="form-section-divider"></div>
           <el-form-item label="可见性">
             <el-switch v-model="addForm.visibleToAll" active-text="所有人" inactive-text="仅管理员" />
@@ -526,7 +549,11 @@ const addForm = ref({
   modelId: '',
   visibleToAll: true,
   supportsThinking: false,
-  supportsMultimodal: false
+  supportsMultimodal: false,
+  inputPriceCny: 0,
+  outputPriceCny: 0,
+  cachedPriceCny: 0,
+  reasoningPriceCny: 0
 })
 
 const currentProvider = computed(() => presetProviders.value.find(p => p.id === addForm.value.providerId))
@@ -539,7 +566,7 @@ function isModelAdded(modelId) {
 }
 
 function showAddModel() {
-  addForm.value = { providerId: '', customProviderName: '', modelSelect: '', protocol: 'openai', apiUrl: '', apiKey: '', displayName: '', modelId: '', visibleToAll: true, supportsThinking: false, supportsMultimodal: false }
+  addForm.value = { providerId: '', customProviderName: '', modelSelect: '', protocol: 'openai', apiUrl: '', apiKey: '', displayName: '', modelId: '', visibleToAll: true, supportsThinking: false, supportsMultimodal: false, inputPriceCny: 0, outputPriceCny: 0, cachedPriceCny: 0, reasoningPriceCny: 0 }
   addVisible.value = true
 }
 
@@ -596,7 +623,11 @@ async function submitAddModel() {
       visibleToAll: addForm.value.visibleToAll,
       supportsThinking: addForm.value.supportsThinking,
       supportsMultimodal: addForm.value.supportsMultimodal,
-      enabled: true
+      enabled: true,
+      inputPriceCny: addForm.value.inputPriceCny || 0,
+      outputPriceCny: addForm.value.outputPriceCny || 0,
+      cachedPriceCny: addForm.value.cachedPriceCny || 0,
+      reasoningPriceCny: addForm.value.reasoningPriceCny || 0
     }
   } else if (isPresetMode.value) {
     if (!addForm.value.apiKey.trim()) { ElMessage.warning('请输入 API Key'); return }
@@ -615,7 +646,11 @@ async function submitAddModel() {
       visibleToAll: addForm.value.visibleToAll,
       supportsThinking: pm.supportsThinking || false,
       supportsMultimodal: pm.supportsMultimodal || false,
-      enabled: true
+      enabled: true,
+      inputPriceCny: addForm.value.inputPriceCny || 0,
+      outputPriceCny: addForm.value.outputPriceCny || 0,
+      cachedPriceCny: addForm.value.cachedPriceCny || 0,
+      reasoningPriceCny: addForm.value.reasoningPriceCny || 0
     }
   } else {
     // 内置厂商 + 自定义模型
@@ -634,7 +669,11 @@ async function submitAddModel() {
       visibleToAll: addForm.value.visibleToAll,
       supportsThinking: addForm.value.supportsThinking,
       supportsMultimodal: addForm.value.supportsMultimodal,
-      enabled: true
+      enabled: true,
+      inputPriceCny: addForm.value.inputPriceCny || 0,
+      outputPriceCny: addForm.value.outputPriceCny || 0,
+      cachedPriceCny: addForm.value.cachedPriceCny || 0,
+      reasoningPriceCny: addForm.value.reasoningPriceCny || 0
     }
   }
 

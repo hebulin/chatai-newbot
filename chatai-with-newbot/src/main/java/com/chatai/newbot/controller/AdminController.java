@@ -7,6 +7,7 @@ import com.chatai.newbot.service.PasswordHasher;
 import com.chatai.newbot.service.StorageManager;
 import com.chatai.newbot.service.WebSearchService;
 import com.chatai.newbot.service.AuditLogService;
+import com.chatai.newbot.service.BillingSettingsService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
@@ -33,15 +34,18 @@ public class AdminController {
     private final WebSearchService webSearchService;
     private final AuditLogService auditLogService;
     private final AdminSupport admin;
+    private final BillingSettingsService billingSettingsService;
 
     public AdminController(StorageManager storageService,
                            ChatHistoryService chatHistoryService, WebSearchService webSearchService,
-                           AuditLogService auditLogService, AdminSupport admin) {
+                           AuditLogService auditLogService, AdminSupport admin,
+                           BillingSettingsService billingSettingsService) {
         this.storageService = storageService;
         this.chatHistoryService = chatHistoryService;
         this.webSearchService = webSearchService;
         this.auditLogService = auditLogService;
         this.admin = admin;
+        this.billingSettingsService = billingSettingsService;
     }
 
     // ========== 厂商信息 =========
@@ -487,6 +491,8 @@ public class AdminController {
         Map<String, Object> result = new HashMap<>();
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("dailyChatLimit", storageService.getDailyChatLimit());
+        data.put("dailyTokenLimit", storageService.getDailyTokenLimit());
+        data.put("dailyCostLimitCny", storageService.getDailyCostLimitCny());
         data.put("rateLimitPerMinute", storageService.getRateLimitPerMinute());
         data.put("contextMaxMessages", storageService.getContextMaxMessages());
         result.put("success", true);
@@ -535,10 +541,30 @@ public class AdminController {
                 return result;
             }
         }
+        long tokenLimit = -1L;
+        if (body != null && body.get("dailyTokenLimit") instanceof Number tn) {
+            tokenLimit = tn.longValue();
+            if (tokenLimit < 0 || tokenLimit > 10_000_000_000L) {
+                result.put("success", false);
+                result.put("message", "每日 Token 配额范围应为 0 ~ 100亿");
+                return result;
+            }
+        }
+        double costLimitCny = -1D;
+        if (body != null && body.get("dailyCostLimitCny") instanceof Number cost) {
+            costLimitCny = cost.doubleValue();
+            if (!Double.isFinite(costLimitCny) || costLimitCny < 0 || costLimitCny > 100_000_000D) {
+                result.put("success", false);
+                result.put("message", "每日金额配额范围应为 0 ~ 1亿元人民币");
+                return result;
+            }
+        }
         try {
             storageService.setDailyChatLimit(limit);
             if (ratePerMinute >= 0) storageService.setRateLimitPerMinute(ratePerMinute);
             if (contextMax >= 0) storageService.setContextMaxMessages(contextMax);
+            if (tokenLimit >= 0) storageService.setDailyTokenLimit(tokenLimit);
+            if (costLimitCny >= 0) storageService.setDailyCostLimitCny(costLimitCny);
             admin.audit(request, "settings.quota", "修改配额设置：每日上限 " + limit);
             result.put("success", true);
             result.put("message", limit == 0 ? "已取消每日调用限制" : "每日调用上限已设为 " + limit + " 次");
@@ -546,6 +572,40 @@ public class AdminController {
             log.error("保存配额设置失败", e);
             result.put("success", false);
             result.put("message", "保存失败: " + e.getMessage());
+        }
+        return result;
+    }
+
+    // ========== 系统设置（成本与币种） ==========
+
+    /** 获取 Token/金额默认展示方式、默认币种及人民币汇率列表。 */
+    @GetMapping("/settings/billing")
+    public Map<String, Object> getBillingSettings(HttpServletRequest request) {
+        admin.requireAdmin(request);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("success", true);
+        result.put("data", billingSettingsService.getConfig());
+        return result;
+    }
+
+    /** 保存 Token/金额默认展示方式、默认币种及人民币汇率列表。 */
+    @PutMapping("/settings/billing")
+    public Map<String, Object> setBillingSettings(@RequestBody Map<String, Object> body,
+                                                   HttpServletRequest request) {
+        admin.requireAdmin(request);
+        Map<String, Object> result = new LinkedHashMap<>();
+        try {
+            result.put("data", billingSettingsService.saveConfig(body));
+            result.put("success", true);
+            result.put("message", "计费与币种设置已保存");
+            admin.audit(request, "settings.billing", "修改计费展示与币种汇率配置");
+        } catch (IllegalArgumentException e) {
+            result.put("success", false);
+            result.put("message", e.getMessage());
+        } catch (Exception e) {
+            log.error("保存计费设置失败", e);
+            result.put("success", false);
+            result.put("message", "保存计费设置失败");
         }
         return result;
     }

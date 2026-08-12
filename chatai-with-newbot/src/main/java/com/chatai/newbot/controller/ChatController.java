@@ -101,6 +101,14 @@ public class ChatController {
                         return Flux.just("{\"error\":{\"message\":\"今日调用次数已达上限（" + limit + " 次），请明日再试\",\"type\":\"quota_error\"}}");
                     }
                 }
+                long tokenLimit = storageService.getDailyTokenLimit();
+                if (tokenLimit > 0 && storageService.sumTokensByUserAndDay(user.getId(), today) >= tokenLimit) {
+                    return Flux.just("{\"error\":{\"message\":\"今日 Token 用量已达全局上限，请明日再试\",\"type\":\"quota_error\"}}");
+                }
+                double costLimitCny = storageService.getDailyCostLimitCny();
+                if (costLimitCny > 0 && storageService.sumCostCnyByUserAndDay(user.getId(), today) >= costLimitCny) {
+                    return Flux.just("{\"error\":{\"message\":\"今日金额用量已达全局预算上限，请明日再试\",\"type\":\"quota_error\"}}");
+                }
             }
         }
 
