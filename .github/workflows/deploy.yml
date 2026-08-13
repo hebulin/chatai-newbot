@@ -46,7 +46,10 @@ jobs:
 
       - name: Build Spring Boot JAR
         working-directory: ./chatai-with-newbot
-        run: mvn -B clean package
+        run: |
+          # data/ 被 Git 忽略，Actions 的全新检出不会包含该目录；SQLite 只能创建数据库文件，不能创建父目录。
+          mkdir -p data
+          mvn -B clean package
 
       - name: Get JAR filename
         id: jar
