@@ -16,7 +16,7 @@
         :class="{ 'is-current': i === activeIdx }"
         :style="{ top: tick.top + 'px' }"
         :title="tick.summary"
-        @click="$emit('jump', tick.messageDomId)"
+        @click="onTickClick(tick, i)"
         @mouseenter="activeIdx = i"
       ></button>
     </div>
@@ -34,7 +34,7 @@
             :key="tick.id"
             class="ruler-panel-item"
             :class="{ 'is-current': i === activeIdx }"
-            @click="onItemClick(tick.messageDomId)"
+            @click="onItemClick(tick, i)"
           >
             <span class="ruler-panel-item-index">{{ i + 1 }}</span>
             <span class="ruler-panel-item-text">{{ tick.content }}</span>
@@ -124,8 +124,41 @@ function recalc() {
   }))
 }
 
+// 高亮锁定：点击刻度/浮窗项跳转期间，高亮固定在被点击项上。
+// 否则平滑滚动过程的视口中心判定会把高亮抢走——尤其目标在顶部无法居中时，
+// 中心会落在其后方的消息上（表现为点击第一条却只高亮屏幕中最后一条）；
+// 目标已在原位时不产生 scroll 事件，连判定都不会触发（再次点击无反应）。
+let highlightLocked = false
+let highlightLockTimer = null
+
+// 锁定高亮到指定刻度下标，滚动结束（scrollend）后再保留 500ms 宽限期解锁；
+// 无滚动（目标已在原位）时由兜底超时解锁
+function lockHighlight(idx) {
+  activeIdx.value = idx
+  highlightLocked = true
+  clearTimeout(highlightLockTimer)
+  highlightLockTimer = null
+  if (scrollEl) scrollEl.addEventListener('scrollend', onScrollEndUnlock, { once: true })
+  highlightLockTimer = setTimeout(unlockHighlight, 1200)
+}
+
+// 平滑滚动结束：宽限 500ms 后解锁，期间高亮保持在点击项上
+function onScrollEndUnlock() {
+  clearTimeout(highlightLockTimer)
+  highlightLockTimer = setTimeout(unlockHighlight, 500)
+}
+
+// 解除高亮锁定；不做视口中心重算，让高亮停留在点击项上，待用户后续滚动自然更新
+function unlockHighlight() {
+  highlightLocked = false
+  clearTimeout(highlightLockTimer)
+  highlightLockTimer = null
+  if (scrollEl) scrollEl.removeEventListener('scrollend', onScrollEndUnlock)
+}
+
 // 滚动时更新当前高亮刻度：找出视口中心最接近的用户消息（按消息 DOM 实际位置判定）
 function onScroll() {
+  if (highlightLocked) return
   if (!scrollEl || ticks.value.length === 0) return
   const center = scrollEl.scrollTop + scrollEl.clientHeight / 2
   let best = -1
@@ -181,9 +214,16 @@ function onGlobalMouseMove(e) {
   }
 }
 
-// 点击浮窗中的消息项：触发跳转，浮窗保持显示不消失
-function onItemClick(messageDomId) {
-  emit('jump', messageDomId)
+// 点击直尺刻度：锁定高亮到被点击项并触发跳转
+function onTickClick(tick, i) {
+  lockHighlight(i)
+  emit('jump', tick.messageDomId)
+}
+
+// 点击浮窗中的消息项：锁定高亮到被点击项并触发跳转，浮窗保持显示不消失
+function onItemClick(tick, i) {
+  lockHighlight(i)
+  emit('jump', tick.messageDomId)
   // 跳转后滚动面板列表使当前项可见（可选，提升体验）
   nextTick(() => {
     scrollPanelToCurrent()
@@ -235,6 +275,7 @@ function unbind() {
   if (rafId) { cancelAnimationFrame(rafId); rafId = null }
   clearTimeout(panelCloseTimer)
   panelCloseTimer = null
+  unlockHighlight()
 }
 
 onMounted(async () => {

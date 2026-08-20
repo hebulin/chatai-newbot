@@ -321,6 +321,8 @@ const streamingMsg = ref(null)
 const syncTipVisible = ref(false)
 // 当前需高亮的用户消息锚点 ID（点击侧边栏锚点跳转后置位，动画结束后清除）
 const highlightMsgId = ref('')
+// 高亮清除定时器：重复跳转同一消息时取消上一次清除，避免新高亮被提前清掉
+let highlightClearTimer = null
 // 切换会话加载缓冲层（懒加载拉取正文期间显示）
 const chatSwitchLoading = ref(false)
 // 快速切换会话竞态控制：仅最新一次切换生效，切换时中断上一会话尚未完成的正文加载，
@@ -342,6 +344,7 @@ const displayMessages = computed(() => {
 watch(() => chatStore.currentChatId, () => {
   visibleCount.value = RENDER_WINDOW
   highlightMsgId.value = ''
+  if (highlightClearTimer) { clearTimeout(highlightClearTimer); highlightClearTimer = null }
 })
 
 // ===== 空会话引导：无任何消息且未在流式输出时展示欢迎内容与建议提问 =====
@@ -660,10 +663,14 @@ async function jumpToAbsIndex(targetIdx, block = 'center') {
   // 暂停滚动跟随，避免跳转后被自动贴底逻辑覆盖
   scrollFollow.autoFollowEnabled.value = false
   el.scrollIntoView({ behavior: 'smooth', block })
-  // 触发高亮动画
+  // 触发高亮动画：先清空再置位，保证重复点击同一消息时 class 重新切换、动画重新播放
+  highlightMsgId.value = ''
+  await nextTick()
   highlightMsgId.value = domId
-  // 动画结束后清除高亮标记（保留 class 直至动画完成）
-  setTimeout(() => { highlightMsgId.value = '' }, 2000)
+  // 动画结束后清除高亮标记（保留 class 直至动画完成）；
+  // 重复跳转时清掉旧定时器，避免旧定时器提前把新高亮清除
+  if (highlightClearTimer) clearTimeout(highlightClearTimer)
+  highlightClearTimer = setTimeout(() => { highlightMsgId.value = '' }, 2000)
   // 平滑滚动期间的 scroll 事件会把 autoFollow 重新置真（近底判定），此后异步内容
   // （mermaid/图片）高度变化会触发 MutationObserver 误贴底——表现为定位后约一秒页面抖动。
   // 滚动稳定后（scrollend，含兜底超时）再次压回 autoFollow 并重置内容高度基线，阻断误贴底

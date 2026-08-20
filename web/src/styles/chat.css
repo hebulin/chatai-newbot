@@ -985,8 +985,10 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
 /* 消息锚点高亮：点击直尺刻度/搜索/语音定位跳转后，目标消息短暂高亮提示定位。
    背景闪烁用伪元素实现而非直接给 wrapper 挂 animation——
    高亮 class 移除时若 wrapper 的 animation 属性发生变化（如 :last-child 的 msgIn），
-   CSS 动画会从头重启，造成高亮结束时消息再次闪动 */
-.msg-wrapper.msg-highlight { position: relative; }
+   CSS 动画会从头重启，造成高亮结束时消息再次闪动。
+   isolation: isolate 使 wrapper 形成独立层叠上下文：否则 ::before 的 z-index:-1
+   会被绘制到聊天容器背景之下，闪烁背景不可见（高亮看似失效） */
+.msg-wrapper.msg-highlight { position: relative; isolation: isolate; }
 .msg-wrapper.msg-highlight::before {
     content: '';
     position: absolute;
