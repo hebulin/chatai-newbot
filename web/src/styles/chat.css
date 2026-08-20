@@ -2272,6 +2272,29 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
     font-weight: 500;
 }
 
+/* 个人设置弹窗 el-select 下拉浮层（通用/分享管理/数据管理共用）：深浅主题变量适配 */
+.settings-select-popper.el-popper {
+    background: var(--paper-2);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-elevated);
+}
+.settings-select-popper .el-popper__arrow::before {
+    background: var(--paper-2);
+    border-color: var(--border);
+}
+.settings-select-popper .el-select-dropdown__item {
+    color: var(--ink-2);
+    font-size: 13px;
+}
+.settings-select-popper .el-select-dropdown__item.is-hovering {
+    background: var(--paper-3);
+    color: var(--ink);
+}
+.settings-select-popper .el-select-dropdown__item.is-selected {
+    color: var(--primary);
+    font-weight: 500;
+}
+
 /* 智能体/角色下拉：分组标题（内置智能体 / 我的提示词）+ 限高滚动 */
 .role-preset-menu {
     max-height: 60vh;

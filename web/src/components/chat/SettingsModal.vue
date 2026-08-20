@@ -69,10 +69,10 @@
               <h3 class="settings-panel-title">{{ t('settings.tabGeneral') }}</h3>
               <div class="settings-form-group">
                 <label>{{ t('settings.language') }}</label>
-                <select v-model="uiLocale" class="settings-select" @change="setLocale(uiLocale)">
-                  <option value="zh">中文</option>
-                  <option value="en">English</option>
-                </select>
+                <el-select v-model="uiLocale" class="settings-el-select" popper-class="settings-select-popper" @change="setLocale">
+                  <el-option value="zh" label="中文" />
+                  <el-option value="en" label="English" />
+                </el-select>
               </div>
               <div class="settings-form-note">{{ t('settings.languageNote') }}</div>
             </div>
@@ -154,12 +154,12 @@
             <div v-if="tab === 'shareManage'" class="settings-panel">
               <h3 class="settings-panel-title">{{ t('settings.tabShares') }}</h3>
               <div class="share-toolbar">
-                <select v-model="shareFilterStatus" class="settings-select">
-                  <option value="">{{ t('settings.allStatus') }}</option>
-                  <option value="valid">{{ t('settings.statusValid') }}</option>
-                  <option value="expired">{{ t('settings.statusExpired') }}</option>
-                  <option value="orphaned">{{ t('settings.statusOrphaned') }}</option>
-                </select>
+                <el-select v-model="shareFilterStatus" class="settings-el-select" popper-class="settings-select-popper">
+                  <el-option value="" :label="t('settings.allStatus')" />
+                  <el-option value="valid" :label="t('settings.statusValid')" />
+                  <el-option value="expired" :label="t('settings.statusExpired')" />
+                  <el-option value="orphaned" :label="t('settings.statusOrphaned')" />
+                </el-select>
                 <button class="settings-btn settings-btn-ghost" :disabled="invalidShares.length === 0" @click="handleClearInvalidShares">{{ t('settings.clearInvalid', { n: invalidShares.length }) }}</button>
                 <button class="settings-btn settings-btn-danger" :disabled="selectedShareIds.length === 0" @click="handleDeleteSelectedShares">{{ t('settings.deleteSelected', { n: selectedShareIds.length }) }}</button>
               </div>
@@ -198,11 +198,11 @@
                     <div class="data-mgmt-title">{{ t('settings.exportAll') }}</div>
                     <div class="data-mgmt-desc">{{ t('settings.exportAllDesc', { n: chatStore.countValidChats() }) }}</div>
                   </div>
-                  <select v-model="exportFormat" class="settings-select">
-                    <option value="txt">{{ t('settings.fmtTxt') }}</option>
-                    <option value="md">{{ t('settings.fmtMd') }}</option>
-                    <option value="json">{{ t('settings.fmtJson') }}</option>
-                  </select>
+                  <el-select v-model="exportFormat" class="settings-el-select" popper-class="settings-select-popper">
+                    <el-option value="txt" :label="t('settings.fmtTxt')" />
+                    <el-option value="md" :label="t('settings.fmtMd')" />
+                    <el-option value="json" :label="t('settings.fmtJson')" />
+                  </el-select>
                   <button class="settings-btn settings-btn-primary" @click="confirmExport">{{ t('settings.export') }}</button>
                 </div>
                 <div class="data-mgmt-row">
@@ -731,19 +731,38 @@ async function doBatchDeleteShares(ids) {
   opacity: 0.4;
   cursor: not-allowed;
 }
-.settings-select {
-  padding: 8px 10px;
-  border: 1px solid var(--border, #333);
-  border-radius: 6px;
-  background: var(--paper, #252536);
-  color: var(--ink, #eee);
-  font-size: 13px;
-  outline: none;
-  cursor: pointer;
+/* === el-select 下拉（通用/分享管理/数据管理共用）：触发器主题适配，浮层见 chat.css 的 .settings-select-popper === */
+.settings-el-select {
+  width: 150px;
   flex-shrink: 0;
 }
-.settings-select:focus {
-  border-color: var(--primary, #6366f1);
+/* EP 用 box-shadow 模拟边框，默认/hover/focus 三态需合并写并加 !important */
+.settings-el-select :deep(.el-select__wrapper),
+.settings-el-select :deep(.el-select__wrapper:hover),
+.settings-el-select :deep(.el-select__wrapper.is-focused) {
+  background: var(--paper, #252536) !important;
+  box-shadow: 0 0 0 1px var(--border, #333) inset !important;
+  border-radius: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  cursor: pointer;
+}
+.settings-el-select :deep(.el-select__wrapper:hover) {
+  box-shadow: 0 0 0 1px var(--ink-4, #666) inset !important;
+}
+.settings-el-select :deep(.el-select__wrapper.is-focused) {
+  box-shadow: 0 0 0 1px var(--primary, #6366f1) inset !important;
+}
+.settings-el-select :deep(.el-select__selected-item) {
+  color: var(--ink, #eee);
+  font-size: 13px;
+}
+.settings-el-select :deep(.el-select__placeholder) {
+  color: var(--ink-3, #999);
+  font-size: 13px;
+}
+.settings-el-select :deep(.el-select__suffix) {
+  color: var(--ink-3, #999);
 }
 .settings-btn-primary {
   background: var(--primary, #6366f1);
