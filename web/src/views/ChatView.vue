@@ -17,6 +17,9 @@
         </div>
       </div>
       <div class="top-right">
+        <button class="icon-btn msg-search-btn" @click="openMsgSearch" :title="t('chat.searchInChat')" :aria-label="t('chat.searchInChat')">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        </button>
         <button class="icon-btn share-chat-btn" @click="handleShareChat" :title="t('chat.shareChat')" :aria-label="t('sidebar.share')">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
         </button>
@@ -45,8 +48,33 @@
 
     <!-- 主内容 -->
     <main class="main-content" :class="{ 'sidebar-collapsed': sidebarCollapsed && !isMobile }">
-      <div class="chat-viewport">
-        <div class="chat-container" ref="chatContainerRef">
+      <!-- 聊天区与 HTML 预览区的分栏容器：预览打开时左右分栏，拖动中间分割线调整比例 -->
+      <div class="chat-split" :class="{ 'with-preview': htmlPreviewCode !== null, dragging: dividerDragging }" ref="chatSplitRef">
+        <div class="chat-pane" :style="chatPaneStyle">
+          <div class="chat-viewport">
+            <!-- 会话内搜索栏：悬浮于对话区顶部，Enter 下一个 / Shift+Enter 上一个 / Esc 关闭 -->
+            <div v-if="msgSearchOpen" class="msg-search-bar">
+              <input
+                ref="msgSearchInputRef"
+                v-model="msgSearchKeyword"
+                class="msg-search-input"
+                :placeholder="t('chat.searchInChatPlaceholder')"
+                autocomplete="off"
+                @keydown.enter="nextMsgMatch"
+                @keydown.shift.enter="prevMsgMatch"
+              />
+              <span class="msg-search-count">{{ msgSearchInfo }}</span>
+              <button class="msg-search-nav" @click="prevMsgMatch" :title="t('chat.searchPrev')">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg>
+              </button>
+              <button class="msg-search-nav" @click="nextMsgMatch" :title="t('chat.searchNext')">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+              <button class="msg-search-nav" @click="closeMsgSearch" :title="t('common.cancel')">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+            <div class="chat-container" ref="chatContainerRef">
           <!-- 空会话引导：新会话未发送内容时展示，发出首条消息后自动消失 -->
           <div v-if="showWelcome" class="chat-welcome">
             <img class="chat-welcome-icon" :src="brandIconSrc" alt="AI" />
@@ -70,6 +98,7 @@
             @lightbox="lightboxSrc = $event"
             @regenerate="handleRegenerate"
             @edit-resend="handleEditResend"
+            @preview-html="handlePreviewHtml"
           />
         </div>
 
@@ -89,26 +118,60 @@
           </button>
         </div>
 
+        <!-- 语音播放悬浮窗：悬浮于对话区底部（输入框上方），展示正在播放的内容；
+             支持暂停/继续、定位到对应消息、关闭停止（全局单例，与消息喇叭按钮状态联动） -->
+        <div v-if="speechStatus !== 'idle'" class="speech-float-bar">
+          <span class="speech-float-status">{{ speechStatus === 'paused' ? t('speech.paused') : t('speech.playing') }}</span>
+          <span class="speech-float-text" :title="speechCurrent?.text">{{ speechTextPreview }}</span>
+          <button class="speech-float-btn" @click="toggleSpeechPause" :title="speechStatus === 'paused' ? t('speech.resume') : t('speech.pause')">
+            <svg v-if="speechStatus === 'playing'" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
+            <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="7 4 20 12 7 20 7 4"/></svg>
+          </button>
+          <button class="speech-float-btn" @click="locateSpeechMsg" :title="t('speech.locate')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/><line x1="12" y1="1" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="1" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="23" y2="12"/></svg>
+          </button>
+          <button class="speech-float-btn" @click="speech.stop()" :title="t('speech.close')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+
         <!-- 切换会话加载缓冲：懒加载拉取正文/长会话首屏渲染期间的视觉过渡 -->
         <div v-if="chatSwitchLoading" class="chat-switch-loading">
           <span class="chat-switch-spinner"></span>
           <span>{{ t('chat.chatLoading') }}</span>
         </div>
+          </div>
+
+          <!-- 当前会话同步提示（同步超过 3 秒才显示） -->
+          <div v-if="syncTipVisible" class="chat-sync-tip">{{ t('chat.syncTip') }}</div>
+
+          <!-- 输入区 -->
+          <ChatInput
+            ref="chatInputRef"
+            :is-streaming="streamChat.isStreaming.value"
+            :supports-thinking="modelsStore.currentModelSupportsThinking"
+            :supports-multimodal="modelsStore.currentModelSupportsMultimodal"
+            @send="handleSend"
+            @stop="handleStop"
+            @clear-context="handleClearContext"
+          />
+        </div>
+
+        <!-- HTML 预览：可拖拽分割线 + 右侧预览面板（默认与聊天区各占 50%） -->
+        <template v-if="htmlPreviewCode !== null">
+          <div class="split-divider" @pointerdown="onDividerPointerDown"></div>
+          <div class="html-preview-pane">
+            <div class="html-preview-header">
+              <span class="html-preview-title">{{ t('chat.htmlPreviewTitle') }}</span>
+              <button class="html-preview-close" @click="closeHtmlPreview" :title="t('chat.closePreview')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+            <!-- sandbox 仅放行脚本执行，不放行同源访问，隔离 AI 生成代码对主站的影响 -->
+            <iframe class="html-preview-frame" sandbox="allow-scripts" referrerpolicy="no-referrer" :srcdoc="htmlPreviewCode"></iframe>
+          </div>
+        </template>
       </div>
-
-      <!-- 当前会话同步提示（同步超过 3 秒才显示） -->
-      <div v-if="syncTipVisible" class="chat-sync-tip">{{ t('chat.syncTip') }}</div>
-
-      <!-- 输入区 -->
-      <ChatInput
-        ref="chatInputRef"
-        :is-streaming="streamChat.isStreaming.value"
-        :supports-thinking="modelsStore.currentModelSupportsThinking"
-        :supports-multimodal="modelsStore.currentModelSupportsMultimodal"
-        @send="handleSend"
-        @stop="handleStop"
-        @clear-context="handleClearContext"
-      />
     </main>
 
     <!-- 设置弹窗 -->
@@ -136,6 +199,7 @@ import { useModelsStore } from '@/stores/models'
 import { useAuthStore } from '@/stores/auth'
 import { useStreamChat } from '@/composables/useStreamChat'
 import { useScrollFollow } from '@/composables/useScrollFollow'
+import { useSpeech } from '@/composables/useSpeech'
 import { useTheme } from '@/composables/useTheme'
 import { logout as apiLogout } from '@/api/auth'
 import { saveChatHistory, generateChatTitle, fetchAnnouncement } from '@/api/chat'
@@ -167,6 +231,87 @@ const showSettings = ref(false)
 const showAbout = ref(false)
 const showStats = ref(false)
 const lightboxSrc = ref(null)
+// ===== HTML 代码块预览面板 =====
+// 点击 html 代码块头部的“预览”按钮打开：聊天区与预览区默认各占 50%，
+// 拖动中间分割线可调整比例（20%~80%），比例持久化到 localStorage
+const htmlPreviewCode = ref(null)
+const chatSplitRef = ref(null)
+const dividerDragging = ref(false)
+const PREVIEW_RATIO_KEY = 'htmlPreviewRatio'
+const splitRatio = ref((() => {
+  try {
+    const v = parseFloat(localStorage.getItem(PREVIEW_RATIO_KEY))
+    if (v >= 20 && v <= 80) return v
+  } catch (e) { /* ignore */ }
+  return 50
+})())
+// 预览打开时（桌面端）聊天区按分割比例定宽；关闭或移动端时恢复自适应撑满
+const chatPaneStyle = computed(() => {
+  if (htmlPreviewCode.value === null || isMobile.value) return {}
+  return { flex: '0 0 calc(' + splitRatio.value + '% - 3px)' }
+})
+function handlePreviewHtml(code) {
+  htmlPreviewCode.value = code
+}
+function closeHtmlPreview() {
+  htmlPreviewCode.value = null
+}
+// 分割线拖拽：pointer 事件全局监听，拖动期间给容器加 dragging class
+// （CSS 同步禁用 iframe 指针事件，避免指针移入 iframe 后丢失 move 事件）
+function onDividerPointerDown(e) {
+  if (isMobile.value) return
+  e.preventDefault()
+  const splitEl = chatSplitRef.value
+  if (!splitEl) return
+  dividerDragging.value = true
+  const rect = splitEl.getBoundingClientRect()
+  const onMove = (ev) => {
+    const ratio = ((ev.clientX - rect.left) / rect.width) * 100
+    splitRatio.value = Math.min(80, Math.max(20, ratio))
+  }
+  const onUp = () => {
+    document.removeEventListener('pointermove', onMove)
+    document.removeEventListener('pointerup', onUp)
+    dividerDragging.value = false
+    try { localStorage.setItem(PREVIEW_RATIO_KEY, String(Math.round(splitRatio.value))) } catch (err) { /* ignore */ }
+  }
+  document.addEventListener('pointermove', onMove)
+  document.addEventListener('pointerup', onUp)
+}
+// ===== 语音播放悬浮窗（全局单例 useSpeech）=====
+// 播放状态与消息工具栏喇叭按钮共享：浮窗展示正在播放的内容，
+// 支持暂停/继续、定位跳转、关闭停止；切换会话需确认，继续切换则停止播放
+const speech = useSpeech()
+const speechStatus = speech.status
+const speechCurrent = speech.current
+// 浮窗展示的播放内容预览（截断 60 字，完整文本挂 title 悬停查看）
+const speechTextPreview = computed(() => {
+  const text = speechCurrent.value ? speechCurrent.value.text : ''
+  return text.length > 60 ? text.substring(0, 60) + '…' : text
+})
+function toggleSpeechPause() {
+  if (speechStatus.value === 'paused') speech.resume()
+  else speech.pause()
+}
+// 定位按钮：跳转到正在播放的消息开头（block:'start' 顶部对齐，而非居中）；
+// 目标在渲染窗口外时 jumpToAbsIndex 会自动展开
+function locateSpeechMsg() {
+  if (!speechCurrent.value) return
+  jumpToAbsIndex(speechCurrent.value.absIdx, 'start')
+}
+// 切换会话前确认：有正在播放/暂停的朗读时提示，继续切换将停止播放
+async function confirmSpeechStopIfPlaying() {
+  if (speechStatus.value === 'idle') return true
+  try {
+    await ElMessageBox.confirm(t('speech.switchChatConfirm'), t('speech.switchChatTitle'), {
+      confirmButtonText: t('common.confirm'),
+      cancelButtonText: t('common.cancel'),
+      type: 'warning'
+    })
+    speech.stop()
+    return true
+  } catch { return false }
+}
 const isDeepThinking = ref(false)
 // 本轮对话是否开启联网搜索（重新生成/编辑重发时沿用上次选择）
 const isWebSearch = ref(false)
@@ -260,6 +405,7 @@ onMounted(async () => {
   setTimeout(() => scrollFollow.requestScrollToBottom(), 300)
 
   window.addEventListener('resize', handleResize)
+  window.addEventListener('keydown', handleGlobalKeydown)
 
   // 侧边栏多端自动同步：切回标签页/窗口聚焦时立即检测一次，前台期间低频轮询；
   // 页面隐藏时轮询自然跳过，版本未变化时仅一次轻量版本查询，开销可忽略
@@ -275,9 +421,35 @@ onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
   window.removeEventListener('focus', handleAutoSync)
   document.removeEventListener('visibilitychange', handleAutoSync)
+  window.removeEventListener('keydown', handleGlobalKeydown)
   if (autoSyncTimer) clearInterval(autoSyncTimer)
   scrollFollow.unbindEvents()
+  // 离开聊天页（如进入管理后台）时停止朗读，避免无 UI 状态下声音继续
+  speech.stop()
 })
+
+// 全局快捷键：Ctrl/Cmd+K 聚焦侧边栏会话搜索；Ctrl/Cmd+F 打开会话内搜索；
+// Esc 依次关闭搜索栏、HTML 预览面板
+function handleGlobalKeydown(e) {
+  const key = (e.key || '').toLowerCase()
+  if ((e.ctrlKey || e.metaKey) && key === 'k') {
+    e.preventDefault()
+    // 确保侧边栏可见后再聚焦搜索框
+    if (isMobile.value) sidebarOpen.value = true
+    else if (sidebarCollapsed.value) sidebarCollapsed.value = false
+    nextTick(() => document.querySelector('.chat-search-input')?.focus())
+    return
+  }
+  if ((e.ctrlKey || e.metaKey) && key === 'f') {
+    e.preventDefault()
+    openMsgSearch()
+    return
+  }
+  if (e.key === 'Escape') {
+    if (msgSearchOpen.value) { closeMsgSearch(); return }
+    if (htmlPreviewCode.value !== null) closeHtmlPreview()
+  }
+}
 
 // 侧边栏自动同步轮询间隔（仅前台生效）
 const AUTO_SYNC_INTERVAL_MS = 30000
@@ -407,7 +579,7 @@ async function doShare(chatId) {
   }
 }
 
-function handleNewChat() {
+async function handleNewChat() {
   if (streamChat.isStreaming.value) {
     ElMessage.warning(t('chat.waitAnswer'))
     return
@@ -415,6 +587,8 @@ function handleNewChat() {
   // 如果当前会话为空，不再新建
   const msgs = chatStore.currentMessages
   if (msgs.length > 0 && msgs.some(m => m.role === 'user')) {
+    // 有正在播放的朗读时先确认，继续切换将停止播放
+    if (!(await confirmSpeechStopIfPlaying())) return
     chatStore.newChat()
     modelsStore.applyDefaultModel()
     isDeepThinking.value = false
@@ -433,6 +607,8 @@ async function handleSwitchChat(id) {
     if (isMobile.value) sidebarOpen.value = false
     return
   }
+  // 有正在播放的朗读时先确认，继续切换将停止播放
+  if (!(await confirmSpeechStopIfPlaying())) return
   // 中断上一次尚未完成的会话正文加载，防止陈旧请求堆积并在超时后误报
   if (switchAbort) switchAbort.abort()
   const controller = new AbortController()
@@ -462,8 +638,50 @@ async function handleSwitchChat(id) {
   }
 }
 
-// 点击消息锚点直尺刻度：跳转定位到主聊天区对应用户消息并高亮
+// 按绝对下标跳转定位到主聊天区对应消息并高亮
+// block：'center' 居中（锚点/搜索跳转）、'start' 顶部对齐（语音浮窗定位到消息开头）
 // 若目标消息在渲染窗口外（被裁剪的更早消息），先展开渲染窗口确保 DOM 存在，再滚动定位
+async function jumpToAbsIndex(targetIdx, block = 'center') {
+  const container = chatContainerRef.value
+  // 若目标落在被裁剪的更早消息区间，逐步展开渲染窗口直至覆盖目标下标
+  // （入场动画已改为仅最后一条消息生效，展开批量渲染不再产生整页抖动）
+  if (targetIdx < hiddenCount.value) {
+    while (targetIdx < hiddenCount.value && hiddenCount.value > 0) {
+      visibleCount.value += RENDER_BATCH
+    }
+    await nextTick()
+  }
+  await nextTick()
+  // 等待 mermaid/图片等异步内容渲染稳定后定位
+  await nextTick()
+  const domId = 'msg-anchor-' + targetIdx
+  const el = document.getElementById(domId)
+  if (!el) return
+  // 暂停滚动跟随，避免跳转后被自动贴底逻辑覆盖
+  scrollFollow.autoFollowEnabled.value = false
+  el.scrollIntoView({ behavior: 'smooth', block })
+  // 触发高亮动画
+  highlightMsgId.value = domId
+  // 动画结束后清除高亮标记（保留 class 直至动画完成）
+  setTimeout(() => { highlightMsgId.value = '' }, 2000)
+  // 平滑滚动期间的 scroll 事件会把 autoFollow 重新置真（近底判定），此后异步内容
+  // （mermaid/图片）高度变化会触发 MutationObserver 误贴底——表现为定位后约一秒页面抖动。
+  // 滚动稳定后（scrollend，含兜底超时）再次压回 autoFollow 并重置内容高度基线，阻断误贴底
+  let settled = false
+  let fallbackTimer = null
+  const settle = () => {
+    if (settled) return
+    settled = true
+    scrollFollow.autoFollowEnabled.value = false
+    scrollFollow.reset()
+    if (container) container.removeEventListener('scrollend', settle)
+    if (fallbackTimer) clearTimeout(fallbackTimer)
+  }
+  if (container) container.addEventListener('scrollend', settle, { once: true })
+  fallbackTimer = setTimeout(settle, 1200)
+}
+
+// 点击消息锚点直尺刻度：跳转定位到主聊天区对应用户消息并高亮
 async function handleJumpToMessage(domId) {
   if (streamChat.isStreaming.value) {
     ElMessage.warning(t('chat.waitAnswer'))
@@ -472,26 +690,73 @@ async function handleJumpToMessage(domId) {
   // 解析目标消息在完整列表中的绝对下标
   const match = /^msg-anchor-(\d+)$/.exec(domId)
   if (!match) return
-  const targetIdx = parseInt(match[1], 10)
-  // 若目标落在被裁剪的更早消息区间，逐步展开渲染窗口直至覆盖目标下标
-  if (targetIdx < hiddenCount.value) {
-    while (targetIdx < hiddenCount.value && hiddenCount.value > 0) {
-      visibleCount.value += RENDER_BATCH
-    }
-  }
-  await nextTick()
-  // 等待 mermaid/图片等异步内容渲染稳定后定位
-  await nextTick()
-  const el = document.getElementById(domId)
-  if (!el) return
-  // 暂停滚动跟随，避免跳转后被自动贴底逻辑覆盖
-  scrollFollow.autoFollowEnabled.value = false
-  el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  // 触发高亮动画
-  highlightMsgId.value = domId
-  // 动画结束后清除高亮标记（保留 class 直至动画完成）
-  setTimeout(() => { highlightMsgId.value = '' }, 2000)
+  await jumpToAbsIndex(parseInt(match[1], 10))
 }
+
+// ===== 会话内消息搜索 =====
+// 顶部搜索按钮或 Ctrl+F 打开；匹配全部用户/AI 消息正文，Enter/按钮上下跳转定位
+const msgSearchOpen = ref(false)
+const msgSearchKeyword = ref('')
+const msgSearchCursor = ref(-1)
+const msgSearchInputRef = ref(null)
+
+// 当前会话中匹配关键字的消息绝对下标列表（按时间顺序）
+const msgSearchMatches = computed(() => {
+  const kw = msgSearchKeyword.value.trim().toLowerCase()
+  if (!kw) return []
+  const list = []
+  chatStore.currentMessages.forEach((m, idx) => {
+    if (m.role !== 'user' && m.role !== 'assistant') return
+    if (String(m.content || '').toLowerCase().includes(kw)) list.push(idx)
+  })
+  return list
+})
+
+const msgSearchInfo = computed(() => {
+  const total = msgSearchMatches.value.length
+  if (!msgSearchKeyword.value.trim()) return ''
+  if (total === 0) return '0/0'
+  return (msgSearchCursor.value + 1) + '/' + total
+})
+
+function openMsgSearch() {
+  msgSearchOpen.value = true
+  nextTick(() => msgSearchInputRef.value?.focus())
+}
+
+function closeMsgSearch() {
+  msgSearchOpen.value = false
+  msgSearchKeyword.value = ''
+  msgSearchCursor.value = -1
+}
+
+// 关键字变化后定位到第一个匹配（从当前视口起向后找更符合直觉，简单起见定位首个）
+watch(msgSearchKeyword, () => {
+  if (!msgSearchMatches.value.length) { msgSearchCursor.value = -1; return }
+  msgSearchCursor.value = 0
+  jumpToAbsIndex(msgSearchMatches.value[0])
+})
+
+// 跳转到指定序号的匹配项（循环）
+function jumpToMatch(cursor) {
+  const matches = msgSearchMatches.value
+  if (!matches.length) return
+  msgSearchCursor.value = ((cursor % matches.length) + matches.length) % matches.length
+  jumpToAbsIndex(matches[msgSearchCursor.value])
+}
+
+function nextMsgMatch() {
+  jumpToMatch(msgSearchCursor.value + 1)
+}
+
+function prevMsgMatch() {
+  jumpToMatch(msgSearchCursor.value - 1)
+}
+
+// 切换会话时关闭搜索栏（匹配结果基于旧会话已无意义）
+watch(() => chatStore.currentChatId, () => {
+  if (msgSearchOpen.value) closeMsgSearch()
+})
 
 function handleDeleteChat(id) {
   ElMessageBox.confirm(t('chat.deleteConfirm'), t('chat.deleteTitle'), {

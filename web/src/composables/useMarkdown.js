@@ -1425,6 +1425,20 @@ async function downloadTableXlsx(rows) {
   }
 }
 
+// 代码语言 -> 下载文件扩展名映射（未识别语言回退 txt）
+const CODE_EXT_MAP = {
+  javascript: 'js', js: 'js', jsx: 'jsx', typescript: 'ts', ts: 'ts', tsx: 'tsx',
+  python: 'py', py: 'py', java: 'java', c: 'c', cpp: 'cpp', 'c++': 'cpp', csharp: 'cs', 'c#': 'cs',
+  go: 'go', rust: 'rs', rs: 'rs', php: 'php', ruby: 'rb', rb: 'rb', swift: 'swift', kotlin: 'kt',
+  html: 'html', xml: 'xml', svg: 'svg', css: 'css', scss: 'scss', less: 'less',
+  json: 'json', yaml: 'yml', yml: 'yml', toml: 'toml', ini: 'ini',
+  sql: 'sql', shell: 'sh', bash: 'sh', sh: 'sh', powershell: 'ps1',
+  markdown: 'md', md: 'md', vue: 'vue', dockerfile: 'Dockerfile', makefile: 'Makefile'
+}
+function codeFileExt(lang) {
+  return CODE_EXT_MAP[(lang || '').toLowerCase()] || 'txt'
+}
+
 // hljs 懒加载完成后补齐“待高亮”代码块（容器内未标记 pending 的说明已在同步阶段处理完）
 function flushPendingHljs(container) {
   if (!hljsModule || !container) return
@@ -1481,8 +1495,27 @@ export function processSpecialContent(container) {
     if (pre.querySelector('.code-header')) return
     const header = document.createElement('div')
     header.className = 'code-header'
-    header.innerHTML = `<span>${lang || 'text'}</span><button class="code-copy-btn">复制代码</button>`
+    // HTML 代码块提供“预览”按钮：点击派发 html-preview 事件（冒泡），
+    // 由 ChatMessages 转发到 ChatView 打开右侧预览面板
+    const isHtml = (lang || '').toLowerCase() === 'html'
+    header.innerHTML = `<span>${lang || 'text'}</span><div class="code-header-actions">` +
+      (isHtml
+        ? `<button class="code-preview-btn" title="预览 HTML"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="7 4 20 12 7 20 7 4"/></svg></button>`
+        : '') +
+      `<button class="code-download-btn" title="下载代码"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>` +
+      `<button class="code-copy-btn">复制代码</button></div>`
     pre.insertBefore(header, pre.firstChild)
+    // 下载代码为文件：按语言映射扩展名，未识别语言用 .txt
+    header.querySelector('.code-download-btn').addEventListener('click', function (e) {
+      e.stopPropagation()
+      downloadFile(block.textContent, 'code-' + Date.now() + '.' + codeFileExt(lang), 'text/plain;charset=utf-8')
+    })
+    if (isHtml) {
+      header.querySelector('.code-preview-btn').addEventListener('click', function (e) {
+        e.stopPropagation()
+        pre.dispatchEvent(new CustomEvent('html-preview', { detail: { code: block.textContent }, bubbles: true }))
+      })
+    }
     // 复制按钮事件（clipboard 失败回退 execCommand）
     header.querySelector('.code-copy-btn').addEventListener('click', function () {
       const self = this

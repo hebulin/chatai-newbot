@@ -73,6 +73,10 @@
           <div class="upload-image-btn" :title="t('input.clearContext')" @click="emit('clear-context')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m13 11 9-9"/><path d="M14.6 12.6c.8.8.9 2.1.2 3L10 22l-8-8 6.4-4.8c.9-.7 2.2-.6 3 .2Z"/><path d="m6.8 10.4 6.8 6.8"/><path d="m5 17 1.4-1.4"/></svg>
           </div>
+          <!-- 语音输入：浏览器支持 SpeechRecognition 时显示，聆听中再次点击停止 -->
+          <div v-if="voiceSupported" class="upload-image-btn" :class="{ 'voice-listening': voiceListening }" :title="voiceListening ? t('input.voiceStop') : t('input.voiceInput')" @click="toggleVoiceInput">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+          </div>
           <input type="file" ref="attachInputRef" :accept="ATTACH_ACCEPT" multiple style="display:none" @change="handleAttachUpload">
           <div class="model-select-area">
             <img v-if="currentIconIsImg" :src="currentIcon" class="model-area-icon" />
@@ -235,6 +239,53 @@ function selectRolePreset(presetId) {
     ElMessage.success(t('input.roleReset'))
   }
 }
+
+// ===== 语音输入（Web Speech API）=====
+// 点击麦克风开始聆听，识别结果实时回填到输入框（识别前的已有文本保留，识别内容追加其后）；
+// 再次点击或识别结束自动停止。不支持的浏览器（如 Firefox）隐藏按钮
+const SpeechRecognitionCtor = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition)
+const voiceSupported = !!SpeechRecognitionCtor
+const voiceListening = ref(false)
+let recognizer = null
+
+function toggleVoiceInput() {
+  if (!voiceSupported) return
+  if (voiceListening.value) {
+    try { recognizer && recognizer.stop() } catch (e) { /* ignore */ }
+    return
+  }
+  recognizer = new SpeechRecognitionCtor()
+  recognizer.lang = 'zh-CN'
+  recognizer.interimResults = true
+  recognizer.continuous = true
+  // 记录开始识别时的已有文本，识别结果在此基础上追加
+  const baseText = inputText.value
+  recognizer.onresult = (e) => {
+    let finalText = ''
+    let interimText = ''
+    for (let i = 0; i < e.results.length; i++) {
+      if (e.results[i].isFinal) finalText += e.results[i][0].transcript
+      else interimText += e.results[i][0].transcript
+    }
+    inputText.value = baseText + finalText + interimText
+    nextTick(autoResize)
+  }
+  recognizer.onend = () => { voiceListening.value = false }
+  recognizer.onerror = () => { voiceListening.value = false }
+  try {
+    recognizer.start()
+    voiceListening.value = true
+  } catch (e) {
+    voiceListening.value = false
+  }
+}
+
+onBeforeUnmount(() => {
+  // 组件卸载时停止识别，释放麦克风
+  if (recognizer && voiceListening.value) {
+    try { recognizer.stop() } catch (e) { /* ignore */ }
+  }
+})
 
 // ===== 模型级联选择器 =====
 const cascaderValue = ref([])

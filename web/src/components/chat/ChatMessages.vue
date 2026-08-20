@@ -9,7 +9,7 @@
         v-else
         class="msg-wrapper"
         :class="[msg.role, { 'msg-highlight': highlightId === msgDomId(idx) }]"
-        :id="msg.role === 'user' ? msgDomId(idx) : undefined"
+        :id="msgDomId(idx)"
       >
         <div v-if="msg.time" class="msg-time-top">{{ msg.time }}</div>
         <div class="msg-row">
@@ -62,6 +62,12 @@
           <button class="footer-copy-btn" @click="$emit('copy', msg.content)" :title="t('messages.copy')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
           </button>
+          <!-- AI 消息：TTS 朗读（播放中显示停止、暂停中显示继续，状态由全局 useSpeech 驱动） -->
+          <button v-if="msg.role === 'assistant' && !msg.isError && speechSupported" class="footer-copy-btn" :class="{ speaking: speechIsCurrent(idx) }" @click="speechToggle(idx, msg.content)" :title="speechBtnTitle(idx)">
+            <svg v-if="speechIsPlaying(idx)" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+            <svg v-else-if="speechIsPaused(idx)" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="7 4 20 12 7 20 7 4"/></svg>
+            <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+          </button>
           <!-- 用户消息：编辑重发 -->
           <button v-if="msg.role === 'user' && !isStreaming" class="footer-copy-btn" @click="$emit('edit-resend', idx)" :title="t('messages.editResend')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -104,6 +110,7 @@
 import { computed, onUpdated, onMounted, onUnmounted, ref, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { renderMarkdown, escapeHtml, renderMermaidBlocks, processSpecialContent, handleMermaidToolbarClick } from '@/composables/useMarkdown'
+import { useSpeech } from '@/composables/useSpeech'
 import { useTheme } from '@/composables/useTheme'
 
 const props = defineProps({
@@ -117,7 +124,7 @@ const props = defineProps({
   highlightId: { type: String, default: '' }
 })
 
-const emit = defineEmits(['copy', 'lightbox', 'regenerate', 'edit-resend'])
+const emit = defineEmits(['copy', 'lightbox', 'regenerate', 'edit-resend', 'preview-html'])
 
 const { t } = useI18n()
 
@@ -131,7 +138,7 @@ function renderMd(text) {
   return renderMarkdown(text)
 }
 
-// 生成用户消息的 DOM 锚点 ID：用于侧边栏点击跳转时 getElementById 定位
+// 生成消息的 DOM 锚点 ID：用于锚点跳转与会话内搜索定位时 getElementById
 // 形如 msg-anchor-3（3 为完整消息列表中的绝对下标，跨渲染窗口保持稳定）
 function msgDomId(displayIdx) {
   return 'msg-anchor-' + (displayIdx + props.startIndex)
@@ -149,6 +156,34 @@ function fmtToken(n) {
 function toggleThinking(e) {
   const block = e.currentTarget.parentElement
   block.classList.toggle('collapsed')
+}
+
+// ===== TTS 朗读（全局单例 useSpeech）=====
+// 喇叭按钮三种状态：非当前消息=喇叭（点击播放）；当前消息播放中=方块（点击停止）；
+// 当前消息已暂停=三角（点击继续）。悬浮播放窗在 ChatView 层渲染，与本按钮共享同一状态
+const speech = useSpeech()
+const speechSupported = speech.speechSupported
+
+// 展示下标换算为完整消息列表绝对下标（与 DOM 锚点 id 同一约定，供全局状态匹配）
+function absIdxOf(displayIdx) {
+  return displayIdx + props.startIndex
+}
+function speechIsCurrent(displayIdx) {
+  return speech.isCurrent(absIdxOf(displayIdx))
+}
+function speechIsPlaying(displayIdx) {
+  return speechIsCurrent(displayIdx) && speech.status.value === 'playing'
+}
+function speechIsPaused(displayIdx) {
+  return speechIsCurrent(displayIdx) && speech.status.value === 'paused'
+}
+function speechToggle(displayIdx, content) {
+  speech.toggle(absIdxOf(displayIdx), content)
+}
+function speechBtnTitle(displayIdx) {
+  if (speechIsPlaying(displayIdx)) return t('messages.stopReading')
+  if (speechIsPaused(displayIdx)) return t('messages.resumeReading')
+  return t('messages.readAloud')
 }
 
 // ===== 思考内容区域自动滚动跟随（逻辑与聊天窗口一致：可随时手动打断，滚回底部时恢复跟随） =====
@@ -198,13 +233,19 @@ function onContainerClick(e) {
 function onLightbox(e) {
   if (e.detail && e.detail.src) emit('lightbox', e.detail.src)
 }
+// HTML 代码块预览事件转发（代码头“预览”按钮派发的 CustomEvent，交由 ChatView 打开右侧预览面板）
+function onHtmlPreview(e) {
+  if (e.detail && e.detail.code != null) emit('preview-html', e.detail.code)
+}
 onMounted(() => {
   containerRef.value?.addEventListener('click', onContainerClick)
   containerRef.value?.addEventListener('lightbox', onLightbox)
+  containerRef.value?.addEventListener('html-preview', onHtmlPreview)
 })
 onUnmounted(() => {
   containerRef.value?.removeEventListener('click', onContainerClick)
   containerRef.value?.removeEventListener('lightbox', onLightbox)
+  containerRef.value?.removeEventListener('html-preview', onHtmlPreview)
   if (renderTimer) clearTimeout(renderTimer)
 })
 </script>

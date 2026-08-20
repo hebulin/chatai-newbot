@@ -4,7 +4,7 @@
        鼠标移入任一锚点刻度热区即显示浮窗列出所有消息，浮窗内可继续选择并点击跳转，
        浮窗保持显示不消失；鼠标离开刻度与浮窗区域后才延迟关闭 -->
   <div
-    v-if="anchors.length > 1"
+    v-if="anchors.length >= 1"
     class="message-ruler"
     @wheel.passive="onWheel"
   >
@@ -253,14 +253,15 @@ watch(() => props.scrollContainerRef, async () => {
   bind()
 })
 
-watch(() => props.messages, async () => {
+// 锚点数据变化时重算刻度：监听 anchors computed 而非 props.messages 引用——
+// 新会话内 addMessage 是对同一数组 push（引用不变），watch 引用 + deep:false 不会触发，
+// 导致新会话无论多少轮对话刻度都不出现（ticks 为空），必须切换会话（数组引用变化）才显示；
+// anchors 是 computed，消息内容/数量/hiddenCount 变化都会重新求值返回新数组，watch 必然触发
+watch(anchors, async () => {
   await nextTick()
-  recalc()
-  onScroll()
-}, { deep: false })
-
-watch(() => props.hiddenCount, async () => {
-  await nextTick()
+  // 直尺容器由 v-if="anchors.length > 1" 控制：bind() 时若尚未渲染（新会话首轮），
+  // trackRef 为 null 导致 ResizeObserver 未挂；此处补挂，保证轨道尺寸变化可重算
+  if (resizeObserver && trackRef.value) resizeObserver.observe(trackRef.value)
   recalc()
   onScroll()
 })

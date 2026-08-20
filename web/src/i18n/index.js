@@ -101,7 +101,20 @@ const zh = {
     copy: '复制',
     editResend: '编辑重发',
     regenerate: '重新生成',
-    tokenCalc: 'Token计算中'
+    tokenCalc: 'Token计算中',
+    readAloud: '朗读',
+    stopReading: '停止朗读',
+    resumeReading: '继续朗读'
+  },
+  speech: {
+    playing: '正在播放',
+    paused: '已暂停',
+    pause: '暂停播放',
+    resume: '继续播放',
+    locate: '定位到消息',
+    close: '关闭并停止播放',
+    switchChatTitle: '切换会话',
+    switchChatConfirm: '当前有正在播放的朗读内容，继续切换会话将停止播放，是否继续？'
   },
   input: {
     placeholder: '写下你正在想的事 · Press Enter to send',
@@ -118,6 +131,8 @@ const zh = {
     myPrompts: '我的提示词',
     uploadAttach: '上传附件（图片及 txt/doc/docx/xls/xlsx/csv/md/log 等文本文档）',
     clearContext: '清除上下文（后续对话不再携带以上历史）',
+    voiceInput: '语音输入',
+    voiceStop: '正在聆听…点击停止',
     send: '发送',
     stop: '停止',
     footShortcut: '⌘/Ctrl+Enter · 新行',
@@ -195,7 +210,13 @@ const zh = {
     notEmpty: '内容不能为空',
     copied: '已复制',
     copyFailed: '复制失败',
-    switchFailed: '会话内容加载失败，请重试'
+    switchFailed: '会话内容加载失败，请重试',
+    htmlPreviewTitle: 'HTML 预览',
+    closePreview: '关闭预览',
+    searchInChat: '会话内搜索（Ctrl+F）',
+    searchInChatPlaceholder: '搜索当前会话内容…',
+    searchPrev: '上一个（Shift+Enter）',
+    searchNext: '下一个（Enter）'
   },
   share: {
     brand: 'Atelier · 会话分享',
@@ -466,7 +487,20 @@ const en = {
     copy: 'Copy',
     editResend: 'Edit & resend',
     regenerate: 'Regenerate',
-    tokenCalc: 'Counting tokens'
+    tokenCalc: 'Counting tokens',
+    readAloud: 'Read aloud',
+    stopReading: 'Stop reading',
+    resumeReading: 'Resume reading'
+  },
+  speech: {
+    playing: 'Playing',
+    paused: 'Paused',
+    pause: 'Pause',
+    resume: 'Resume',
+    locate: 'Jump to message',
+    close: 'Close and stop',
+    switchChatTitle: 'Switch Chat',
+    switchChatConfirm: 'A message is currently being read aloud. Switching chats will stop playback. Continue?'
   },
   input: {
     placeholder: 'Write what you are thinking · Press Enter to send',
@@ -483,6 +517,8 @@ const en = {
     myPrompts: 'My prompts',
     uploadAttach: 'Upload attachment (images and txt/doc/docx/xls/xlsx/csv/md/log and other text documents)',
     clearContext: 'Clear context (history above will no longer be sent)',
+    voiceInput: 'Voice input',
+    voiceStop: 'Listening… click to stop',
     send: 'Send',
     stop: 'Stop',
     footShortcut: '⌘/Ctrl+Enter · New line',
@@ -560,7 +596,13 @@ const en = {
     notEmpty: 'Content cannot be empty',
     copied: 'Copied',
     copyFailed: 'Copy failed',
-    switchFailed: 'Failed to load chat content, please retry'
+    switchFailed: 'Failed to load chat content, please retry',
+    htmlPreviewTitle: 'HTML Preview',
+    closePreview: 'Close Preview',
+    searchInChat: 'Search in chat (Ctrl+F)',
+    searchInChatPlaceholder: 'Search current chat…',
+    searchPrev: 'Previous (Shift+Enter)',
+    searchNext: 'Next (Enter)'
   },
   share: {
     brand: 'Atelier · Shared Chat',

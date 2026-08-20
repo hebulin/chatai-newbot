@@ -885,7 +885,7 @@ public class UnifiedChatService {
     /**
      * 模型连通性测试：向厂商 API 发一条最小非流式请求，验证 API Key/URL/模型ID 是否可用。
      * 连通成功后追加一次短生成请求测算生成速度（token/s），并将延迟/速度/测试时间持久化到模型配置。
-     * 仅由管理员在后台手动触发，不做任何自动测试。
+     * 触发入口：管理员后台手动测试（AdminModelController）与模型健康检查定时任务（ModelHealthCheckService）。
      * @param modelConfigId 模型配置ID
      * @return success/message/latencyMs/speed，失败时 message 携带厂商返回的错误信息
      */
