@@ -306,7 +306,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onActivated } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Edit, Delete, Star, StarFilled, Connection, Loading, ArrowUp, ArrowDown } from '@element-plus/icons-vue'
@@ -692,8 +692,9 @@ async function submitAddModel() {
   }
 }
 
-async function loadData() {
-  loading.value = true
+// 加载模型与厂商数据；silent 为 true 时不显示 loading 遮罩（keep-alive 激活刷新用，避免闪烁）
+async function loadData(silent = false) {
+  if (!silent) loading.value = true
   try {
     const [mRes, pRes] = await Promise.all([getModels(), getProviders()])
     if (mRes?.success) {
@@ -706,9 +707,9 @@ async function loadData() {
   }
 }
 
-onMounted(async () => {
-  await loadData()
-  // 接收快速接入页厂商卡片下钻的过滤参数，按厂商过滤模型列表
+// 接收快速接入页厂商卡片下钻的过滤参数，按厂商过滤模型列表
+// （keep-alive 缓存下组件不再重复挂载，故需在每次激活时检查而非仅 onMounted）
+function applyProviderDrilldown() {
   const pid = route.query.providerId
   if (pid) {
     filters.value.providerId = String(pid)
@@ -716,5 +717,19 @@ onMounted(async () => {
     // 清除 query，避免刷新或返回时重复应用过滤
     router.replace({ path: '/admin/models' })
   }
+}
+
+onMounted(async () => {
+  await loadData()
+  applyProviderDrilldown()
+})
+
+// keep-alive 缓存下再次进入本页时静默刷新数据并重新检查下钻参数；
+// 首次挂载由 onMounted 负责加载，跳过第一次激活避免重复请求
+let firstActivation = true
+onActivated(() => {
+  if (firstActivation) { firstActivation = false; return }
+  loadData(true)
+  applyProviderDrilldown()
 })
 </script>

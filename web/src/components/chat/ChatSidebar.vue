@@ -102,7 +102,7 @@
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="3" y1="20" x2="21" y2="20"/></svg>
               <span>{{ t('sidebar.stats') }}</span>
             </div>
-            <div v-if="authStore.role === 'admin'" class="user-menu-item" @click="goAdmin">
+            <div v-if="authStore.role === 'admin'" class="user-menu-item" @click="goAdmin" @mouseenter="prefetchAdminEntry">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd"><path d="M12 8.4A3.6 3.6 0 1 0 12 15.6 3.6 3.6 0 1 0 12 8.4Z M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58Z"/></svg>
               <span>{{ t('sidebar.admin') }}</span>
             </div>
@@ -224,6 +224,19 @@ const userAvatarSrc = computed(() => {
 
 function toggleUserMenu() {
   userMenuOpen.value = !userMenuOpen.value
+  // 菜单展开即预热后台入口 chunk，缩短点击"管理后台"后的加载等待
+  if (userMenuOpen.value) prefetchAdminEntry()
+}
+
+// 预加载后台管理入口 chunk（布局 + 默认首屏"快速接入"页）：
+// 路由懒加载的 chunk 若等点击后才下载/解析会阻塞主线程造成卡顿，
+// 在打开菜单/悬停入口的间隙提前拉取，点击时即可秒开（import 结果有缓存，flag 防重复触发）
+let adminPrefetched = false
+function prefetchAdminEntry() {
+  if (adminPrefetched || authStore.role !== 'admin') return
+  adminPrefetched = true
+  import('@/layout/AdminLayout.vue')
+  import('@/views/admin/QuickStart.vue')
 }
 
 function goAdmin() {

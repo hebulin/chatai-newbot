@@ -121,7 +121,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onActivated } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getStorageSettings, getQuotaSettings, setQuotaSettings, getSecuritySettings, setSecuritySettings, getBillingSettings, setBillingSettings } from '@/api/settings'
 
@@ -141,8 +141,9 @@ const billingLoading = ref(false)
 const billingSaving = ref(false)
 const billing = ref({ displayMode: 'token', defaultCurrency: 'CNY', currencies: [{ code: 'CNY', name: '人民币', symbol: '¥', rate: 1 }] })
 
-async function loadSettings() {
-  loading.value = true
+// 加载存储设置；silent 为 true 时不显示 loading 遮罩（keep-alive 激活刷新用，避免闪烁）
+async function loadSettings(silent = false) {
+  if (!silent) loading.value = true
   try {
     const res = await getStorageSettings()
     if (res?.success) {
@@ -160,9 +161,20 @@ onMounted(() => {
   loadBilling()
 })
 
-// 加载每日配额设置
-async function loadQuota() {
-  quotaLoading.value = true
+// keep-alive 缓存下再次进入本页时静默刷新各分区设置；
+// 首次挂载由 onMounted 负责加载，跳过第一次激活避免重复请求
+let firstActivation = true
+onActivated(() => {
+  if (firstActivation) { firstActivation = false; return }
+  loadSettings(true)
+  loadQuota(true)
+  loadSecurity(true)
+  loadBilling(true)
+})
+
+// 加载每日配额设置；silent 为 true 时不显示 loading 遮罩（keep-alive 激活刷新用）
+async function loadQuota(silent = false) {
+  if (!silent) quotaLoading.value = true
   try {
     const res = await getQuotaSettings()
     if (res?.success) {
@@ -198,9 +210,9 @@ async function handleSaveQuota() {
   }
 }
 
-// 加载安全设置
-async function loadSecurity() {
-  securityLoading.value = true
+// 加载安全设置；silent 为 true 时不显示 loading 遮罩（keep-alive 激活刷新用）
+async function loadSecurity(silent = false) {
+  if (!silent) securityLoading.value = true
   try {
     const res = await getSecuritySettings()
     if (res?.success) {
@@ -226,9 +238,9 @@ async function handleSaveSecurity() {
   }
 }
 
-// 加载计费与币种配置
-async function loadBilling() {
-  billingLoading.value = true
+// 加载计费与币种配置；silent 为 true 时不显示 loading 遮罩（keep-alive 激活刷新用）
+async function loadBilling(silent = false) {
+  if (!silent) billingLoading.value = true
   try {
     const res = await getBillingSettings()
     if (res?.success && res.data) billing.value = res.data

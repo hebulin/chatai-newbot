@@ -38,7 +38,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onActivated } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getWebSearchSettings, setWebSearchSettings, testWebSearch } from '@/api/settings'
 
@@ -54,9 +54,17 @@ onMounted(() => {
   loadWebSearch()
 })
 
-// 加载联网搜索设置
-async function loadWebSearch() {
-  wsLoading.value = true
+// keep-alive 缓存下再次进入本页时静默刷新数据；
+// 首次挂载由 onMounted 负责加载，跳过第一次激活避免重复请求
+let firstActivation = true
+onActivated(() => {
+  if (firstActivation) { firstActivation = false; return }
+  loadWebSearch(true)
+})
+
+// 加载联网搜索设置；silent 为 true 时不显示 loading 遮罩（keep-alive 激活刷新用，避免闪烁）
+async function loadWebSearch(silent = false) {
+  if (!silent) wsLoading.value = true
   try {
     const res = await getWebSearchSettings()
     if (res?.success) {

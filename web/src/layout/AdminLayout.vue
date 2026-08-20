@@ -37,9 +37,16 @@
       </el-tabs>
     </div>
 
-    <!-- 主内容区 -->
+    <!-- 主内容区：keep-alive 缓存已访问的 tab 页面（切回秒开、保留筛选/分页状态），
+         transition 以淡出淡入过渡缓解内容突变的生硬感 -->
     <main class="admin-main">
-      <router-view />
+      <router-view v-slot="{ Component }">
+        <transition name="admin-page" mode="out-in">
+          <keep-alive>
+            <component :is="Component" :key="route.path" />
+          </keep-alive>
+        </transition>
+      </router-view>
     </main>
 
     <!-- 底部 -->
@@ -82,10 +89,39 @@ function goChat() {
   router.push('/')
 }
 
+// 空闲时依次预加载全部后台子页面的异步 chunk：
+// 避免切换 tab 时现场下载/解析 chunk 阻塞主线程，导致"tab 已切换但内容不变、随后突然跳变"的卡顿
+function prefetchAdminViews() {
+  const loaders = [
+    () => import('@/views/admin/QuickStart.vue'),
+    () => import('@/views/admin/Models.vue'),
+    () => import('@/views/admin/Providers.vue'),
+    () => import('@/views/admin/Users.vue'),
+    () => import('@/views/admin/Shares.vue'),
+    () => import('@/views/admin/Settings.vue'),
+    () => import('@/views/admin/WebSearch.vue'),
+    () => import('@/views/admin/Announcements.vue'),
+    () => import('@/views/admin/AuditLogs.vue')
+  ]
+  // 优先用浏览器空闲回调逐个加载（不抢占首屏渲染）；不支持时退化为错峰 setTimeout
+  const schedule = window.requestIdleCallback
+    ? (cb) => window.requestIdleCallback(cb, { timeout: 2000 })
+    : (cb) => setTimeout(cb, 300)
+  let idx = 0
+  const loadNext = () => {
+    if (idx >= loaders.length) return
+    loaders[idx++]()
+    schedule(loadNext)
+  }
+  schedule(loadNext)
+}
+
 onMounted(() => {
   initTheme()
   // 鉴权检查
   authStore.checkAuth()
+  // 进入后台后利用空闲时段预热其余 tab 页面 chunk
+  prefetchAdminViews()
 })
 </script>
 
@@ -115,7 +151,8 @@ onMounted(() => {
   background: var(--bg-2);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-  backdrop-filter: blur(12px);
+  /* 注：不使用 backdrop-filter 模糊——背景色 var(--bg-2) 本就不透明，模糊无视觉效果，
+     且粘性定位 + backdrop-filter 在滚动时需持续重绘下方内容，是滚动掉帧的常见元凶 */
 }
 .nav-brand {
   display: flex;
@@ -263,5 +300,22 @@ onMounted(() => {
   .admin-footer {
     padding: 12px 16px;
   }
+}
+</style>
+
+<!-- 过渡类作用于子页面根元素（跨组件），需非 scoped 全局样式 -->
+<style>
+/* 后台 tab 页面切换过渡：旧页快速淡出，新页轻微上浮淡入，
+   缓解路由内容"突然一变"的生硬感；时长控制在 180ms 内不拖慢操作节奏 */
+.admin-page-enter-active,
+.admin-page-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.admin-page-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.admin-page-leave-to {
+  opacity: 0;
 }
 </style>

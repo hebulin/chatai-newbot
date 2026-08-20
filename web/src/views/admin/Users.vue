@@ -186,7 +186,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onActivated } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Edit, Delete, Key, Lock, Unlock } from '@element-plus/icons-vue'
 import { getUsers, addUser, updateUser, deleteUser, batchDeleteUsers, updateUserPermissions } from '@/api/users'
@@ -421,8 +421,9 @@ async function savePermissions() {
   }
 }
 
-async function loadUsers() {
-  loading.value = true
+// 加载用户列表（服务端分页）；silent 为 true 时不显示 loading 遮罩（keep-alive 激活刷新用，避免闪烁）
+async function loadUsers(silent = false) {
+  if (!silent) loading.value = true
   try {
     const params = { page: userPage.value, size: userPageSize.value }
     if (filterUsername.value) params.username = filterUsername.value
@@ -451,6 +452,15 @@ async function loadModels() {
 
 onMounted(() => {
   loadUsers()
+  loadModels()
+})
+
+// keep-alive 缓存下再次进入本页时静默刷新数据；
+// 首次挂载由 onMounted 负责加载，跳过第一次激活避免重复请求
+let firstActivation = true
+onActivated(() => {
+  if (firstActivation) { firstActivation = false; return }
+  loadUsers(true)
   loadModels()
 })
 </script>

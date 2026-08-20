@@ -143,7 +143,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onActivated } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { listAnnouncements, publishAnnouncement, republishAnnouncement, offlineAnnouncement, deleteAnnouncement } from '@/api/settings'
 import { autoColWidth } from '@/composables/useTableAutoWidth'
@@ -182,8 +182,9 @@ function periodText(row) {
   return `${row.startAt || '立即'} ~ ${row.endAt || '长期'}`
 }
 
-async function loadAnnouncements() {
-  loading.value = true
+// 加载公告列表；silent 为 true 时不显示 loading 遮罩（keep-alive 激活刷新用，避免闪烁）
+async function loadAnnouncements(silent = false) {
+  if (!silent) loading.value = true
   try {
     const res = await listAnnouncements()
     if (res?.success) announcements.value = res.data || []
@@ -319,4 +320,12 @@ async function handleDelete(row) {
 }
 
 onMounted(loadAnnouncements)
+
+// keep-alive 缓存下再次进入本页时静默刷新数据；
+// 首次挂载由 onMounted 负责加载，跳过第一次激活避免重复请求
+let firstActivation = true
+onActivated(() => {
+  if (firstActivation) { firstActivation = false; return }
+  loadAnnouncements(true)
+})
 </script>

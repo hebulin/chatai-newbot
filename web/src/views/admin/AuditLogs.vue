@@ -49,7 +49,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onActivated } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getAuditLogs, getAuditActions, resetAuditLogs } from '@/api/audit'
 import AdminPager from '@/components/admin/AdminPager.vue'
@@ -107,8 +107,9 @@ function isDangerAction(a) {
   return a && (a.includes('delete') || a.includes('Delete') || a.endsWith('.fail'))
 }
 
-async function load() {
-  loading.value = true
+// 加载审计日志（服务端分页）；silent 为 true 时不显示 loading 遮罩（keep-alive 激活刷新用，避免闪烁）
+async function load(silent = false) {
+  if (!silent) loading.value = true
   try {
     const params = { page: page.value, size: pageSize.value }
     if (filterUser.value) params.username = filterUser.value
@@ -198,6 +199,15 @@ async function loadActions() {
 
 onMounted(() => {
   load()
+  loadActions()
+})
+
+// keep-alive 缓存下再次进入本页时静默刷新数据；
+// 首次挂载由 onMounted 负责加载，跳过第一次激活避免重复请求
+let firstActivation = true
+onActivated(() => {
+  if (firstActivation) { firstActivation = false; return }
+  load(true)
   loadActions()
 })
 </script>

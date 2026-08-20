@@ -77,7 +77,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onActivated } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getProviders } from '@/api/providers'
@@ -177,8 +177,9 @@ async function submitQuickAdd() {
   }
 }
 
-async function loadData() {
-  loading.value = true
+// 加载厂商与模型数据；silent 为 true 时不显示 loading 遮罩（keep-alive 激活刷新用，避免闪烁）
+async function loadData(silent = false) {
+  if (!silent) loading.value = true
   try {
     const [pRes, mRes] = await Promise.all([getProviders(), getModels()])
     if (pRes?.success) allProviders.value = pRes.data || []
@@ -189,4 +190,12 @@ async function loadData() {
 }
 
 onMounted(loadData)
+
+// keep-alive 缓存下再次进入本页时静默刷新数据；
+// 首次挂载由 onMounted 负责加载，跳过第一次激活避免重复请求
+let firstActivation = true
+onActivated(() => {
+  if (firstActivation) { firstActivation = false; return }
+  loadData(true)
+})
 </script>
