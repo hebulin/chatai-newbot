@@ -124,7 +124,11 @@ public class SqliteStorageService implements StorageService {
                 "disabled INTEGER DEFAULT 0," +
                 "daily_limit_type TEXT," +
                 "daily_limit_value INTEGER DEFAULT 0," +
-                "prompt_presets TEXT" +
+                "prompt_presets TEXT," +
+                "two_factor_enabled INTEGER DEFAULT 0," +
+                "two_factor_secret TEXT," +
+                "recovery_code_hashes TEXT DEFAULT '[]'," +
+                "two_factor_last_used_step INTEGER DEFAULT -1" +
                 ")");
 
         // 老数据库补充 system_prompt 列（幂等迁移）
@@ -135,6 +139,8 @@ public class SqliteStorageService implements StorageService {
         ensureUserDailyLimitColumns();
         // 老数据库补充提示词预设列（幂等迁移）
         ensureUserPromptPresetsColumn();
+        // 老数据库补充双重验证列（幂等迁移）
+        ensureUserTwoFactorColumns();
 
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_model_config (" +
                 "id TEXT PRIMARY KEY," +
@@ -464,6 +470,28 @@ public class SqliteStorageService implements StorageService {
     }
 
     /**
+     * 为 t_user 表补充双重验证列（幂等迁移）。
+     * 密钥保存 AES-GCM 密文，恢复码仅保存摘要，最近时间步用于阻止验证码重放。
+     */
+    private void ensureUserTwoFactorColumns() {
+        Set<String> columns = jdbcTemplate.queryForList("PRAGMA table_info(t_user)").stream()
+                .map(c -> String.valueOf(c.get("name")))
+                .collect(Collectors.toSet());
+        if (!columns.contains("two_factor_enabled")) {
+            jdbcTemplate.execute("ALTER TABLE t_user ADD COLUMN two_factor_enabled INTEGER DEFAULT 0");
+        }
+        if (!columns.contains("two_factor_secret")) {
+            jdbcTemplate.execute("ALTER TABLE t_user ADD COLUMN two_factor_secret TEXT");
+        }
+        if (!columns.contains("recovery_code_hashes")) {
+            jdbcTemplate.execute("ALTER TABLE t_user ADD COLUMN recovery_code_hashes TEXT DEFAULT '[]'");
+        }
+        if (!columns.contains("two_factor_last_used_step")) {
+            jdbcTemplate.execute("ALTER TABLE t_user ADD COLUMN two_factor_last_used_step INTEGER DEFAULT -1");
+        }
+    }
+
+    /**
      * 为 t_chat_share 表补充 expires_at 列（幂等迁移）。
      */
     private void ensureChatShareExpiresColumn() {
@@ -534,6 +562,10 @@ public class SqliteStorageService implements StorageService {
         u.setDisabled(rs.getInt("disabled") == 1);
         u.setDailyLimitType(rs.getString("daily_limit_type"));
         u.setDailyLimitValue(rs.getInt("daily_limit_value"));
+        u.setTwoFactorEnabled(rs.getInt("two_factor_enabled") == 1);
+        u.setTwoFactorSecret(rs.getString("two_factor_secret"));
+        u.setRecoveryCodeHashes(parseJsonArray(rs.getString("recovery_code_hashes")));
+        u.setTwoFactorLastUsedStep(rs.getLong("two_factor_last_used_step"));
         return u;
     };
 
@@ -626,11 +658,13 @@ public class SqliteStorageService implements StorageService {
     /** 插入用户记录 */
     private void insertUser(User u) {
         jdbcTemplate.update(
-                "INSERT INTO t_user (id, username, password, role, created_at, last_login_at, last_login_ip, last_login_browser, allowed_model_ids, system_prompt, disabled, daily_limit_type, daily_limit_value, prompt_presets) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO t_user (id, username, password, role, created_at, last_login_at, last_login_ip, last_login_browser, allowed_model_ids, system_prompt, disabled, daily_limit_type, daily_limit_value, prompt_presets, two_factor_enabled, two_factor_secret, recovery_code_hashes, two_factor_last_used_step) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 u.getId(), u.getUsername(), u.getPassword(), u.getRole(), u.getCreatedAt(),
                 u.getLastLoginAt(), u.getLastLoginIp(), u.getLastLoginBrowser(),
                 toJsonArray(u.getAllowedModelIds()), u.getSystemPrompt(), u.isDisabled() ? 1 : 0,
-                u.getDailyLimitType(), u.getDailyLimitValue(), toPromptPresetsJson(u.getPromptPresets()));
+                u.getDailyLimitType(), u.getDailyLimitValue(), toPromptPresetsJson(u.getPromptPresets()),
+                u.isTwoFactorEnabled() ? 1 : 0, u.getTwoFactorSecret(),
+                toJsonArray(u.getRecoveryCodeHashes()), u.getTwoFactorLastUsedStep());
     }
 
     @Override
@@ -767,6 +801,11 @@ public class SqliteStorageService implements StorageService {
         c.setDisabled(src.isDisabled());
         c.setDailyLimitType(src.getDailyLimitType());
         c.setDailyLimitValue(src.getDailyLimitValue());
+        c.setTwoFactorEnabled(src.isTwoFactorEnabled());
+        c.setTwoFactorSecret(src.getTwoFactorSecret());
+        c.setRecoveryCodeHashes(src.getRecoveryCodeHashes() == null
+                ? new ArrayList<>() : new ArrayList<>(src.getRecoveryCodeHashes()));
+        c.setTwoFactorLastUsedStep(src.getTwoFactorLastUsedStep());
         return c;
     }
 
@@ -800,6 +839,81 @@ public class SqliteStorageService implements StorageService {
                 PasswordHasher.hash(newPassword), userId);
         userCache.remove(userId);
         return 0;
+    }
+
+    /**
+     * 启用双重验证并保存密钥密文与恢复码摘要。
+     */
+    @Override
+    public boolean enableTwoFactor(String userId, String encryptedSecret, List<String> recoveryCodeHashes) {
+        int updated = jdbcTemplate.update(
+                "UPDATE t_user SET two_factor_enabled=1, two_factor_secret=?, recovery_code_hashes=?, two_factor_last_used_step=-1 WHERE id=? AND two_factor_enabled=0",
+                encryptedSecret, toJsonArray(recoveryCodeHashes), userId);
+        userCache.remove(userId);
+        return updated > 0;
+    }
+
+    /**
+     * 关闭双重验证并清除密钥、恢复码和验证码重放状态。
+     */
+    @Override
+    public boolean disableTwoFactor(String userId) {
+        int updated = jdbcTemplate.update(
+                "UPDATE t_user SET two_factor_enabled=0, two_factor_secret=NULL, recovery_code_hashes='[]', two_factor_last_used_step=-1 WHERE id=?",
+                userId);
+        userCache.remove(userId);
+        return updated > 0;
+    }
+
+    /**
+     * 仅在新时间步大于已记录时间步时原子更新，拒绝验证码重放。
+     */
+    @Override
+    public boolean claimTwoFactorStep(String userId, long step) {
+        int updated = jdbcTemplate.update(
+                "UPDATE t_user SET two_factor_last_used_step=? WHERE id=? AND two_factor_enabled=1 AND two_factor_last_used_step < ?",
+                step, userId, step);
+        if (updated > 0) {
+            userCache.remove(userId);
+        }
+        return updated > 0;
+    }
+
+    /**
+     * 在进程内串行读取并删除恢复码摘要，确保同一码只能成功一次。
+     */
+    @Override
+    public synchronized boolean consumeRecoveryCode(String userId, String recoveryCodeHash) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT recovery_code_hashes FROM t_user WHERE id=? AND two_factor_enabled=1", userId);
+        if (rows.isEmpty()) {
+            return false;
+        }
+        List<String> hashes = parseJsonArray((String) rows.get(0).get("recovery_code_hashes"));
+        if (!hashes.remove(recoveryCodeHash)) {
+            return false;
+        }
+        int updated = jdbcTemplate.update(
+                "UPDATE t_user SET recovery_code_hashes=? WHERE id=? AND two_factor_enabled=1",
+                toJsonArray(hashes), userId);
+        if (updated > 0) {
+            userCache.remove(userId);
+        }
+        return updated > 0;
+    }
+
+    /**
+     * 用新摘要列表整体替换恢复码，旧恢复码立即全部失效。
+     */
+    @Override
+    public boolean replaceRecoveryCodes(String userId, List<String> recoveryCodeHashes) {
+        int updated = jdbcTemplate.update(
+                "UPDATE t_user SET recovery_code_hashes=? WHERE id=? AND two_factor_enabled=1",
+                toJsonArray(recoveryCodeHashes), userId);
+        if (updated > 0) {
+            userCache.remove(userId);
+        }
+        return updated > 0;
     }
 
     // ========== 模型配置相关 ==========

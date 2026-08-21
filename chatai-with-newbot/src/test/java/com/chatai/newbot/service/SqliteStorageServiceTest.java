@@ -15,6 +15,7 @@ import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -70,6 +71,32 @@ class SqliteStorageServiceTest {
         assertNotNull(service.register(username, "pass1234", "127.0.0.1"));
         assertNull(service.register(username, "pass1234", "127.0.0.1"), "重复用户名应注册失败");
         assertNull(service.register("admin", "pass1234", "127.0.0.1"), "admin 用户名应被拒绝");
+    }
+
+    /**
+     * 双重验证凭据应可启用、阻止 TOTP 时间步重放、一次性消费恢复码并完整清除。
+     */
+    @Test
+    void twoFactor_凭据生命周期与一次性语义() {
+        User user = service.register(uniqueName("two_factor"), "pass1234", "127.0.0.1");
+        assertNotNull(user);
+        assertTrue(service.enableTwoFactor(user.getId(), "ENC:test-secret", List.of("hash-a", "hash-b")));
+
+        User enabled = service.getUserById(user.getId());
+        assertTrue(enabled.isTwoFactorEnabled());
+        assertEquals(2, enabled.getRecoveryCodeHashes().size());
+        assertTrue(service.claimTwoFactorStep(user.getId(), 100L));
+        assertFalse(service.claimTwoFactorStep(user.getId(), 100L), "同一时间步必须拒绝重放");
+        assertTrue(service.consumeRecoveryCode(user.getId(), "hash-a"));
+        assertFalse(service.consumeRecoveryCode(user.getId(), "hash-a"), "恢复码必须只能使用一次");
+        assertTrue(service.replaceRecoveryCodes(user.getId(), List.of("hash-new")));
+        assertEquals(List.of("hash-new"), service.getUserById(user.getId()).getRecoveryCodeHashes());
+
+        assertTrue(service.disableTwoFactor(user.getId()));
+        User disabled = service.getUserById(user.getId());
+        assertFalse(disabled.isTwoFactorEnabled());
+        assertTrue(disabled.getRecoveryCodeHashes().isEmpty());
+        assertNull(disabled.getTwoFactorSecret());
     }
 
     @Test

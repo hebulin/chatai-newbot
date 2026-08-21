@@ -662,6 +662,60 @@ public class StorageManager implements StorageService {
         return code;
     }
 
+    /**
+     * 移除指定用户除当前会话外的全部 Token，用于安全凭据变更后收敛既有登录面。
+     * @param userId 用户ID
+     * @param currentToken 当前操作会话 Token
+     */
+    public void removeOtherTokensByUserId(String userId, String currentToken) {
+        List<String> tokensToRemove = activeTokens.entrySet().stream()
+                .filter(entry -> userId.equals(entry.getValue().userId))
+                .map(Map.Entry::getKey)
+                .filter(token -> !token.equals(currentToken))
+                .toList();
+        tokensToRemove.forEach(this::removeToken);
+    }
+
+    /**
+     * 启用用户双重验证。
+     */
+    @Override
+    public boolean enableTwoFactor(String userId, String encryptedSecret, List<String> recoveryCodeHashes) {
+        return sqliteStorage.enableTwoFactor(userId, encryptedSecret, recoveryCodeHashes);
+    }
+
+    /**
+     * 关闭双重验证，并注销除当前操作会话外由控制器统一处理的登录状态。
+     */
+    @Override
+    public boolean disableTwoFactor(String userId) {
+        return sqliteStorage.disableTwoFactor(userId);
+    }
+
+    /**
+     * 原子占用一个 TOTP 时间步。
+     */
+    @Override
+    public boolean claimTwoFactorStep(String userId, long step) {
+        return sqliteStorage.claimTwoFactorStep(userId, step);
+    }
+
+    /**
+     * 一次性消费恢复码摘要。
+     */
+    @Override
+    public boolean consumeRecoveryCode(String userId, String recoveryCodeHash) {
+        return sqliteStorage.consumeRecoveryCode(userId, recoveryCodeHash);
+    }
+
+    /**
+     * 替换全部恢复码摘要。
+     */
+    @Override
+    public boolean replaceRecoveryCodes(String userId, List<String> recoveryCodeHashes) {
+        return sqliteStorage.replaceRecoveryCodes(userId, recoveryCodeHashes);
+    }
+
     // ========== 委托方法：模型配置相关 ==========
 
     @Override

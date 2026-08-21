@@ -26,6 +26,18 @@ public class User {
     private String dailyLimitType;
     /** 单用户每日限额数值（与 dailyLimitType 配套使用，<=0 视为不限制） */
     private int dailyLimitValue;
+    /** 是否已启用双重验证；属于安全配置，不直接序列化给通用用户接口 */
+    @JsonIgnore
+    private boolean twoFactorEnabled;
+    /** TOTP 共享密钥的 AES-GCM 密文；任何接口都不得返回此字段 */
+    @JsonIgnore
+    private String twoFactorSecret;
+    /** 尚未使用的恢复码 SHA-256 摘要列表；任何接口都不得返回此字段 */
+    @JsonIgnore
+    private List<String> recoveryCodeHashes = new ArrayList<>();
+    /** 最近一次成功使用的 TOTP 时间步，用于阻止同一验证码重放 */
+    @JsonIgnore
+    private long twoFactorLastUsedStep = -1L;
 
     @JsonIgnore
     public boolean isAdmin() {

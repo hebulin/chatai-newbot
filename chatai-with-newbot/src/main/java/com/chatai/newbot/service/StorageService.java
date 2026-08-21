@@ -99,6 +99,46 @@ public interface StorageService {
      */
     int changePassword(String userId, String oldPassword, String newPassword);
 
+    /**
+     * 启用用户双重验证并保存加密密钥、恢复码摘要。
+     * @param userId 用户ID
+     * @param encryptedSecret TOTP 密钥密文
+     * @param recoveryCodeHashes 恢复码摘要列表
+     * @return true=保存成功
+     */
+    boolean enableTwoFactor(String userId, String encryptedSecret, List<String> recoveryCodeHashes);
+
+    /**
+     * 关闭用户双重验证并清除全部关联凭据。
+     * @param userId 用户ID
+     * @return true=关闭成功
+     */
+    boolean disableTwoFactor(String userId);
+
+    /**
+     * 原子占用一个新的 TOTP 时间步，防止同一验证码被重复提交。
+     * @param userId 用户ID
+     * @param step 已验证通过的时间步
+     * @return true=时间步首次使用；false=已使用或用户未启用双重验证
+     */
+    boolean claimTwoFactorStep(String userId, long step);
+
+    /**
+     * 一次性消费指定恢复码摘要。
+     * @param userId 用户ID
+     * @param recoveryCodeHash 恢复码 SHA-256 摘要
+     * @return true=恢复码有效并已删除
+     */
+    boolean consumeRecoveryCode(String userId, String recoveryCodeHash);
+
+    /**
+     * 替换用户全部恢复码摘要。
+     * @param userId 用户ID
+     * @param recoveryCodeHashes 新恢复码摘要列表
+     * @return true=替换成功
+     */
+    boolean replaceRecoveryCodes(String userId, List<String> recoveryCodeHashes);
+
     // ========== 模型配置相关 ==========
 
     /**
