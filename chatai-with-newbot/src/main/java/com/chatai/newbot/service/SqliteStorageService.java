@@ -221,14 +221,17 @@ public class SqliteStorageService implements StorageService {
                 ")");
         jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_chat_session_user ON t_chat_session(user_id)");
 
-        // 用户会话全局状态（最后所在会话 + 已删除会话ID累积；行存在即表示该用户已完成按会话行迁移）
+        // 用户会话全局状态（最后所在会话 + 已删除会话ID累积 + 会话文件夹定义；行存在即表示该用户已完成按会话行迁移）
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_chat_user_state (" +
                 "user_id TEXT PRIMARY KEY," +
                 "last_chat_id TEXT," +
                 "deleted_chat_ids TEXT," +
+                "folders_json TEXT," +
                 "updated_at TEXT," +
                 "updated_at_ts INTEGER DEFAULT 0" +
                 ")");
+        // 老数据库补充会话文件夹列（幂等迁移）
+        ensureChatUserStateFoldersColumn();
 
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_setting (" +
                 "key TEXT PRIMARY KEY," +
@@ -501,6 +504,20 @@ public class SqliteStorageService implements StorageService {
         if (!hasColumn) {
             jdbcTemplate.execute("ALTER TABLE t_chat_share ADD COLUMN expires_at TEXT");
             log.info("SQLite: t_chat_share 表已补充 expires_at 列");
+        }
+    }
+
+    /**
+     * 为 t_chat_user_state 表补充 folders_json 列（幂等迁移）。
+     * 该列存储会话文件夹定义列表 JSON（id/名称/折叠态），会话归属关系存于各会话 meta.folderId。
+     */
+    private void ensureChatUserStateFoldersColumn() {
+        List<Map<String, Object>> columns = jdbcTemplate.queryForList("PRAGMA table_info(t_chat_user_state)");
+        boolean hasColumn = columns.stream()
+                .anyMatch(c -> "folders_json".equals(String.valueOf(c.get("name"))));
+        if (!hasColumn) {
+            jdbcTemplate.execute("ALTER TABLE t_chat_user_state ADD COLUMN folders_json TEXT");
+            log.info("SQLite: t_chat_user_state 表已补充 folders_json 列");
         }
     }
 
@@ -1679,7 +1696,7 @@ public class SqliteStorageService implements StorageService {
      */
     public Map<String, Object> loadChatUserState(String userId) {
         List<Map<String, Object>> list = jdbcTemplate.queryForList(
-                "SELECT last_chat_id, deleted_chat_ids FROM t_chat_user_state WHERE user_id = ?", userId);
+                "SELECT last_chat_id, deleted_chat_ids, folders_json FROM t_chat_user_state WHERE user_id = ?", userId);
         return list.isEmpty() ? null : list.get(0);
     }
 
@@ -1688,18 +1705,19 @@ public class SqliteStorageService implements StorageService {
      * @param userId 用户ID
      * @param lastChatId 最后所在会话ID
      * @param deletedChatIdsJson 已删除会话ID列表 JSON
+     * @param foldersJson 会话文件夹定义列表 JSON（null 表示清空文件夹）
      * @param updatedAt 更新时间字符串
      * @param updatedAtTs 更新时间戳
      */
     public void saveChatUserState(String userId, String lastChatId, String deletedChatIdsJson,
-                                   String updatedAt, long updatedAtTs) {
+                                   String foldersJson, String updatedAt, long updatedAtTs) {
         int updated = jdbcTemplate.update(
-                "UPDATE t_chat_user_state SET last_chat_id=?, deleted_chat_ids=?, updated_at=?, updated_at_ts=? WHERE user_id=?",
-                lastChatId, deletedChatIdsJson, updatedAt, updatedAtTs, userId);
+                "UPDATE t_chat_user_state SET last_chat_id=?, deleted_chat_ids=?, folders_json=?, updated_at=?, updated_at_ts=? WHERE user_id=?",
+                lastChatId, deletedChatIdsJson, foldersJson, updatedAt, updatedAtTs, userId);
         if (updated == 0) {
             jdbcTemplate.update(
-                    "INSERT INTO t_chat_user_state (user_id, last_chat_id, deleted_chat_ids, updated_at, updated_at_ts) VALUES (?,?,?,?,?)",
-                    userId, lastChatId, deletedChatIdsJson, updatedAt, updatedAtTs);
+                    "INSERT INTO t_chat_user_state (user_id, last_chat_id, deleted_chat_ids, folders_json, updated_at, updated_at_ts) VALUES (?,?,?,?,?,?)",
+                    userId, lastChatId, deletedChatIdsJson, foldersJson, updatedAt, updatedAtTs);
         }
     }
 

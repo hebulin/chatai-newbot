@@ -94,6 +94,7 @@ public class ChatHistoryService {
             result.put("chats", chats);
             result.put("chatMeta", chatMeta);
             result.put("deletedChatIds", parseDeletedIds(state));
+            result.put("folders", parseFolders(state));
             return result;
         } catch (Exception e) {
             log.error("从SQLite加载会话历史失败: userId={}", userId, e);
@@ -151,7 +152,7 @@ public class ChatHistoryService {
                     }
                 }
                 sqliteStorage.saveChatUserState(userId, lastChatId,
-                        objectMapper.writeValueAsString(deletedIds), updatedAt, updatedAtTs);
+                        objectMapper.writeValueAsString(deletedIds), null, updatedAt, updatedAtTs);
                 if (migrated > 0) {
                     log.info("会话历史已迁移为按会话行存储: userId={}, 会话数={}", userId, migrated);
                 }
@@ -171,6 +172,22 @@ public class ChatHistoryService {
         try {
             List<String> ids = objectMapper.readValue(s, new TypeReference<List<String>>() {});
             return ids != null ? ids : new ArrayList<>();
+        } catch (Exception e) {
+            return new ArrayList<>();
+        }
+    }
+
+    /**
+     * 解析用户状态行中的 folders_json（会话文件夹定义列表，空/解析失败返回空列表）。
+     * 每项为 { id, name, collapsed } 的 Map，会话与文件夹的归属关系另存于会话 meta.folderId。
+     */
+    private List<Object> parseFolders(Map<String, Object> state) {
+        if (state == null || !(state.get("folders_json") instanceof String s) || s.isEmpty()) {
+            return new ArrayList<>();
+        }
+        try {
+            List<Object> folders = objectMapper.readValue(s, new TypeReference<List<Object>>() {});
+            return folders != null ? folders : new ArrayList<>();
         } catch (Exception e) {
             return new ArrayList<>();
         }
@@ -243,6 +260,7 @@ public class ChatHistoryService {
         result.put("chatMeta", chatMeta);
         result.put("deletedChatIds", parseDeletedIds(state));
         result.put("summaries", summaries);
+        result.put("folders", parseFolders(state));
         // 随摘要一并返回当前版本号，前端以此作为后续变更检测的基准
         result.put("version", version);
         return result;
@@ -351,8 +369,13 @@ public class ChatHistoryService {
             } else if (state != null && state.get("last_chat_id") instanceof String s) {
                 lastChatId = s;
             }
+            // 文件夹定义：仅在客户端显式上传 folders 字段时覆盖，旧客户端不带该字段则保留服务端现有值
+            String foldersJson = state != null && state.get("folders_json") instanceof String exist ? exist : null;
+            if (chatData.get("folders") instanceof List<?> folderList) {
+                foldersJson = objectMapper.writeValueAsString(folderList);
+            }
             sqliteStorage.saveChatUserState(userId, lastChatId,
-                    objectMapper.writeValueAsString(new ArrayList<>(deletedIds)), updatedAt, updatedAtTs);
+                    objectMapper.writeValueAsString(new ArrayList<>(deletedIds)), foldersJson, updatedAt, updatedAtTs);
         } catch (Exception e) {
             log.error("保存会话历史到SQLite失败: userId={}", userId, e);
             // 抛出运行时异常触发事务回滚，控制器层 catch 后返回失败提示

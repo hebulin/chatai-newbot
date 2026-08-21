@@ -12,6 +12,8 @@ export const useChatStore = defineStore('chat', () => {
   const deletedChatIds = ref([])
   const isChatHistoryLoaded = ref(false)
   const searchKeyword = ref('')
+  // 会话文件夹定义列表：[{ id, name, collapsed }]；会话归属存于各会话 meta.folderId
+  const folders = ref([])
 
   let syncTimer = null
   // 全量同步挂起标记：发送消息→bot 输出期间不执行全量上传，结束后统一补一次，
@@ -57,6 +59,7 @@ export const useChatStore = defineStore('chat', () => {
         id,
         title,
         pinned: !!meta.pinned,
+        folderId: meta.folderId || null,
         fullContent,
         lastTime,
         lastTimeDate: parseDateFromStr(lastTime)
@@ -82,10 +85,29 @@ export const useChatStore = defineStore('chat', () => {
       return b.lastTimeDate - a.lastTimeDate
     })
 
-    // 按日期分组（置顶会话归入“置顶”分组，因排序后靠前故分组也在最前）
+    const validFolderIds = new Set(folders.value.map(f => f.id))
+
+    // 搜索时不做文件夹分组：命中的会话（含文件夹内）平铺到日期分组，便于快速定位
+    const groupingByFolder = !keyword
+    let folderGroups = []
+    if (groupingByFolder) {
+      const byFolder = {}
+      filtered.forEach(info => {
+        if (info.folderId && validFolderIds.has(info.folderId)) {
+          if (!byFolder[info.folderId]) byFolder[info.folderId] = []
+          byFolder[info.folderId].push(info)
+        }
+      })
+      folderGroups = folders.value
+        .map(f => ({ folder: f, chats: byFolder[f.id] || [] }))
+    }
+
+    // 按日期分组（置顶会话归入“置顶”分组，因排序后靠前故分组也在最前）；
+    // 分组阶段排除已归入文件夹的会话（搜索态除外）
     const groups = {}
     const groupOrder = []
     filtered.forEach(info => {
+      if (groupingByFolder && info.folderId && validFolderIds.has(info.folderId)) return
       const dateLabel = info.pinned ? '置顶' : getDateLabel(info.lastTimeDate)
       if (!groups[dateLabel]) {
         groups[dateLabel] = []
@@ -94,8 +116,24 @@ export const useChatStore = defineStore('chat', () => {
       groups[dateLabel].push(info)
     })
 
-    return { groups, groupOrder, total: filtered.length }
+    return { groups, groupOrder, total: filtered.length, folderGroups }
   })
+
+  // 规整服务端/备份返回的文件夹列表：仅保留含合法 id 与 name 的项，去除重复 id
+  function normalizeFolders(raw) {
+    const list = []
+    const seen = new Set()
+    if (!Array.isArray(raw)) return list
+    raw.forEach(f => {
+      if (!f || typeof f !== 'object') return
+      const id = typeof f.id === 'string' ? f.id : String(f.id || '')
+      const name = typeof f.name === 'string' ? f.name.trim() : ''
+      if (!id || !name || seen.has(id)) return
+      seen.add(id)
+      list.push({ id, name, collapsed: !!f.collapsed })
+    })
+    return list
+  }
 
   const currentMessages = computed(() => {
     return chats.value[currentChatId.value] || []
@@ -144,6 +182,7 @@ export const useChatStore = defineStore('chat', () => {
         chats.value = {}
         chatMeta.value = data.chatMeta || {}
         deletedChatIds.value = data.deletedChatIds || []
+        folders.value = normalizeFolders(data.folders)
         remoteVersion = data.version || 0
         const map = {}
         ;(data.summaries || []).forEach(s => { if (s && s.id) map[s.id] = s })
@@ -217,7 +256,8 @@ export const useChatStore = defineStore('chat', () => {
           lastChatId: currentChatId.value,
           chats: chats.value,
           chatMeta: chatMeta.value,
-          deletedChatIds: deletedChatIds.value
+          deletedChatIds: deletedChatIds.value,
+          folders: folders.value
         })
         // 记住保存后的版本基准，自己的写入不触发下一轮自动同步重拉
         if (res && res.success && res.version) {
@@ -340,6 +380,8 @@ export const useChatStore = defineStore('chat', () => {
       }
     })
     chatMeta.value = mergedMeta
+    // 文件夹定义以服务端为准（本地待上传变更已被守卫排除）
+    folders.value = normalizeFolders(data.folders)
     // 已删除列表以服务端累积合并后的为准（本地待上传变更已被守卫排除）
     deletedChatIds.value = data.deletedChatIds || []
   }
@@ -503,7 +545,8 @@ export const useChatStore = defineStore('chat', () => {
       version: 1,
       exportedAt: new Date().toISOString(),
       chats: chats.value,
-      chatMeta: chatMeta.value
+      chatMeta: chatMeta.value,
+      folders: folders.value
     }
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' })
     const a = document.createElement('a')
@@ -538,7 +581,19 @@ export const useChatStore = defineStore('chat', () => {
       if (delIdx >= 0) deletedChatIds.value.splice(delIdx, 1)
       imported++
     })
-    if (imported > 0) syncToServer()
+    // 合并备份中的文件夹定义：同名/同 id 冲突时以本地现有文件夹为准，仅补充缺失项
+    let foldersChanged = false
+    const backupFolders = normalizeFolders(data.folders)
+    if (backupFolders.length > 0) {
+      const localIds = new Set(folders.value.map(f => f.id))
+      const localNames = new Set(folders.value.map(f => f.name))
+      backupFolders.forEach(f => {
+        if (localIds.has(f.id) || localNames.has(f.name)) return
+        folders.value.push({ ...f, collapsed: false })
+        foldersChanged = true
+      })
+    }
+    if (imported > 0 || foldersChanged) syncToServer()
     return { imported, skipped }
   }
 
@@ -589,6 +644,67 @@ export const useChatStore = defineStore('chat', () => {
     syncToServer()
   }
 
+  // ========== 会话文件夹 ==========
+
+  // 新建文件夹并返回其 id；重名时复用已有文件夹
+  function createFolder(name) {
+    const n = (name || '').trim()
+    if (!n) return null
+    const existing = folders.value.find(f => f.name === n)
+    if (existing) return existing.id
+    const id = 'folder_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7)
+    folders.value.push({ id, name: n, collapsed: false })
+    syncToServer()
+    return id
+  }
+
+  // 重命名文件夹（空名称忽略）
+  function renameFolder(id, name) {
+    const n = (name || '').trim()
+    if (!n) return
+    const f = folders.value.find(x => x.id === id)
+    if (!f || f.name === n) return
+    // 避免与现有文件夹重名
+    if (folders.value.some(x => x.id !== id && x.name === n)) return
+    f.name = n
+    syncToServer()
+  }
+
+  // 删除文件夹：仅移除分组容器，其内会话恢复为未分组状态
+  function deleteFolder(id) {
+    const idx = folders.value.findIndex(f => f.id === id)
+    if (idx < 0) return
+    folders.value.splice(idx, 1)
+    Object.keys(chatMeta.value).forEach(chatId => {
+      const meta = chatMeta.value[chatId]
+      if (meta && meta.folderId === id) {
+        delete meta.folderId
+        chatMeta.value[chatId] = { ...meta }
+      }
+    })
+    syncToServer()
+  }
+
+  // 展开/收起文件夹
+  function toggleFolderCollapsed(id) {
+    const f = folders.value.find(x => x.id === id)
+    if (!f) return
+    f.collapsed = !f.collapsed
+    syncToServer()
+  }
+
+  // 将会话移入文件夹（folderId 为空则移出所有文件夹）
+  function moveChatToFolder(chatId, folderId) {
+    const meta = chatMeta.value[chatId] || {}
+    if (folderId && folders.value.some(f => f.id === folderId)) {
+      meta.folderId = folderId
+    } else {
+      delete meta.folderId
+    }
+    chatMeta.value[chatId] = { ...meta }
+    syncToServer()
+  }
+
   // 设置会话标题（仅当未手动命名时生效，用于 AI 自动命名）
   function setAutoTitleIfEmpty(id, title) {
     const t = (title || '').trim()
@@ -622,11 +738,13 @@ export const useChatStore = defineStore('chat', () => {
 
   return {
     chats, chatSummaries, chatMeta, currentChatId, deletedChatIds, isChatHistoryLoaded, searchKeyword,
+    folders,
     sortedChatList, currentMessages,
     loadFromServer, syncToServer, suspendSync, resumeSync, syncCurrentChatFromServer, refreshFromServer,
     ensureChatLoaded, ensureAllChatsLoaded,
     newChat, switchChat, switchChatLazy, deleteChat, deleteAllChats,
     addMessage, truncateMessages, updateLastAssistantMessage, exportChats, exportChatsJson, importChatsJson, countValidChats, findEmptyChatId,
-    togglePin, renameChat, setAutoTitleIfEmpty, exportChatMarkdown, setChatPromptPreset
+    togglePin, renameChat, setAutoTitleIfEmpty, exportChatMarkdown, setChatPromptPreset,
+    createFolder, renameFolder, deleteFolder, toggleFolderCollapsed, moveChatToFolder
   }
 })

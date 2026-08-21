@@ -92,7 +92,19 @@ const zh = {
     logout: '退出登录',
     renamePrompt: '输入新的会话名称（留空恢复默认）',
     renameTitle: '重命名会话',
-    nameMaxLen: '名称最多 40 字'
+    nameMaxLen: '名称最多 40 字',
+    newFolder: '新建文件夹',
+    newFolderPrompt: '输入文件夹名称',
+    newFolderInline: '新建文件夹…',
+    folderNameRequired: '文件夹名称不能为空',
+    folderNameMaxLen: '文件夹名称最多 20 字',
+    moveToFolder: '移动到文件夹',
+    removeFromFolder: '移出文件夹',
+    noFolders: '暂无文件夹',
+    back: '返回',
+    deleteFolder: '删除文件夹',
+    deleteFolderConfirm: '删除文件夹「{name}」？其中的会话不会被删除，将恢复为未分组。',
+    renameFolderPrompt: '输入新的文件夹名称'
   },
   about: {
     version: '软件版本号：',
@@ -523,7 +535,19 @@ const en = {
     logout: 'Sign out',
     renamePrompt: 'Enter a new chat name (leave empty to restore default)',
     renameTitle: 'Rename Chat',
-    nameMaxLen: 'Name is limited to 40 characters'
+    nameMaxLen: 'Name is limited to 40 characters',
+    newFolder: 'New Folder',
+    newFolderPrompt: 'Folder name',
+    newFolderInline: 'New folder…',
+    folderNameRequired: 'Folder name is required',
+    folderNameMaxLen: 'Folder name is limited to 20 characters',
+    moveToFolder: 'Move to folder',
+    removeFromFolder: 'Remove from folder',
+    noFolders: 'No folders yet',
+    back: 'Back',
+    deleteFolder: 'Delete folder',
+    deleteFolderConfirm: 'Delete folder "{name}"? Chats inside are kept and will become ungrouped.',
+    renameFolderPrompt: 'Enter a new folder name'
   },
   about: {
     version: 'Version: ',
