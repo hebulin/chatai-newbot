@@ -74,9 +74,21 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m13 11 9-9"/><path d="M14.6 12.6c.8.8.9 2.1.2 3L10 22l-8-8 6.4-4.8c.9-.7 2.2-.6 3 .2Z"/><path d="m6.8 10.4 6.8 6.8"/><path d="m5 17 1.4-1.4"/></svg>
           </div>
           <!-- 语音输入：浏览器支持 SpeechRecognition 时显示，聆听中再次点击停止 -->
-          <div v-if="voiceSupported" class="upload-image-btn" :class="{ 'voice-listening': voiceListening }" :title="voiceListening ? t('input.voiceStop') : t('input.voiceInput')" @click="toggleVoiceInput">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-          </div>
+          <button
+            v-if="voiceSupported"
+            type="button"
+            class="upload-image-btn"
+            :class="{ 'voice-listening': voiceListening }"
+            :title="voiceListening ? t('input.voiceStop') : t('input.voiceInput')"
+            :aria-label="voiceListening ? t('input.voiceStop') : t('input.voiceInput')"
+            :aria-pressed="voiceListening"
+            @click="toggleVoiceInput"
+          >
+            <span v-if="voiceListening" class="voice-meter" :style="{ '--voice-level': voiceLevel }" aria-hidden="true">
+              <span v-for="i in 5" :key="i" class="voice-meter-bar"></span>
+            </span>
+            <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+          </button>
           <input type="file" ref="attachInputRef" :accept="ATTACH_ACCEPT" multiple style="display:none" @change="handleAttachUpload">
           <div class="model-select-area">
             <img v-if="currentIconIsImg" :src="currentIcon" class="model-area-icon" />
@@ -246,21 +258,98 @@ function selectRolePreset(presetId) {
 const SpeechRecognitionCtor = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition)
 const voiceSupported = !!SpeechRecognitionCtor
 const voiceListening = ref(false)
+const voiceLevel = ref(0)
 let recognizer = null
+let recognitionSeq = 0
+let voiceStream = null
+let voiceAudioContext = null
+let voiceAnalyser = null
+let voiceMeterFrame = 0
+let voiceMeterSeq = 0
 
+// 停止音量采样并释放额外获取的麦克风流与 AudioContext
+function stopVoiceMeter() {
+  voiceMeterSeq++
+  if (voiceMeterFrame) cancelAnimationFrame(voiceMeterFrame)
+  voiceMeterFrame = 0
+  voiceLevel.value = 0
+  voiceAnalyser?.disconnect()
+  voiceAnalyser = null
+  voiceStream?.getTracks().forEach(track => track.stop())
+  voiceStream = null
+  if (voiceAudioContext) voiceAudioContext.close().catch(() => {})
+  voiceAudioContext = null
+}
+
+// 读取真实麦克风音量驱动五段音量条；无声时归零保持平静，失败时安静降级
+async function startVoiceMeter() {
+  stopVoiceMeter()
+  const mySeq = voiceMeterSeq
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext
+  if (!navigator.mediaDevices?.getUserMedia || !AudioContextCtor) return
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    if (!voiceListening.value || mySeq !== voiceMeterSeq) {
+      stream.getTracks().forEach(track => track.stop())
+      return
+    }
+    voiceStream = stream
+    voiceAudioContext = new AudioContextCtor()
+    if (voiceAudioContext.state === 'suspended') await voiceAudioContext.resume()
+    const source = voiceAudioContext.createMediaStreamSource(stream)
+    voiceAnalyser = voiceAudioContext.createAnalyser()
+    voiceAnalyser.fftSize = 256
+    voiceAnalyser.smoothingTimeConstant = 0.72
+    source.connect(voiceAnalyser)
+    const samples = new Uint8Array(voiceAnalyser.fftSize)
+
+    // 每帧计算时域信号 RMS，过滤环境底噪后映射为 0~1 的视觉强度
+    const sampleLevel = () => {
+      if (!voiceListening.value || mySeq !== voiceMeterSeq || !voiceAnalyser) return
+      voiceAnalyser.getByteTimeDomainData(samples)
+      let sum = 0
+      for (let i = 0; i < samples.length; i++) {
+        const normalized = (samples[i] - 128) / 128
+        sum += normalized * normalized
+      }
+      const rms = Math.sqrt(sum / samples.length)
+      const normalizedLevel = Math.min(1, Math.max(0, (rms - 0.018) / 0.12))
+      voiceLevel.value = normalizedLevel < 0.06 ? 0 : Math.round(normalizedLevel * 100) / 100
+      voiceMeterFrame = requestAnimationFrame(sampleLevel)
+    }
+    sampleLevel()
+  } catch (e) {
+    if (mySeq === voiceMeterSeq) stopVoiceMeter()
+  }
+}
+
+// 立即结束当前语音输入，并让旧识别器的异步回调失效
+function stopVoiceInput() {
+  recognitionSeq++
+  const activeRecognizer = recognizer
+  recognizer = null
+  voiceListening.value = false
+  stopVoiceMeter()
+  try { activeRecognizer?.stop() } catch (e) { /* ignore */ }
+}
+
+// 切换语音输入状态：开始时启动识别与真实音量采样，再次点击立即停止
 function toggleVoiceInput() {
   if (!voiceSupported) return
   if (voiceListening.value) {
-    try { recognizer && recognizer.stop() } catch (e) { /* ignore */ }
+    stopVoiceInput()
     return
   }
-  recognizer = new SpeechRecognitionCtor()
-  recognizer.lang = 'zh-CN'
-  recognizer.interimResults = true
-  recognizer.continuous = true
+  const mySeq = ++recognitionSeq
+  const nextRecognizer = new SpeechRecognitionCtor()
+  recognizer = nextRecognizer
+  nextRecognizer.lang = 'zh-CN'
+  nextRecognizer.interimResults = true
+  nextRecognizer.continuous = true
   // 记录开始识别时的已有文本，识别结果在此基础上追加
   const baseText = inputText.value
-  recognizer.onresult = (e) => {
+  nextRecognizer.onresult = (e) => {
+    if (mySeq !== recognitionSeq) return
     let finalText = ''
     let interimText = ''
     for (let i = 0; i < e.results.length; i++) {
@@ -270,21 +359,33 @@ function toggleVoiceInput() {
     inputText.value = baseText + finalText + interimText
     nextTick(autoResize)
   }
-  recognizer.onend = () => { voiceListening.value = false }
-  recognizer.onerror = () => { voiceListening.value = false }
-  try {
-    recognizer.start()
-    voiceListening.value = true
-  } catch (e) {
+  nextRecognizer.onend = () => {
+    if (mySeq !== recognitionSeq) return
+    recognizer = null
     voiceListening.value = false
+    stopVoiceMeter()
+  }
+  nextRecognizer.onerror = () => {
+    if (mySeq !== recognitionSeq) return
+    recognizer = null
+    voiceListening.value = false
+    stopVoiceMeter()
+  }
+  try {
+    nextRecognizer.start()
+    voiceListening.value = true
+    startVoiceMeter()
+  } catch (e) {
+    recognizer = null
+    voiceListening.value = false
+    stopVoiceMeter()
   }
 }
 
 onBeforeUnmount(() => {
   // 组件卸载时停止识别，释放麦克风
-  if (recognizer && voiceListening.value) {
-    try { recognizer.stop() } catch (e) { /* ignore */ }
-  }
+  if (recognizer || voiceListening.value) stopVoiceInput()
+  else stopVoiceMeter()
 })
 
 // ===== 模型级联选择器 =====

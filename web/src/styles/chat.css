@@ -201,10 +201,12 @@ input, button, textarea, select { font: inherit; color: inherit; background: non
 }
 .icon-btn:hover::before { content: none; }
 
-/* 顶栏分享/侧栏按钮：去掉描边走简约风，悬停仅变色加淡底；
+/* 顶栏搜索/分享/侧栏按钮：去掉描边走简约风，悬停仅变色加淡底；
    用 transparent 而非 border:none，保持与其他 icon-btn 尺寸对齐 */
 .share-chat-btn,
 .share-chat-btn:hover,
+.msg-search-btn,
+.msg-search-btn:hover,
 .toggle-sidebar-btn,
 .toggle-sidebar-btn:hover {
     border-color: transparent;
@@ -776,6 +778,16 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
     flex-shrink: 0;
 }
 .msg-search-nav:hover { color: var(--primary); border-color: var(--primary); }
+.msg-search-match {
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--primary) 20%, transparent);
+    color: inherit;
+    box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--primary) 55%, transparent);
+}
+.msg-search-match-active {
+    background: color-mix(in srgb, var(--primary) 38%, transparent);
+    box-shadow: inset 0 -2px 0 var(--primary);
+}
 @media (max-width: 768px) {
     .msg-search-input { width: 130px; }
 }
@@ -2039,6 +2051,7 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
 /* Upload attachment button（简约风：无边框，悬停淡色底） */
 .upload-image-btn {
     width: 28px; height: 28px;
+    padding: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2051,15 +2064,34 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
     border-radius: var(--radius-sm);
 }
 .upload-image-btn:hover { background: var(--primary-soft); color: var(--primary); }
-/* 语音输入聆听中：主色高亮 + 呼吸脉冲提示录音状态 */
+/* 语音输入聆听中：麦克风切换为真实音量驱动的五段波形，无声时保持平静 */
 .upload-image-btn.voice-listening {
     background: var(--primary-soft);
     color: var(--primary);
-    animation: voicePulse 1.2s ease-in-out infinite;
 }
-@keyframes voicePulse {
-    0%, 100% { box-shadow: 0 0 0 0 var(--primary-soft); }
-    50% { box-shadow: 0 0 0 5px transparent; }
+.voice-meter {
+    width: 15px;
+    height: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+}
+.voice-meter-bar {
+    width: 2px;
+    height: 12px;
+    border-radius: 2px;
+    background: currentColor;
+    transform-origin: center;
+    transition: transform 120ms ease-out;
+}
+.voice-meter-bar:nth-child(1) { transform: scaleY(calc(0.25 + var(--voice-level) * 0.55)); }
+.voice-meter-bar:nth-child(2) { transform: scaleY(calc(0.35 + var(--voice-level) * 0.65)); }
+.voice-meter-bar:nth-child(3) { transform: scaleY(calc(0.25 + var(--voice-level) * 0.75)); }
+.voice-meter-bar:nth-child(4) { transform: scaleY(calc(0.4 + var(--voice-level) * 0.5)); }
+.voice-meter-bar:nth-child(5) { transform: scaleY(calc(0.25 + var(--voice-level) * 0.6)); }
+@media (prefers-reduced-motion: reduce) {
+    .voice-meter-bar { transition: none; }
 }
 
 /* Model select — el-cascader 嵌入工具栏 */

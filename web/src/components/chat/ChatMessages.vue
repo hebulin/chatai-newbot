@@ -27,13 +27,13 @@
                   {{ att.name }}
                 </span>
               </div>
-              <span v-html="formatUserContent(msg.content)"></span>
+              <span v-html="formatUserContent(msg.content, idx)"></span>
             </template>
             <template v-else>
               <!-- 错误气泡：请求失败/流内错误统一样式，与正常回答区分 -->
               <div v-if="msg.isError" class="error-bubble">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                <span>{{ msg.content }}</span>
+                <span v-html="formatUserContent(msg.content, idx)"></span>
               </div>
               <template v-else>
                 <!-- 历史消息必然已完成：固定显示“已思考”，不依赖 thinkingTime 判断状态，
@@ -45,7 +45,7 @@
                   </div>
                   <div class="thinking-body" v-html="renderMd(msg.reasoning_content)"></div>
                 </div>
-                <div v-if="msg.content" class="answer-content" v-html="renderMd(msg.content)"></div>
+                <div v-if="msg.content" class="answer-content" v-html="renderMd(msg.content, idx)"></div>
               </template>
             </template>
           </div>
@@ -121,7 +121,10 @@ const props = defineProps({
   // 需加上 startIndex 换算回完整会话消息列表的绝对下标，用于生成全局唯一 DOM ID
   startIndex: { type: Number, default: 0 },
   // 当前需高亮的用户消息 DOM ID（点击侧边栏锚点跳转后置位，动画结束后清除）
-  highlightId: { type: String, default: '' }
+  highlightId: { type: String, default: '' },
+  // 会话内搜索关键字与当前命中消息绝对下标：用于在渲染后的富文本中精确标记关键词
+  searchKeyword: { type: String, default: '' },
+  searchActiveIndex: { type: Number, default: -1 }
 })
 
 const emit = defineEmits(['copy', 'lightbox', 'regenerate', 'edit-resend', 'preview-html'])
@@ -134,8 +137,9 @@ const containerRef = ref(null)
 const userAvatarSrc = computed(() => getTheme() === 'dark' ? '/icons/user_ss.svg' : '/icons/user.svg')
 const aiAvatarSrc = computed(() => getTheme() === 'dark' ? '/icons/AIBot_ss.svg' : '/icons/AIBot.svg')
 
-function renderMd(text) {
-  return renderMarkdown(text)
+// 渲染 Markdown；仅历史消息正文传入展示下标并叠加搜索高亮，思考过程与流式消息保持原样
+function renderMd(text, displayIdx = -1) {
+  return highlightRenderedHtml(renderMarkdown(text), displayIdx)
 }
 
 // 生成消息的 DOM 锚点 ID：用于锚点跳转与会话内搜索定位时 getElementById
@@ -144,8 +148,51 @@ function msgDomId(displayIdx) {
   return 'msg-anchor-' + (displayIdx + props.startIndex)
 }
 
-function formatUserContent(content) {
-  return escapeHtml(content).replace(/\n/g, '<br>')
+// 在离屏 HTML 中包裹关键词，返回给 v-html 一次性渲染，避免直接修改 Vue 已挂载 DOM
+function highlightRenderedHtml(html, displayIdx) {
+  if (displayIdx < 0) return html
+  const keyword = props.searchKeyword.trim()
+  if (!keyword) return html
+  const keywordLower = keyword.toLowerCase()
+  const root = document.createElement('div')
+  root.innerHTML = html
+  const isActive = displayIdx + props.startIndex === props.searchActiveIndex
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  const textNodes = []
+  let node = walker.nextNode()
+  while (node) {
+    const parent = node.parentElement
+    // 代码、公式、图表与操作按钮有独立的后处理流程，搜索标记不介入其内部 DOM
+    const skip = parent?.closest('script, style, svg, button, input, textarea, pre, code, .code-header, .mermaid-container, .katex')
+    if (!skip && node.textContent?.toLowerCase().includes(keywordLower)) textNodes.push(node)
+    node = walker.nextNode()
+  }
+
+  textNodes.forEach(textNode => {
+    const text = textNode.textContent || ''
+    const lower = text.toLowerCase()
+    const fragment = document.createDocumentFragment()
+    let cursor = 0
+    let matchAt = lower.indexOf(keywordLower)
+    while (matchAt !== -1) {
+      if (matchAt > cursor) fragment.append(document.createTextNode(text.slice(cursor, matchAt)))
+      const mark = document.createElement('mark')
+      mark.className = `msg-search-match${isActive ? ' msg-search-match-active' : ''}`
+      mark.textContent = text.slice(matchAt, matchAt + keyword.length)
+      fragment.append(mark)
+      cursor = matchAt + keyword.length
+      matchAt = lower.indexOf(keywordLower, cursor)
+    }
+    if (cursor < text.length) fragment.append(document.createTextNode(text.slice(cursor)))
+    textNode.replaceWith(fragment)
+  })
+  return root.innerHTML
+}
+
+// 转义用户/错误消息并按需叠加离屏搜索高亮，确保 v-html 输入安全
+function formatUserContent(content, displayIdx = -1) {
+  const html = escapeHtml(content).replace(/\n/g, '<br>')
+  return highlightRenderedHtml(html, displayIdx)
 }
 
 function fmtToken(n) {

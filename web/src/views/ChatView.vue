@@ -64,13 +64,13 @@
                 @keydown.shift.enter="prevMsgMatch"
               />
               <span class="msg-search-count">{{ msgSearchInfo }}</span>
-              <button class="msg-search-nav" @click="prevMsgMatch" :title="t('chat.searchPrev')">
+              <button class="msg-search-nav" @click="prevMsgMatch" :title="t('chat.searchPrev')" :aria-label="t('chat.searchPrev')">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg>
               </button>
-              <button class="msg-search-nav" @click="nextMsgMatch" :title="t('chat.searchNext')">
+              <button class="msg-search-nav" @click="nextMsgMatch" :title="t('chat.searchNext')" :aria-label="t('chat.searchNext')">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
               </button>
-              <button class="msg-search-nav" @click="closeMsgSearch" :title="t('common.cancel')">
+              <button class="msg-search-nav" @click="closeMsgSearch" :title="t('common.cancel')" :aria-label="t('common.cancel')">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               </button>
             </div>
@@ -94,6 +94,8 @@
             :streaming-msg="streamingMsg"
             :start-index="hiddenCount"
             :highlight-id="highlightMsgId"
+            :search-keyword="msgSearchKeyword"
+            :search-active-index="activeMsgSearchIndex"
             @copy="copyMsgContent"
             @lightbox="lightboxSrc = $event"
             @regenerate="handleRegenerate"
@@ -726,6 +728,12 @@ const msgSearchInfo = computed(() => {
   return (msgSearchCursor.value + 1) + '/' + total
 })
 
+// 当前搜索结果对应的消息绝对下标，供消息组件标记当前关键词命中位置
+const activeMsgSearchIndex = computed(() => {
+  if (msgSearchCursor.value < 0) return -1
+  return msgSearchMatches.value[msgSearchCursor.value] ?? -1
+})
+
 function openMsgSearch() {
   msgSearchOpen.value = true
   nextTick(() => msgSearchInputRef.value?.focus())
@@ -737,11 +745,19 @@ function closeMsgSearch() {
   msgSearchCursor.value = -1
 }
 
-// 关键字变化后定位到第一个匹配（从当前视口起向后找更符合直觉，简单起见定位首个）
+// 跳转到搜索结果所在消息后，再将具体关键词高亮滚动到视口中央
+async function jumpToSearchMatch(messageIndex) {
+  await jumpToAbsIndex(messageIndex)
+  await nextTick()
+  const activeMark = document.querySelector(`#msg-anchor-${messageIndex} .msg-search-match-active`)
+  activeMark?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
+}
+
+// 关键字变化后定位到第一个匹配，并将具体关键词置于视口中央
 watch(msgSearchKeyword, () => {
   if (!msgSearchMatches.value.length) { msgSearchCursor.value = -1; return }
   msgSearchCursor.value = 0
-  jumpToAbsIndex(msgSearchMatches.value[0])
+  jumpToSearchMatch(msgSearchMatches.value[0])
 })
 
 // 跳转到指定序号的匹配项（循环）
@@ -749,13 +765,15 @@ function jumpToMatch(cursor) {
   const matches = msgSearchMatches.value
   if (!matches.length) return
   msgSearchCursor.value = ((cursor % matches.length) + matches.length) % matches.length
-  jumpToAbsIndex(matches[msgSearchCursor.value])
+  jumpToSearchMatch(matches[msgSearchCursor.value])
 }
 
+// 导航到下一个搜索命中项，末尾自动回到第一项
 function nextMsgMatch() {
   jumpToMatch(msgSearchCursor.value + 1)
 }
 
+// 导航到上一个搜索命中项，第一项之前自动回到末项
 function prevMsgMatch() {
   jumpToMatch(msgSearchCursor.value - 1)
 }
