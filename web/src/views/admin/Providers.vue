@@ -63,8 +63,9 @@
             <span v-else style="color:var(--ink-4)">未设置</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="150" align="center" fixed="right">
+        <el-table-column label="操作" width="210" align="center" fixed="right">
           <template #default="{ row }">
+            <el-button size="small" text @click="showDetail(row)">明细</el-button>
             <el-button size="small" text aria-label="编辑厂商" @click="showRename(row)">
               <el-icon><Edit /></el-icon>
             </el-button>
@@ -77,6 +78,34 @@
         :total="filteredProviders.length" :total-pages="providerTotalPages"
         @size-change="providerPage = 1" />
     </div>
+
+    <!-- 厂商明细弹窗：模型数与列表页统一按厂商模型目录计算 -->
+    <el-dialog v-model="detailVisible" :title="'厂商明细 - ' + detailProvider.name" width="760px" destroy-on-close>
+      <el-descriptions :column="2" border>
+        <el-descriptions-item label="厂商 ID">{{ detailProvider.id || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="类型">{{ detailProvider.type === 'custom' ? '自定义' : '预置' }}</el-descriptions-item>
+        <el-descriptions-item label="显示名称">{{ detailProvider.name || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="协议">{{ formatProtocol(detailProvider.protocol) }}</el-descriptions-item>
+        <el-descriptions-item label="API 地址" :span="2">{{ detailProvider.defaultApiUrl || '-' }}</el-descriptions-item>
+      </el-descriptions>
+      <div class="detail-toolbar">
+        <strong>支持模型（{{ getModelCount(detailProvider) }}）</strong>
+        <el-input v-model="detailModelQuery" placeholder="按模型名称模糊查询" clearable style="width:240px" />
+      </div>
+      <el-table :data="filteredDetailModels" height="340" border empty-text="暂无匹配模型">
+        <el-table-column prop="id" label="模型 ID" min-width="220" show-overflow-tooltip />
+        <el-table-column prop="name" label="模型名称" min-width="200" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.name || row.id }}</template>
+        </el-table-column>
+        <el-table-column label="思考" width="80" align="center">
+          <template #default="{ row }">{{ row.supportsThinking ? '支持' : '不支持' }}</template>
+        </el-table-column>
+        <el-table-column label="多模态" width="90" align="center">
+          <template #default="{ row }">{{ row.supportsMultimodal ? '支持' : '不支持' }}</template>
+        </el-table-column>
+      </el-table>
+      <template #footer><el-button @click="detailVisible = false">关闭</el-button></template>
+    </el-dialog>
 
     <!-- 修改厂商弹窗 -->
     <el-dialog v-model="renameVisible" :title="renameForm.isCustom ? '修改自定义厂商' : '修改预置厂商'" width="520px" destroy-on-close>
@@ -156,7 +185,6 @@ import { ref, computed, onMounted, onActivated, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Edit } from '@element-plus/icons-vue'
 import { getProviders, renameProvider, fetchProviderModels, saveProviderModels } from '@/api/providers'
-import { getModels } from '@/api/models'
 import { autoColWidth } from '@/composables/useTableAutoWidth'
 import AdminPager from '@/components/admin/AdminPager.vue'
 
@@ -174,7 +202,6 @@ const providerIconMap = {
 const loading = ref(false)
 const submitting = ref(false)
 const allProviders = ref([])
-const allModels = ref([])
 
 const filterName = ref('')
 const filterType = ref('')
@@ -222,8 +249,36 @@ function resetFilter() {
   providerPage.value = 1
 }
 
+// 返回厂商目录中的模型总数，确保列表数字与厂商明细模型表一致
 function getModelCount(p) {
-  return allModels.value.filter(m => m.providerId === p.id).length
+  return Array.isArray(p?.models) ? p.models.length : (p?.modelCount || 0)
+}
+
+// ===== 厂商明细 =====
+const detailVisible = ref(false)
+const detailProvider = ref({ name: '', models: [] })
+const detailModelQuery = ref('')
+
+// 厂商明细模型名称采用大小写不敏感的包含匹配
+const filteredDetailModels = computed(() => {
+  const keyword = detailModelQuery.value.trim().toLocaleLowerCase()
+  const models = Array.isArray(detailProvider.value.models) ? detailProvider.value.models : []
+  if (!keyword) return models
+  return models.filter(model => (model.name || model.id || '').toLocaleLowerCase().includes(keyword))
+})
+
+// 打开厂商明细并重置模型查询条件
+function showDetail(row) {
+  detailProvider.value = { ...row, models: Array.isArray(row.models) ? row.models : [] }
+  detailModelQuery.value = ''
+  detailVisible.value = true
+}
+
+// 将后端协议值转换为管理员可读文本
+function formatProtocol(protocol) {
+  if (protocol === 'anthropic') return 'Anthropic'
+  if (protocol === 'openai') return 'OpenAI 兼容'
+  return protocol || '-'
 }
 
 // 修改厂商
@@ -340,9 +395,8 @@ async function submitRename() {
 async function loadData(silent = false) {
   if (!silent) loading.value = true
   try {
-    const [pRes, mRes] = await Promise.all([getProviders(), getModels()])
+    const pRes = await getProviders()
     if (pRes?.success) allProviders.value = pRes.data || []
-    if (mRes?.success) allModels.value = mRes.data || []
   } finally {
     loading.value = false
   }
@@ -366,5 +420,16 @@ onActivated(() => {
   flex-wrap: wrap;
   gap: 6px;
   overflow-y: auto;
+}
+.detail-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 18px 0 10px;
+}
+@media (max-width: 720px) {
+  .detail-toolbar { align-items: stretch; flex-direction: column; }
+  .detail-toolbar :deep(.el-input) { width: 100% !important; }
 }
 </style>

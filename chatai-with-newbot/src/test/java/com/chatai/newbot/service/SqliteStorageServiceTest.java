@@ -1,6 +1,7 @@
 package com.chatai.newbot.service;
 
 import com.chatai.newbot.model.ModelConfig;
+import com.chatai.newbot.model.ProviderModel;
 import com.chatai.newbot.model.UsageLog;
 import com.chatai.newbot.model.User;
 import org.junit.jupiter.api.AfterAll;
@@ -16,6 +17,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -170,6 +172,17 @@ class SqliteStorageServiceTest {
         assertEquals(first.getProviderName(), reused.getProviderName());
         assertEquals(first.getProviderIcon(), reused.getProviderIcon());
         assertEquals(first.getApiUrl(), reused.getApiUrl());
+
+        ProviderModel catalogModel = new ProviderModel();
+        catalogModel.setId("catalog-only-model");
+        catalogModel.setName("目录模型");
+        service.saveProviderModels(first.getProviderId(), List.of(catalogModel));
+        Map<String, Object> providerRow = service.listCustomProviders().stream()
+                .filter(row -> first.getProviderId().equals(row.get("id")))
+                .findFirst().orElseThrow();
+        assertEquals(1, ((Number) providerRow.get("modelCount")).intValue(),
+                "厂商模型数必须按支持目录统计，不能按已接入配置数统计");
+        assertEquals(1, ((List<?>) providerRow.get("models")).size());
     }
 
     /** 分享复制授权应允许被授权用户读取，同时查询参数不能绕过所有权校验。 */

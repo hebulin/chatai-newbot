@@ -31,7 +31,7 @@
             size="small"
             @click.stop="showQuickAdd(p)"
           >一键接入</el-button>
-          <span v-else class="provider-card-done">✓ 已全部接入</span>
+          <span v-else class="provider-card-done">已全部接入</span>
         </div>
       </div>
       <div v-if="!loading && presetProviders.length === 0" style="text-align:center;color:var(--ink-3);padding:40px;grid-column:1/-1;">
@@ -40,7 +40,7 @@
     </div>
 
     <!-- 快速接入弹窗 -->
-    <el-dialog v-model="quickAddVisible" :title="'快速接入 - ' + (currentProvider?.name || '')" width="500px" destroy-on-close>
+    <el-dialog v-model="quickAddVisible" :title="'快速接入 - ' + (currentProvider?.name || '')" width="560px" destroy-on-close>
       <el-form label-width="80px">
         <el-form-item label="厂商">
           <span style="display:flex;align-items:center;gap:8px;">
@@ -52,9 +52,20 @@
           <el-input v-model="quickAddForm.apiKey" placeholder="sk-..." />
         </el-form-item>
         <el-form-item label="选择模型">
-          <div style="display:flex;flex-direction:column;gap:8px;max-height:240px;overflow-y:auto;width:100%;">
+          <div class="quick-model-picker">
+            <el-input v-model="modelKeyword" placeholder="搜索模型名称或 ID" clearable />
+            <div class="quick-model-actions">
+              <el-checkbox
+                :model-value="allFilteredSelected"
+                :indeterminate="someFilteredSelected"
+                :disabled="filteredAvailableModels.length === 0"
+                @change="toggleSelectAll"
+              >全选（{{ filteredAvailableModels.length }}）</el-checkbox>
+              <span>已选 {{ selectedModelCount }} 个</span>
+            </div>
+            <div class="quick-model-list">
             <el-checkbox
-              v-for="pm in availableModels"
+              v-for="pm in filteredAvailableModels"
               :key="pm.id"
               v-model="quickAddForm.selectedIds[pm.id]"
             >
@@ -62,6 +73,8 @@
               <span v-if="pm.supportsThinking" class="think-badge" style="margin-left:4px;">思考</span>
               <span v-if="pm.supportsMultimodal" class="mm-badge" style="margin-left:4px;">多模态</span>
             </el-checkbox>
+              <div v-if="filteredAvailableModels.length === 0" class="quick-model-empty">暂无匹配模型</div>
+            </div>
           </div>
         </el-form-item>
         <el-form-item label="可见性">
@@ -103,6 +116,7 @@ const presetProviders = computed(() => allProviders.value.filter(p => p.type !==
 
 const quickAddVisible = ref(false)
 const currentProvider = ref(null)
+const modelKeyword = ref('')
 const quickAddForm = ref({
   apiKey: '',
   selectedIds: {},
@@ -113,6 +127,30 @@ const availableModels = computed(() => {
   if (!currentProvider.value) return []
   const pModels = currentProvider.value.models || []
   return pModels.filter(pm => !allModels.value.some(m => m.providerId === currentProvider.value.id && m.modelId === pm.id))
+})
+
+// 按模型名称或 ID 进行大小写不敏感的包含搜索
+const filteredAvailableModels = computed(() => {
+  const keyword = modelKeyword.value.trim().toLocaleLowerCase()
+  if (!keyword) return availableModels.value
+  return availableModels.value.filter(model => {
+    const haystack = `${model.name || ''} ${model.id || ''}`.toLocaleLowerCase()
+    return haystack.includes(keyword)
+  })
+})
+
+// 当前已经勾选的可接入模型数量
+const selectedModelCount = computed(() => availableModels.value
+  .filter(model => quickAddForm.value.selectedIds[model.id]).length)
+
+// 当前搜索结果是否已经全部选中
+const allFilteredSelected = computed(() => filteredAvailableModels.value.length > 0
+  && filteredAvailableModels.value.every(model => quickAddForm.value.selectedIds[model.id]))
+
+// 当前搜索结果是否处于部分选中状态
+const someFilteredSelected = computed(() => {
+  const selected = filteredAvailableModels.value.filter(model => quickAddForm.value.selectedIds[model.id]).length
+  return selected > 0 && selected < filteredAvailableModels.value.length
 })
 
 function getExistingCount(providerId) {
@@ -136,6 +174,7 @@ function onCardClick(p) {
 
 function showQuickAdd(p) {
   currentProvider.value = p
+  modelKeyword.value = ''
   quickAddForm.value = { apiKey: '', selectedIds: {}, visibleToAll: true }
   // 默认全选可用模型
   const pModels = p.models || []
@@ -145,6 +184,13 @@ function showQuickAdd(p) {
     }
   })
   quickAddVisible.value = true
+}
+
+// 全选或取消全选当前搜索结果，未命中的模型保持原选择状态
+function toggleSelectAll(checked) {
+  filteredAvailableModels.value.forEach(model => {
+    quickAddForm.value.selectedIds[model.id] = checked
+  })
 }
 
 async function submitQuickAdd() {
@@ -199,3 +245,10 @@ onActivated(() => {
   loadData(true)
 })
 </script>
+
+<style scoped>
+.quick-model-picker { display: flex; width: 100%; flex-direction: column; gap: 10px; }
+.quick-model-actions { display: flex; align-items: center; justify-content: space-between; color: var(--ink-3); font-size: 12px; }
+.quick-model-list { display: flex; max-height: 240px; flex-direction: column; gap: 8px; overflow-y: auto; }
+.quick-model-empty { padding: 24px 0; color: var(--ink-3); text-align: center; }
+</style>

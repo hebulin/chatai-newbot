@@ -204,7 +204,7 @@
     <el-dialog v-model="addVisible" title="添加模型" width="540px" destroy-on-close>
       <el-form label-width="90px">
         <el-form-item label="厂商">
-          <el-select v-model="addForm.providerId" style="width:100%" @change="onProviderChange">
+          <el-select v-model="addForm.providerId" filterable style="width:100%" @change="onProviderChange">
             <el-option v-for="p in allProviders" :key="p.id" :label="p.name + (p.type === 'custom' ? '（自定义）' : '')" :value="p.id" />
             <el-option label="新建自定义厂商..." value="__custom__" />
           </el-select>
@@ -215,8 +215,8 @@
         </el-form-item>
         <!-- 已有厂商模型选择 -->
         <el-form-item v-if="addForm.providerId !== '__custom__' && addForm.providerId" label="模型">
-          <el-select v-model="addForm.modelSelect" style="width:100%" @change="onModelSelectChange">
-            <el-option v-for="pm in currentProviderModels" :key="pm.id" :label="pm.name + (pm.supportsThinking ? ' (思考)' : '') + (pm.supportsMultimodal ? ' (多模态)' : '') + (isModelAdded(pm.id) ? ' ✓已接入' : '')" :value="pm.id" />
+          <el-select v-model="addForm.modelSelect" filterable style="width:100%" @change="onModelSelectChange">
+            <el-option v-for="pm in currentProviderModels" :key="pm.id" :label="pm.name + (pm.supportsThinking ? ' (思考)' : '') + (pm.supportsMultimodal ? ' (多模态)' : '') + (isModelAdded(pm.id) ? '（已接入）' : '')" :value="pm.id" />
             <el-option label="自定义模型..." value="__custom__" />
           </el-select>
         </el-form-item>

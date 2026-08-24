@@ -6,9 +6,14 @@
     <div class="sidebar-content">
       <div class="sidebar-header">
         <span class="sb-eyebrow">{{ t('sidebar.eyebrow') }}</span>
-        <button class="icon-btn close-sidebar-btn" @click="$emit('toggle')" :title="t('common.close')">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
+        <div class="sidebar-header-actions">
+          <button class="sidebar-header-action" :class="{ active: multiSelectMode }" @click="toggleMultiSelect" :title="t('sidebar.multiSelect')" :aria-label="t('sidebar.multiSelect')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="5" height="5" rx="1"/><rect x="3" y="15" width="5" height="5" rx="1"/><path d="M12 6h9M12 17h9"/><path d="m4.5 6.5 1 1 2-2"/></svg>
+          </button>
+          <button class="icon-btn close-sidebar-btn" @click="$emit('toggle')" :title="t('common.close')" :aria-label="t('common.close')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
       </div>
 
       <div class="new-chat-row">
@@ -18,12 +23,6 @@
           </span>
           <span class="nc-label">{{ t('sidebar.newChat') }}</span>
           <span class="nc-shortcut">⌘N</span>
-        </button>
-        <button class="new-folder-btn" @click="onCreateFolder" :title="t('sidebar.newFolder')" :aria-label="t('sidebar.newFolder')">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="10" x2="12" y2="16"/><line x1="9" y1="13" x2="15" y2="13"/></svg>
-        </button>
-        <button class="new-folder-btn" :class="{ active: multiSelectMode }" @click="toggleMultiSelect" title="多选会话" aria-label="多选会话">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="5" height="5" rx="1"/><rect x="3" y="15" width="5" height="5" rx="1"/><path d="M12 6h9M12 17h9"/><path d="m4.5 6.5 1 1 2-2"/></svg>
         </button>
       </div>
 
@@ -46,6 +45,12 @@
         <!-- 加载骨架屏：会话历史未加载完成时显示 -->
         <div v-if="!chatStore.isChatHistoryLoaded" class="chat-list-skeleton">
           <div v-for="n in 5" :key="n" class="chat-skeleton-item"></div>
+        </div>
+        <div v-if="chatStore.isChatHistoryLoaded && !chatStore.searchKeyword" class="chat-date-header folder-section-title">
+          <span>{{ t('sidebar.folders') }}</span>
+          <button class="folder-title-action" @click="onCreateFolder" :title="t('sidebar.newFolder')" :aria-label="t('sidebar.newFolder')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="10" x2="12" y2="16"/><line x1="9" y1="13" x2="15" y2="13"/></svg>
+          </button>
         </div>
         <!-- 全文搜索结果（服务端检索消息内容） -->
         <template v-if="chatStore.searchKeyword && searchResults.length">
@@ -77,7 +82,7 @@
             <svg class="folder-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
             <span class="folder-name">{{ row.folder.name }}</span>
             <span class="folder-count">{{ row.count }}</span>
-            <button class="chat-more-btn folder-more-btn" @click.stop="toggleFolderMenu(row.folder.id)" :title="t('sidebar.more')">
+            <button class="chat-more-btn folder-more-btn" @click.stop="toggleFolderMenu(row.folder.id)" :title="t('sidebar.more')" :aria-label="t('sidebar.more')">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
             </button>
             <div class="chat-item-menu folder-menu" v-if="openFolderMenuId === row.folder.id" @click.stop>
@@ -98,7 +103,7 @@
             <input v-if="multiSelectMode" class="chat-select-checkbox" type="checkbox" :checked="selectedChatIds.includes(row.chat.id)" :aria-label="'选择会话 ' + row.chat.title" @click.stop="toggleChatSelection(row.chat.id)" />
             <svg v-if="row.chat.pinned" class="pin-marker" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M16 3l5 5-3 1-4 4-1 6-2-2-4 4-1-1 4-4-2-2 6-1 4-4z"/></svg>
             <span class="title">{{ row.chat.title }}</span>
-            <button v-if="!multiSelectMode" class="chat-more-btn" @click.stop="toggleChatMenu(row.chat.id)" :title="t('sidebar.more')">
+            <button v-if="!multiSelectMode" class="chat-more-btn" @click.stop="toggleChatMenu(row.chat.id)" :title="t('sidebar.more')" :aria-label="t('sidebar.more')">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
             </button>
             <div class="chat-item-menu" :class="{ 'is-move-menu': moveMenuId === row.chat.id }" v-if="openMenuId === row.chat.id" @click.stop>
@@ -297,7 +302,7 @@ async function promptCreateFolder(defaultName) {
   }
 }
 
-// 侧边栏顶部"新建文件夹"按钮
+// 文件夹分组标题右侧的新建入口
 async function onCreateFolder() {
   await promptCreateFolder()
 }
@@ -525,7 +530,23 @@ const emit = defineEmits(['toggle', 'new-chat', 'switch-chat', 'delete-chat', 'o
 }
 .chat-item.selected { background: color-mix(in srgb, var(--primary,#6366f1) 12%, transparent); }
 .chat-select-checkbox { width:15px; height:15px; flex:0 0 auto; accent-color:var(--primary,#6366f1); }
-.new-folder-btn.active { color:var(--primary,#6366f1); border-color:var(--primary,#6366f1); }
+.sidebar-header-actions { display:flex; align-items:center; gap:4px; }
+.sidebar-header-action {
+  display:inline-flex;
+  width:24px;
+  height:24px;
+  align-items:center;
+  justify-content:center;
+  padding:0;
+  border:0;
+  border-radius:6px;
+  background:transparent;
+  color:var(--ink-3,#999);
+  cursor:pointer;
+  transition:background .15s,color .15s;
+}
+.sidebar-header-action:hover,
+.sidebar-header-action.active { background:var(--primary-soft,#eef3ff); color:var(--primary,#4a7dff); }
 .multi-select-toolbar { display:flex; align-items:center; gap:6px; padding:8px 10px; margin-bottom:8px; border:1px solid var(--border,#333); border-radius:6px; color:var(--ink-2,#ccc); font-size:11px; }
 .multi-select-toolbar span { margin-right:auto; }
 .multi-select-toolbar button { border:0; background:transparent; color:var(--primary,#6366f1); cursor:pointer; font-size:11px; }
@@ -577,11 +598,10 @@ const emit = defineEmits(['toggle', 'new-chat', 'switch-chat', 'delete-chat', 'o
   color: #e5484d;
 }
 
-/* 新建会话 + 新建文件夹 并排按钮行 */
+/* 新建会话按钮行 */
 .new-chat-row {
   display: flex;
   align-items: stretch;
-  gap: 8px;
   margin-bottom: 16px;
 }
 .new-chat-row .new-chat-btn {
@@ -590,28 +610,24 @@ const emit = defineEmits(['toggle', 'new-chat', 'switch-chat', 'delete-chat', 'o
   min-width: 0;
   margin-bottom: 0;
 }
-/* 并排布局下隐藏 ⌘N 快捷键徽标，为双语文案预留单行空间，避免挤压换行（快捷键本身仍可用） */
-.new-chat-row .nc-shortcut {
-  display: none;
+
+/* 文件夹一级分组标题与日期标题保持相同层级，右侧只保留小型新建入口 */
+.folder-section-title { display:flex; align-items:center; justify-content:space-between; }
+.folder-title-action {
+  display:inline-flex;
+  width:22px;
+  height:22px;
+  align-items:center;
+  justify-content:center;
+  padding:0;
+  border:0;
+  border-radius:5px;
+  background:transparent;
+  color:var(--primary,#4a7dff);
+  cursor:pointer;
+  transition:background .15s;
 }
-.new-folder-btn {
-  flex-shrink: 0;
-  width: 44px;
-  border-radius: var(--radius, 10px);
-  border: 1px solid var(--border, #e5e5e5);
-  background: var(--surface-2, #f7f7f7);
-  color: var(--ink-2, #666);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: background .15s, color .15s, border-color .15s;
-}
-.new-folder-btn:hover {
-  color: var(--primary, #4a7dff);
-  border-color: var(--primary, #4a7dff);
-  background: var(--surface-1, #fff);
-}
+.folder-title-action:hover { background:var(--primary-soft,#eef3ff); }
 
 /* 文件夹分组标题行 */
 .chat-folder-header {

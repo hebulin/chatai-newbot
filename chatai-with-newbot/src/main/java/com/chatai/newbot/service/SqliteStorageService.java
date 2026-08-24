@@ -1504,17 +1504,17 @@ public class SqliteStorageService implements StorageService {
                 "SELECT * FROM t_custom_provider ORDER BY created_at, name")) {
             String id = cleanText(row.get("id"));
             Provider provider = getResolvedProvider(id);
+            List<ProviderModel> models = provider == null || provider.getModels() == null
+                    ? Collections.emptyList() : provider.getModels();
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", id);
             m.put("name", cleanText(row.get("name")));
-            m.put("modelCount", jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM t_model_config WHERE provider_id=?", Integer.class, id));
+            m.put("modelCount", models.size());
             m.put("icon", cleanText(row.get("icon")));
             m.put("defaultApiUrl", cleanText(row.get("api_url")));
             m.put("protocol", cleanText(row.get("protocol")));
             m.put("thinkingParamType", cleanText(row.get("thinking_param_type")));
-            m.put("models", provider == null || provider.getModels() == null
-                    ? Collections.emptyList() : provider.getModels());
+            m.put("models", models);
             m.put("type", "custom");
             result.add(m);
         }

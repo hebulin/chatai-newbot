@@ -67,16 +67,17 @@
         <el-table-column prop="lastLoginBrowser" label="浏览器" :width="colW.browser" show-overflow-tooltip>
           <template #default="{ row }">{{ row.lastLoginBrowser || '-' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="180" align="center" fixed="right">
+        <el-table-column label="操作" width="230" align="center" fixed="right">
           <template #default="{ row }">
             <el-button-group>
-              <el-button size="small" text @click="editUser(row)">
+              <el-button size="small" text @click="showUserDetail(row)">明细</el-button>
+              <el-button size="small" text aria-label="编辑用户" @click="editUser(row)">
                 <el-icon><Edit /></el-icon>
               </el-button>
-              <el-button v-if="row.username !== 'admin'" size="small" text type="danger" @click="handleDelete(row)">
+              <el-button v-if="row.username !== 'admin'" size="small" text type="danger" aria-label="删除用户" @click="handleDelete(row)">
                 <el-icon><Delete /></el-icon>
               </el-button>
-              <el-button v-if="row.role !== 'admin'" size="small" text @click="showPerms(row)">
+              <el-button v-if="row.role !== 'admin'" size="small" text aria-label="设置用户模型权限" @click="showPerms(row)">
                 <el-icon><Key /></el-icon>
               </el-button>
               <el-button
@@ -84,6 +85,7 @@
                 size="small" text
                 :type="row.disabled ? 'danger' : 'success'"
                 :title="row.disabled ? '已禁用，点击启用账号' : '正常，点击禁用账号'"
+                :aria-label="row.disabled ? '启用用户' : '禁用用户'"
                 @click="handleToggleDisabled(row)"
               >
                 <!-- icon 展示当前状态：正常=绿色解锁，禁用=红色锁定 -->
@@ -98,6 +100,41 @@
         :total="userTotal" :total-pages="userTotalPages"
         @size-change="reloadUsers" @page-change="loadUsers" />
     </div>
+
+    <!-- 用户明细弹窗 -->
+    <el-dialog v-model="detailVisible" :title="'用户明细 - ' + detailUser.username" width="760px" destroy-on-close>
+      <div class="user-detail-header">
+        <div class="admin-avatar-preview" aria-label="用户头像预览">
+          <img :src="avatarSource(detailUser)" alt="用户头像" />
+        </div>
+        <div>
+          <div class="user-detail-name">{{ detailUser.displayName || detailUser.username || '-' }}</div>
+          <div class="user-detail-subtitle">{{ detailUser.username || '-' }}</div>
+        </div>
+      </div>
+      <el-descriptions :column="2" border>
+        <el-descriptions-item label="用户 ID" :span="2">{{ detailUser.id || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="角色">{{ detailUser.role === 'admin' ? '管理员' : '普通用户' }}</el-descriptions-item>
+        <el-descriptions-item label="状态">{{ detailUser.disabled ? '已禁用' : '正常' }}</el-descriptions-item>
+        <el-descriptions-item label="邮箱">{{ detailUser.email || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="联系电话">{{ detailUser.phone || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="部门">{{ detailUser.department || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="职位">{{ detailUser.jobTitle || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="每日限额">{{ limitText(detailUser) }}</el-descriptions-item>
+        <el-descriptions-item label="注册时间">{{ detailUser.createdAt || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="最近登录">{{ detailUser.lastLoginAt || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="登录 IP">{{ detailUser.lastLoginIp || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="浏览器" :span="2">{{ detailUser.lastLoginBrowser || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="个人简介" :span="2">{{ detailUser.bio || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="可用模型" :span="2">
+          <div v-if="detailAllowedModels.length" class="detail-model-tags">
+            <el-tag v-for="model in detailAllowedModels" :key="model.id" size="small">{{ model.name }}</el-tag>
+          </div>
+          <span v-else>不限制（可用所有公开模型）</span>
+        </el-descriptions-item>
+      </el-descriptions>
+      <template #footer><el-button @click="detailVisible = false">关闭</el-button></template>
+    </el-dialog>
 
     <!-- 添加用户弹窗 -->
     <el-dialog v-model="addVisible" title="添加用户" width="420px" destroy-on-close>
@@ -164,6 +201,12 @@
           <span style="font-size:12px;color:var(--ink-3);line-height:1.6;">二选其一：按每日调用次数或每日 Token 总量限制。选“不单独限制”则回退全局配额。仅对普通用户生效。</span>
         </el-form-item>
         <el-divider content-position="left">用户资料</el-divider>
+        <div class="avatar-edit-row">
+          <div class="admin-avatar-preview" aria-label="编辑头像预览">
+            <img :src="avatarSource(editForm)" alt="头像预览" />
+          </div>
+          <span>头像预览会随头像类型和 SVG 代码实时更新</span>
+        </div>
         <div class="user-profile-grid">
           <el-form-item label="显示名称"><el-input v-model="editForm.displayName" maxlength="80" /></el-form-item>
           <el-form-item label="邮箱"><el-input v-model="editForm.email" maxlength="160" /></el-form-item>
@@ -238,6 +281,18 @@ const userPageSize = ref(10)
 const userTotal = ref(0)
 const userTotalPages = ref(1)
 
+// ===== 用户明细 =====
+const detailVisible = ref(false)
+const detailUser = ref({ username: '', allowedModelIds: [] })
+
+// 将用户授权模型 ID 转换为明细弹窗中可读的模型名称
+const detailAllowedModels = computed(() => {
+  return (detailUser.value.allowedModelIds || []).map(id => {
+    const model = allModels.value.find(item => item.id === id)
+    return { id, name: model?.displayName || model?.modelId || id }
+  })
+})
+
 // 列宽自适应：按当页列最长内容计算，上限 50 个汉字
 // 每日限额列的展示文本
 function limitText(u) {
@@ -262,6 +317,20 @@ const colW = computed(() => {
 function getModelIcon(m) {
   if (m.providerId && providerIconMap[m.providerId]) return providerIconMap[m.providerId]
   return null
+}
+
+// 打开用户明细并复制当前行，避免列表刷新影响弹窗内容
+function showUserDetail(row) {
+  detailUser.value = { ...row, allowedModelIds: [...(row.allowedModelIds || [])] }
+  detailVisible.value = true
+}
+
+// 返回用户头像地址；SVG 代码不完整时回退默认头像，防止预览出现破图
+function avatarSource(user) {
+  const svg = user?.avatarType === 'svg' ? String(user.avatarValue || '').trim() : ''
+  return svg.toLocaleLowerCase().startsWith('<svg')
+    ? 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg)
+    : '/icons/user.svg'
 }
 
 // 添加用户
@@ -511,6 +580,31 @@ onActivated(() => {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0 14px;
 }
+.avatar-edit-row,
+.user-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+.admin-avatar-preview {
+  display: flex;
+  width: 64px;
+  height: 64px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--paper-2);
+}
+.admin-avatar-preview img { width: 100%; height: 100%; object-fit: cover; }
+.user-detail-name { color: var(--ink-1); font-size: 18px; font-weight: 600; }
+.user-detail-subtitle { margin-top: 4px; color: var(--ink-3); font-size: 12px; }
+.detail-model-tags { display: flex; flex-wrap: wrap; gap: 6px; }
 @media (max-width: 720px) {
   .user-profile-grid { grid-template-columns: 1fr; }
 }
