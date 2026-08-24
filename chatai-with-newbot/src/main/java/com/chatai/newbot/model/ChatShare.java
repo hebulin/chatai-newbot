@@ -1,5 +1,6 @@
 package com.chatai.newbot.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 
 /**
@@ -14,4 +15,16 @@ public class ChatShare {
     private String title;           // 会话标题快照（分享时刻的标题）
     private String createdAt;       // 创建时间 yyyy-MM-dd HH:mm:ss
     private String expiresAt;       // 过期时间 yyyy-MM-dd HH:mm:ss，null/空=永久有效
+    /** 分享时刻的消息快照 JSON；源会话变化或删除不会改变已分享内容 */
+    @JsonIgnore
+    private String snapshotJson;
+    /** 可选访问密码的 BCrypt 摘要；绝不返回前端 */
+    @JsonIgnore
+    private String passwordHash;
+    /** 已成功读取次数 */
+    private int accessCount;
+    /** 最大读取次数，0 表示不限 */
+    private int maxViews;
+    /** 是否在生成快照时执行了敏感信息脱敏 */
+    private boolean sanitized;
 }

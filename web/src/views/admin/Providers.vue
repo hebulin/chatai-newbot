@@ -43,6 +43,7 @@
             <span class="model-id-text">{{ row.id }}</span>
           </template>
         </el-table-column>
+        <el-table-column prop="defaultApiUrl" label="API 地址" min-width="220" show-overflow-tooltip />
         <el-table-column label="模型数" :width="colW.count" align="center">
           <template #default="{ row }">{{ getModelCount(row) }}</template>
         </el-table-column>
@@ -62,11 +63,12 @@
             <span v-else style="color:var(--ink-4)">未设置</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="80" align="center" fixed="right">
+        <el-table-column label="操作" width="150" align="center" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" text @click="showRename(row)">
+            <el-button size="small" text aria-label="编辑厂商" @click="showRename(row)">
               <el-icon><Edit /></el-icon>
             </el-button>
+            <el-button size="small" text aria-label="获取上游模型" @click="showCatalog(row)">获取模型</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -107,6 +109,12 @@
             <span style="font-size:12px;color:var(--ink-4);margin-left:8px;">预置厂商的图标不可修改</span>
           </template>
         </el-form-item>
+        <el-form-item label="当前模型">
+          <div class="provider-model-list">
+            <el-tag v-for="model in renameForm.models" :key="model.id" size="small">{{ model.name || model.id }}</el-tag>
+            <span v-if="!renameForm.models.length" style="color:var(--ink-4)">暂无已知模型</span>
+          </div>
+        </el-form-item>
         <div style="font-size:12px;color:var(--ink-3);margin-top:4px;">
           {{ renameForm.isCustom ? '修改后将同步更新所有该自定义厂商下的模型（仅匹配当前原名）' : '修改后预置厂商的显示名将立即更新，并同步至所有关联模型（ID/协议/默认URL等不可改）' }}
         </div>
@@ -116,14 +124,38 @@
         <el-button type="primary" @click="submitRename" :loading="submitting">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="catalogVisible" :title="'获取上游模型 - ' + catalogForm.name" width="680px" destroy-on-close>
+      <el-form label-width="90px">
+        <el-form-item label="API 地址">
+          <el-input v-model="catalogForm.apiUrl" placeholder="例如 https://api.example.com/v1" />
+        </el-form-item>
+        <el-form-item label="API Key">
+          <el-input v-model="catalogForm.apiKey" type="password" show-password placeholder="可留空，优先复用该厂商已接入模型的 Key" />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :loading="catalogLoading" @click="loadUpstreamModels">获取最新模型</el-button>
+          <span v-if="catalogEndpoint" style="margin-left:10px;color:var(--ink-3);font-size:12px">{{ catalogEndpoint }}</span>
+        </el-form-item>
+      </el-form>
+      <el-table ref="catalogTable" :data="fetchedModels" height="320" border @selection-change="handleCatalogSelection">
+        <el-table-column type="selection" width="46" />
+        <el-table-column prop="id" label="模型 ID" min-width="220" show-overflow-tooltip />
+        <el-table-column prop="name" label="模型名称" min-width="180" show-overflow-tooltip />
+      </el-table>
+      <template #footer>
+        <el-button @click="catalogVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="!selectedModels.length" :loading="catalogSaving" @click="saveCatalog">保存选中模型（{{ selectedModels.length }}）</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onActivated } from 'vue'
+import { ref, computed, onMounted, onActivated, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Edit } from '@element-plus/icons-vue'
-import { getProviders, renameProvider } from '@/api/providers'
+import { getProviders, renameProvider, fetchProviderModels, saveProviderModels } from '@/api/providers'
 import { getModels } from '@/api/models'
 import { autoColWidth } from '@/composables/useTableAutoWidth'
 import AdminPager from '@/components/admin/AdminPager.vue'
@@ -176,6 +208,7 @@ const colW = computed(() => {
     type: autoColWidth(['自定义', '预置'], { header: '类型', extra: 24 }),
     // 厂商ID列以等宽字体渲染，按 mono 测宽
     id: autoColWidth(list.map(p => p.id), { header: '厂商ID', min: 100, mono: true }),
+    apiUrl: autoColWidth(list.map(p => p.defaultApiUrl || ''), { header: 'API 地址', min: 160 }),
     count: autoColWidth(list.map(getModelCount), { header: '模型数' }),
     defaultName: autoColWidth(list.map(p => p.type === 'custom' ? '-' : (p.defaultName || p.name)), { header: '预设名称', min: 100 }),
     displayName: autoColWidth(list.map(p => p.name), { header: '显示名称', min: 100 }),
@@ -190,9 +223,6 @@ function resetFilter() {
 }
 
 function getModelCount(p) {
-  if (p.type === 'custom') {
-    return allModels.value.filter(m => m.providerId === '__custom__' && m.providerName === p.name).length
-  }
   return allModels.value.filter(m => m.providerId === p.id).length
 }
 
@@ -205,7 +235,8 @@ const renameForm = ref({
   currentIcon: '',
   newName: '',
   newIcon: '',
-  oldName: ''
+  oldName: '',
+  models: []
 })
 
 function showRename(row) {
@@ -216,9 +247,68 @@ function showRename(row) {
     currentIcon: row.icon || '',
     newName: row.name,
     newIcon: row.icon || '',
-    oldName: row.name
+    oldName: row.name,
+    models: Array.isArray(row.models) ? row.models : []
   }
   renameVisible.value = true
+}
+
+// ===== 上游模型目录 =====
+const catalogVisible = ref(false)
+const catalogLoading = ref(false)
+const catalogSaving = ref(false)
+const catalogTable = ref(null)
+const catalogForm = ref({ providerId: '', name: '', apiUrl: '', apiKey: '' })
+const fetchedModels = ref([])
+const selectedModels = ref([])
+
+// 保存上游模型表格的当前多选结果
+function handleCatalogSelection(rows) {
+  selectedModels.value = rows
+}
+const catalogEndpoint = ref('')
+
+// 打开上游模型目录弹窗并保留当前厂商地址
+function showCatalog(row) {
+  catalogForm.value = { providerId: row.id, name: row.name, apiUrl: row.defaultApiUrl || '', apiKey: '' }
+  fetchedModels.value = []
+  selectedModels.value = []
+  catalogEndpoint.value = ''
+  catalogVisible.value = true
+}
+
+// 获取上游模型并默认全选，管理员可取消不希望入库的条目
+async function loadUpstreamModels() {
+  if (!catalogForm.value.apiUrl.trim()) { ElMessage.warning('请输入 API 地址'); return }
+  catalogLoading.value = true
+  try {
+    const res = await fetchProviderModels(catalogForm.value.providerId, {
+      apiUrl: catalogForm.value.apiUrl.trim(), apiKey: catalogForm.value.apiKey.trim()
+    })
+    if (!res?.success) { ElMessage.error(res?.message || '获取失败'); return }
+    fetchedModels.value = res.data || []
+    catalogEndpoint.value = res.endpoint || ''
+    await nextTick()
+    fetchedModels.value.forEach(row => catalogTable.value?.toggleRowSelection(row, true))
+    ElMessage.success(`已获取 ${fetchedModels.value.length} 个模型`)
+  } finally {
+    catalogLoading.value = false
+  }
+}
+
+// 保存管理员勾选的模型目录
+async function saveCatalog() {
+  catalogSaving.value = true
+  try {
+    const res = await saveProviderModels(catalogForm.value.providerId, selectedModels.value)
+    if (res?.success) {
+      ElMessage.success(res.message || '模型目录已保存')
+      catalogVisible.value = false
+      await loadData()
+    } else ElMessage.error(res?.message || '保存失败')
+  } finally {
+    catalogSaving.value = false
+  }
 }
 
 async function submitRename() {
@@ -268,3 +358,13 @@ onActivated(() => {
   loadData(true)
 })
 </script>
+
+<style scoped>
+.provider-model-list {
+  display: flex;
+  max-height: 120px;
+  flex-wrap: wrap;
+  gap: 6px;
+  overflow-y: auto;
+}
+</style>

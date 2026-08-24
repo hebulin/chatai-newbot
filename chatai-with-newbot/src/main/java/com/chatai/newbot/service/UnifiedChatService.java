@@ -147,13 +147,13 @@ public class UnifiedChatService {
                 Map<String, Object> m = new HashMap<>();
                 m.put("role", msg.getRole());
                 // 附件文档：解析文本合并进文本内容（纯文本方式，不依赖多模态）
-                String textContent = contentWithAttachments(msg);
+                String textContent = contentWithAttachments(msg, usageLog.getUserId());
                 // 多模态：当消息含图片时，content转为 OpenAI Vision 格式的数组
                 if (msg.getImages() != null && !msg.getImages().isEmpty() && config.isSupportsMultimodal()) {
                     List<Map<String, Object>> contentParts = new ArrayList<>();
                     // 添加图片部分（本地上传 URL 先还原为 base64 data URL，存量 base64 原样透传）
                     for (String image : msg.getImages()) {
-                        String imageBase64 = fileStorageService.toDataUrl(image);
+                        String imageBase64 = fileStorageService.toDataUrl(image, usageLog.getUserId());
                         if (imageBase64 == null) {
                             continue; // 本地文件已被删除，跳过该图片
                         }
@@ -340,13 +340,13 @@ public class UnifiedChatService {
                 Map<String, Object> m = new HashMap<>();
                 m.put("role", msg.getRole());
                 // 附件文档：解析文本合并进文本内容（纯文本方式，不依赖多模态）
-                String textContent = contentWithAttachments(msg);
+                String textContent = contentWithAttachments(msg, usageLog.getUserId());
                 // 多模态：Anthropic 图片格式为 {type:"image", source:{type:"base64",...}}
                 if (msg.getImages() != null && !msg.getImages().isEmpty() && config.isSupportsMultimodal()) {
                     List<Map<String, Object>> contentParts = new ArrayList<>();
                     for (String image : msg.getImages()) {
                         // 本地上传 URL 先还原为 base64 data URL，存量 base64 原样透传
-                        String imageBase64 = fileStorageService.toDataUrl(image);
+                        String imageBase64 = fileStorageService.toDataUrl(image, usageLog.getUserId());
                         if (imageBase64 == null) {
                             continue; // 本地文件已被删除，跳过该图片
                         }
@@ -730,7 +730,7 @@ public class UnifiedChatService {
      * @param msg 待处理消息（无附件时原样返回 content）
      * @return 合并附件后的文本内容
      */
-    private String contentWithAttachments(NewBotMessage msg) {
+    private String contentWithAttachments(NewBotMessage msg, String userId) {
         String content = msg.getContent() == null ? "" : msg.getContent();
         if (msg.getAttachments() == null || msg.getAttachments().isEmpty()) {
             return msg.getContent();
@@ -741,7 +741,7 @@ public class UnifiedChatService {
                 continue;
             }
             String name = att.getName() == null ? "未命名文档" : att.getName();
-            String text = fileStorageService.readDocumentText(att.getUrl());
+            String text = fileStorageService.readDocumentText(att.getUrl(), userId);
             sb.append("【附件文档：").append(name).append("】\n");
             sb.append(text != null ? text : "（该附件内容已失效，无法读取）");
             sb.append("\n【附件文档结束】\n\n");

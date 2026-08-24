@@ -28,6 +28,26 @@
       </div>
     </div>
 
+    <div class="admin-card" v-loading="observabilityLoading" style="margin-top:20px;">
+      <div class="observability-heading">
+        <div>
+          <h3 style="font-size:16px;font-weight:600;margin:0 0 4px;color:var(--ink);">运行状态</h3>
+          <div class="observability-subtitle">进程启动后累计指标，用于快速定位错误、慢请求与聊天流拥塞。</div>
+        </div>
+        <el-button @click="loadObservability()">刷新</el-button>
+      </div>
+      <div class="observability-grid">
+        <div class="metric-item"><span>运行时长</span><strong>{{ formatDuration(observability.uptimeSeconds) }}</strong></div>
+        <div class="metric-item"><span>HTTP 请求</span><strong>{{ observability.requestCount ?? 0 }}</strong></div>
+        <div class="metric-item"><span>服务端错误</span><strong>{{ observability.serverErrorCount ?? 0 }}</strong></div>
+        <div class="metric-item"><span>慢请求</span><strong>{{ observability.slowRequestCount ?? 0 }}</strong></div>
+        <div class="metric-item"><span>平均延迟</span><strong>{{ observability.averageLatencyMs ?? 0 }} ms</strong></div>
+        <div class="metric-item"><span>活跃聊天流</span><strong>{{ observability.activeChats ?? 0 }}</strong></div>
+        <div class="metric-item"><span>聊天失败</span><strong>{{ observability.chatFailureCount ?? 0 }} / {{ observability.chatRequestCount ?? 0 }}</strong></div>
+        <div class="metric-item"><span>JVM 堆内存</span><strong>{{ formatBytes(observability.heapUsedBytes) }} / {{ formatBytes(observability.heapMaxBytes) }}</strong></div>
+      </div>
+    </div>
+
     <div class="admin-card" v-loading="quotaLoading" style="margin-top:20px;">
       <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;color:var(--ink);">调用限制</h3>
 
@@ -108,8 +128,30 @@
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
         <span style="font-size:13px;color:var(--ink-3);width:150px;">IP绑定校验</span>
         <el-switch v-model="ipBindingEnabled" active-text="开启" inactive-text="关闭" />
-        <el-button type="primary" @click="handleSaveSecurity" :loading="securitySaving">保存</el-button>
       </div>
+
+      <div class="security-setting-row">
+        <span class="security-setting-label">开放用户注册</span>
+        <el-switch v-model="registrationEnabled" active-text="开启" inactive-text="关闭" />
+      </div>
+
+      <div class="security-setting-row">
+        <span class="security-setting-label">注册验证码</span>
+        <el-switch v-model="registrationCaptchaEnabled" active-text="开启" inactive-text="关闭" />
+      </div>
+
+      <div class="security-setting-row">
+        <span class="security-setting-label">注册邀请码</span>
+        <el-input v-model="inviteCode" type="password" show-password style="width:280px" :placeholder="inviteCodeConfigured ? '已配置，留空表示保持不变' : '留空表示不限制邀请码'" />
+        <el-checkbox v-if="inviteCodeConfigured" v-model="clearInviteCode">清除现有邀请码</el-checkbox>
+      </div>
+
+      <div class="security-setting-row security-setting-row-top">
+        <span class="security-setting-label">Bot SVG 头像</span>
+        <el-input v-model="botAvatarSvg" type="textarea" :rows="6" maxlength="20000" show-word-limit placeholder="粘贴完整的 <svg>...</svg> 代码；留空使用默认头像" style="max-width:620px" />
+      </div>
+
+      <el-button type="primary" @click="handleSaveSecurity" :loading="securitySaving">保存安全设置</el-button>
 
       <div style="font-size:13px;color:var(--ink-3);line-height:1.8;background:var(--paper-2);padding:12px 16px;border-radius:8px;border:1px solid var(--line);">
         开启后，登录时的 IP 会绑定到登录凭证，后续请求 IP 发生变更将强制下线并要求重新登录，可防止凭证被盗用。
@@ -122,11 +164,13 @@
 
 <script setup>
 import { ref, onMounted, onActivated } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { getStorageSettings, getQuotaSettings, setQuotaSettings, getSecuritySettings, setSecuritySettings, getBillingSettings, setBillingSettings } from '@/api/settings'
+import { ElMessage } from 'element-plus'
+import { getStorageSettings, getQuotaSettings, setQuotaSettings, getSecuritySettings, setSecuritySettings, getBillingSettings, setBillingSettings, getObservability } from '@/api/settings'
 
 const loading = ref(false)
 const settings = ref({ useSqlite: true, dbFileSize: '' })
+const observabilityLoading = ref(false)
+const observability = ref({})
 const quotaLoading = ref(false)
 const quotaSaving = ref(false)
 const dailyChatLimit = ref(0)
@@ -137,6 +181,12 @@ const contextMaxMessages = ref(0)
 const securityLoading = ref(false)
 const securitySaving = ref(false)
 const ipBindingEnabled = ref(true)
+const registrationEnabled = ref(true)
+const registrationCaptchaEnabled = ref(false)
+const inviteCodeConfigured = ref(false)
+const inviteCode = ref('')
+const clearInviteCode = ref(false)
+const botAvatarSvg = ref('')
 const billingLoading = ref(false)
 const billingSaving = ref(false)
 const billing = ref({ displayMode: 'token', defaultCurrency: 'CNY', currencies: [{ code: 'CNY', name: '人民币', symbol: '¥', rate: 1 }] })
@@ -156,6 +206,7 @@ async function loadSettings(silent = false) {
 
 onMounted(() => {
   loadSettings()
+  loadObservability()
   loadQuota()
   loadSecurity()
   loadBilling()
@@ -167,10 +218,40 @@ let firstActivation = true
 onActivated(() => {
   if (firstActivation) { firstActivation = false; return }
   loadSettings(true)
+  loadObservability(true)
   loadQuota(true)
   loadSecurity(true)
   loadBilling(true)
 })
+
+// 加载当前进程的运行指标；静默刷新时不显示整卡遮罩
+async function loadObservability(silent = false) {
+  if (!silent) observabilityLoading.value = true
+  try {
+    const res = await getObservability()
+    if (res?.success) observability.value = res.data || {}
+  } finally {
+    observabilityLoading.value = false
+  }
+}
+
+// 将秒数格式化为适合后台概览的紧凑时长
+function formatDuration(seconds) {
+  const value = Math.max(0, Number(seconds || 0))
+  const days = Math.floor(value / 86400)
+  const hours = Math.floor((value % 86400) / 3600)
+  const minutes = Math.floor((value % 3600) / 60)
+  if (days) return `${days}天 ${hours}小时`
+  if (hours) return `${hours}小时 ${minutes}分钟`
+  return `${minutes}分钟`
+}
+
+// 将字节数格式化为 MB/GB，避免后台展示难读的长整数
+function formatBytes(bytes) {
+  const value = Math.max(0, Number(bytes || 0))
+  if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(1)} GB`
+  return `${(value / 1024 ** 2).toFixed(1)} MB`
+}
 
 // 加载每日配额设置；silent 为 true 时不显示 loading 遮罩（keep-alive 激活刷新用）
 async function loadQuota(silent = false) {
@@ -201,7 +282,7 @@ async function handleSaveQuota() {
       contextMaxMessages: contextMaxMessages.value ?? 0
     })
     if (res?.success) {
-      ElMessage.success(res.message || '保存成功')
+      ElMessage.success({ message: (res.messages || [res.message || '保存成功']).join('；'), duration: 5000, showClose: true })
     } else {
       ElMessage.error(res?.message || '保存失败')
     }
@@ -217,6 +298,12 @@ async function loadSecurity(silent = false) {
     const res = await getSecuritySettings()
     if (res?.success) {
       ipBindingEnabled.value = res.data?.ipBindingEnabled ?? true
+      registrationEnabled.value = res.data?.registrationEnabled ?? true
+      registrationCaptchaEnabled.value = res.data?.registrationCaptchaEnabled ?? false
+      inviteCodeConfigured.value = res.data?.inviteCodeConfigured ?? false
+      inviteCode.value = ''
+      clearInviteCode.value = false
+      botAvatarSvg.value = res.data?.botAvatarSvg || ''
     }
   } finally {
     securityLoading.value = false
@@ -227,9 +314,18 @@ async function loadSecurity(silent = false) {
 async function handleSaveSecurity() {
   securitySaving.value = true
   try {
-    const res = await setSecuritySettings({ ipBindingEnabled: ipBindingEnabled.value })
+    const payload = {
+      ipBindingEnabled: ipBindingEnabled.value,
+      registrationEnabled: registrationEnabled.value,
+      registrationCaptchaEnabled: registrationCaptchaEnabled.value,
+      clearInviteCode: clearInviteCode.value,
+      botAvatarSvg: botAvatarSvg.value
+    }
+    if (inviteCode.value.trim()) payload.inviteCode = inviteCode.value.trim()
+    const res = await setSecuritySettings(payload)
     if (res?.success) {
       ElMessage.success(res.message || '保存成功')
+      await loadSecurity(true)
     } else {
       ElMessage.error(res?.message || '保存失败')
     }
@@ -282,4 +378,6 @@ async function handleSaveBilling() {
 
 <style scoped>
 .billing-row,.currency-row{display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap}.billing-label{width:150px;font-size:13px;color:var(--ink-3)}.currency-table{padding:14px;border:1px solid var(--line);border-radius:8px;background:var(--paper-2)}.currency-rate-prefix,.currency-code-label{font-size:12px;color:var(--ink-3)}.settings-note{margin-top:16px;font-size:13px;color:var(--ink-3);line-height:1.8;background:var(--paper-2);padding:12px 16px;border-radius:8px;border:1px solid var(--line)}
+.security-setting-row{display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}.security-setting-row-top{align-items:flex-start}.security-setting-label{width:150px;font-size:13px;color:var(--ink-3);flex:0 0 auto}
+.observability-heading{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:16px}.observability-subtitle{font-size:12px;color:var(--ink-3)}.observability-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}.metric-item{display:flex;flex-direction:column;gap:6px;padding:14px;border:1px solid var(--line);border-radius:8px;background:var(--paper-2)}.metric-item span{font-size:12px;color:var(--ink-3)}.metric-item strong{font-size:16px;color:var(--ink);font-weight:600}
 </style>

@@ -12,6 +12,14 @@
     <!-- 加载中 -->
     <div v-if="loading" class="share-status">{{ t('common.loading') }}</div>
 
+    <div v-else-if="passwordRequired" class="share-status share-password-panel">
+      <h2>该分享需要访问密码</h2>
+      <label for="share-password">访问密码</label>
+      <input id="share-password" v-model="passwordInput" type="password" autocomplete="current-password" class="share-password-input" @keydown.enter="loadShare" />
+      <button type="button" class="share-primary-btn" @click="loadShare">查看分享</button>
+      <p v-if="passwordError" class="share-password-error" aria-live="polite">{{ passwordError }}</p>
+    </div>
+
     <!-- 错误提示 -->
     <div v-else-if="errorMsg" class="share-status share-error">
       <p>{{ errorMsg }}</p>
@@ -23,6 +31,8 @@
       <div class="share-meta">
         <h1 class="share-title">{{ title }}</h1>
         <p class="share-sub">{{ t('share.sharedBy', { name: sharedBy }) }} · {{ sharedAt }} · {{ t('share.readonly') }}<span v-if="expiresAt"> · {{ t('share.validUntil', { date: expiresAt }) }}</span></p>
+        <p v-if="maxViews > 0" class="share-sub">访问次数：{{ accessCount }} / {{ maxViews }}</p>
+        <button type="button" class="share-primary-btn" :disabled="cloning" @click="cloneToMine">{{ cloning ? '复制中...' : '复制到我的会话' }}</button>
       </div>
 
       <div class="chat-messages share-messages" ref="containerRef">
@@ -75,7 +85,7 @@
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { getSharedChat } from '@/api/share'
+import { getSharedChat, cloneSharedChat } from '@/api/share'
 import { renderMarkdown, escapeHtml, processSpecialContent, renderMermaidBlocks, handleMermaidToolbarClick } from '@/composables/useMarkdown'
 import { useTheme } from '@/composables/useTheme'
 import '@/styles/chat.css'
@@ -92,6 +102,12 @@ const sharedAt = ref('')
 const expiresAt = ref('')
 const messages = ref([])
 const containerRef = ref(null)
+const passwordRequired = ref(false)
+const passwordInput = ref('')
+const passwordError = ref('')
+const accessCount = ref(0)
+const maxViews = ref(0)
+const cloning = ref(false)
 
 const userAvatarSrc = computed(() => getTheme() === 'dark' ? '/icons/user_ss.svg' : '/icons/user.svg')
 const aiAvatarSrc = computed(() => getTheme() === 'dark' ? '/icons/AIBot_ss.svg' : '/icons/AIBot.svg')
@@ -104,15 +120,22 @@ function toggleThinking(e) {
   e.currentTarget.parentElement.classList.toggle('collapsed')
 }
 
-onMounted(async () => {
+// 加载公开分享；需要密码时保留页面并展示密码表单
+async function loadShare() {
+  loading.value = true
+  errorMsg.value = ''
+  passwordError.value = ''
   try {
-    const res = await getSharedChat(route.params.id)
+    const res = await getSharedChat(route.params.id, passwordInput.value)
     if (res && res.success) {
+      passwordRequired.value = false
       title.value = res.title || t('share.defaultTitle')
       sharedBy.value = res.sharedBy || ''
       sharedAt.value = res.sharedAt || ''
       expiresAt.value = res.expiresAt || ''
       messages.value = res.messages || []
+      accessCount.value = Number(res.accessCount || 0)
+      maxViews.value = Number(res.maxViews || 0)
       document.title = title.value + ' - ' + t('share.docTitleSuffix')
       // 先退出 loading 让 v-else 分支渲染出 containerRef，再处理代码高亮与 mermaid 图表；
       // 否则 containerRef 为 null，mermaid 渲染被整体跳过，图表永远停在“渲染中”占位
@@ -123,6 +146,9 @@ onMounted(async () => {
         renderMermaidBlocks(containerRef.value, getTheme())
         containerRef.value.addEventListener('click', handleMermaidToolbarClick)
       }
+    } else if (res?.passwordRequired) {
+      passwordRequired.value = true
+      passwordError.value = passwordInput.value ? (res.message || '密码错误') : ''
     } else {
       errorMsg.value = (res && res.message) || t('share.loadFailed')
     }
@@ -131,7 +157,21 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
-})
+}
+
+// 将当前分享快照复制到已登录账号；未登录时请求层会引导登录
+async function cloneToMine() {
+  cloning.value = true
+  try {
+    const res = await cloneSharedChat(route.params.id, passwordInput.value)
+    if (res?.success) window.location.href = '/'
+    else errorMsg.value = res?.message || '复制失败'
+  } finally {
+    cloning.value = false
+  }
+}
+
+onMounted(loadShare)
 </script>
 
 <style scoped>
@@ -206,6 +246,12 @@ onMounted(async () => {
 .share-error a {
   color: #4f46e5;
 }
+.share-password-panel { max-width:420px; margin:80px auto; }
+.share-password-panel label { display:block; margin:18px 0 6px; font-size:13px; }
+.share-password-input { width:100%; padding:10px 12px; border:1px solid var(--border,#333); border-radius:6px; background:var(--paper,#252536); color:var(--ink,#eee); }
+.share-primary-btn { margin-top:12px; padding:9px 16px; border:0; border-radius:6px; background:var(--primary,#6366f1); color:#fff; cursor:pointer; }
+.share-primary-btn:disabled { opacity:.5; cursor:not-allowed; }
+.share-password-error { color:#ef4444; font-size:12px; }
 
 .share-meta {
   max-width: 860px;

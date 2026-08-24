@@ -85,6 +85,9 @@ public class SqliteStorageService implements StorageService {
             loadProviders();
             log.info("SQLite: 已加载 {} 个内置厂商", providers.size());
 
+            // 将历史固定 __custom__/custom 厂商迁移为稳定且唯一的厂商 ID。
+            migrateLegacyCustomProviders();
+
             // 加载厂商显示名覆盖
             loadProviderNameOverrides();
             log.info("SQLite: 已加载 {} 个厂商显示名覆盖", providerNameOverrides.size());
@@ -119,6 +122,14 @@ public class SqliteStorageService implements StorageService {
                 "last_login_at TEXT," +
                 "last_login_ip TEXT," +
                 "last_login_browser TEXT," +
+                "display_name TEXT," +
+                "email TEXT," +
+                "phone TEXT," +
+                "department TEXT," +
+                "job_title TEXT," +
+                "bio TEXT," +
+                "avatar_type TEXT DEFAULT 'default'," +
+                "avatar_value TEXT," +
                 "allowed_model_ids TEXT DEFAULT '[]'," +
                 "system_prompt TEXT," +
                 "disabled INTEGER DEFAULT 0," +
@@ -141,6 +152,8 @@ public class SqliteStorageService implements StorageService {
         ensureUserPromptPresetsColumn();
         // 老数据库补充双重验证列（幂等迁移）
         ensureUserTwoFactorColumns();
+        // 老数据库补充用户资料与头像列（幂等迁移）
+        ensureUserProfileColumns();
 
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_model_config (" +
                 "id TEXT PRIMARY KEY," +
@@ -175,6 +188,7 @@ public class SqliteStorageService implements StorageService {
 
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_usage_log (" +
                 "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "request_id TEXT," +
                 "user_id TEXT," +
                 "username TEXT," +
                 "model_id TEXT," +
@@ -189,6 +203,8 @@ public class SqliteStorageService implements StorageService {
                 ")");
         // 老数据库补充人民币成本快照列（幂等迁移）
         ensureUsageCostColumn();
+        ensureColumn("t_usage_log", "request_id", "TEXT");
+        jdbcTemplate.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_request ON t_usage_log(request_id) WHERE request_id IS NOT NULL");
         jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_usage_user ON t_usage_log(user_id)");
         jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_usage_time ON t_usage_log(timestamp)");
         // 复合索引：个人配额统计（user_id + timestamp 范围/前缀查询）与用户维度时间筛选
@@ -259,11 +275,46 @@ public class SqliteStorageService implements StorageService {
                 "user_name TEXT," +
                 "title TEXT," +
                 "created_at TEXT," +
-                "expires_at TEXT" +
+                "expires_at TEXT," +
+                "snapshot_json TEXT," +
+                "password_hash TEXT," +
+                "access_count INTEGER DEFAULT 0," +
+                "max_views INTEGER DEFAULT 0," +
+                "sanitized INTEGER DEFAULT 0" +
                 ")");
         jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_share_user ON t_chat_share(user_id)");
         // 老数据库补充 expires_at 列（幂等迁移）
         ensureChatShareExpiresColumn();
+        ensureChatShareEnhancementColumns();
+
+        // 自定义厂商独立持久化，ID 不再复用固定的 __custom__。
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_custom_provider (" +
+                "id TEXT PRIMARY KEY," +
+                "name TEXT NOT NULL UNIQUE," +
+                "icon TEXT," +
+                "api_url TEXT," +
+                "protocol TEXT DEFAULT 'openai'," +
+                "thinking_param_type TEXT DEFAULT 'default'," +
+                "models_json TEXT DEFAULT '[]'," +
+                "created_at TEXT," +
+                "updated_at TEXT" +
+                ")");
+
+        // 新上传资源记录所有者；存量资源无记录时按兼容策略处理。
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_file_asset (" +
+                "url TEXT PRIMARY KEY," +
+                "owner_user_id TEXT NOT NULL," +
+                "asset_type TEXT NOT NULL," +
+                "created_at TEXT" +
+                ")");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_file_asset_owner ON t_file_asset(owner_user_id)");
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_file_asset_grant (" +
+                "url TEXT NOT NULL," +
+                "user_id TEXT NOT NULL," +
+                "created_at TEXT," +
+                "PRIMARY KEY(url,user_id)" +
+                ")");
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_file_asset_grant_user ON t_file_asset_grant(user_id)");
 
         // 系统公告表（支持公告期与历史公告，两种存储模式共用 SQLite）
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_announcement (" +
@@ -495,6 +546,46 @@ public class SqliteStorageService implements StorageService {
     }
 
     /**
+     * 为用户表补齐个人资料与头像字段，旧数据库可无损升级。
+     */
+    private void ensureUserProfileColumns() {
+        ensureColumn("t_user", "display_name", "TEXT");
+        ensureColumn("t_user", "email", "TEXT");
+        ensureColumn("t_user", "phone", "TEXT");
+        ensureColumn("t_user", "department", "TEXT");
+        ensureColumn("t_user", "job_title", "TEXT");
+        ensureColumn("t_user", "bio", "TEXT");
+        ensureColumn("t_user", "avatar_type", "TEXT DEFAULT 'default'");
+        ensureColumn("t_user", "avatar_value", "TEXT");
+    }
+
+    /**
+     * 为分享表补齐快照、密码、访问次数与脱敏标记字段。
+     */
+    private void ensureChatShareEnhancementColumns() {
+        ensureColumn("t_chat_share", "snapshot_json", "TEXT");
+        ensureColumn("t_chat_share", "password_hash", "TEXT");
+        ensureColumn("t_chat_share", "access_count", "INTEGER DEFAULT 0");
+        ensureColumn("t_chat_share", "max_views", "INTEGER DEFAULT 0");
+        ensureColumn("t_chat_share", "sanitized", "INTEGER DEFAULT 0");
+    }
+
+    /**
+     * 通用 SQLite 加列迁移：仅在列不存在时执行 ALTER TABLE。
+     * @param table 表名（仅内部固定常量调用）
+     * @param column 列名（仅内部固定常量调用）
+     * @param definition SQLite 列定义
+     */
+    private void ensureColumn(String table, String column, String definition) {
+        boolean exists = jdbcTemplate.queryForList("PRAGMA table_info(" + table + ")").stream()
+                .anyMatch(c -> column.equals(String.valueOf(c.get("name"))));
+        if (!exists) {
+            jdbcTemplate.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
+            log.info("SQLite: {} 表已补充 {} 列", table, column);
+        }
+    }
+
+    /**
      * 为 t_chat_share 表补充 expires_at 列（幂等迁移）。
      */
     private void ensureChatShareExpiresColumn() {
@@ -573,6 +664,14 @@ public class SqliteStorageService implements StorageService {
         u.setLastLoginAt(rs.getString("last_login_at"));
         u.setLastLoginIp(rs.getString("last_login_ip"));
         u.setLastLoginBrowser(rs.getString("last_login_browser"));
+        u.setDisplayName(rs.getString("display_name"));
+        u.setEmail(rs.getString("email"));
+        u.setPhone(rs.getString("phone"));
+        u.setDepartment(rs.getString("department"));
+        u.setJobTitle(rs.getString("job_title"));
+        u.setBio(rs.getString("bio"));
+        u.setAvatarType(rs.getString("avatar_type"));
+        u.setAvatarValue(rs.getString("avatar_value"));
         u.setAllowedModelIds(parseJsonArray(rs.getString("allowed_model_ids")));
         u.setSystemPrompt(rs.getString("system_prompt"));
         u.setPromptPresets(parsePromptPresets(rs.getString("prompt_presets")));
@@ -605,9 +704,8 @@ public class SqliteStorageService implements StorageService {
             admin.setCreatedAt(nowString());
             insertUser(admin);
             if (ADMIN_FALLBACK_PASSWORD.equals(initialPassword)) {
-                log.warn("SQLite: 已创建内置admin账户（使用兜底初始密码 {}）。安全提示：请尽快在后台修改密码，" +
-                        "或通过环境变量 CHATAI_ADMIN_PASSWORD / 系统属性 chatai.admin.password 指定强密码后重新初始化",
-                        ADMIN_FALLBACK_PASSWORD);
+                log.warn("SQLite: 已创建内置admin账户并使用系统兜底初始密码。安全提示：请尽快在后台修改密码，" +
+                        "或通过环境变量 CHATAI_ADMIN_PASSWORD / 系统属性 chatai.admin.password 指定强密码后重新初始化");
             } else {
                 log.info("SQLite: 已创建内置admin账户（使用外部指定的初始密码）");
             }
@@ -675,9 +773,11 @@ public class SqliteStorageService implements StorageService {
     /** 插入用户记录 */
     private void insertUser(User u) {
         jdbcTemplate.update(
-                "INSERT INTO t_user (id, username, password, role, created_at, last_login_at, last_login_ip, last_login_browser, allowed_model_ids, system_prompt, disabled, daily_limit_type, daily_limit_value, prompt_presets, two_factor_enabled, two_factor_secret, recovery_code_hashes, two_factor_last_used_step) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO t_user (id, username, password, role, created_at, last_login_at, last_login_ip, last_login_browser, display_name, email, phone, department, job_title, bio, avatar_type, avatar_value, allowed_model_ids, system_prompt, disabled, daily_limit_type, daily_limit_value, prompt_presets, two_factor_enabled, two_factor_secret, recovery_code_hashes, two_factor_last_used_step) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 u.getId(), u.getUsername(), u.getPassword(), u.getRole(), u.getCreatedAt(),
                 u.getLastLoginAt(), u.getLastLoginIp(), u.getLastLoginBrowser(),
+                u.getDisplayName(), u.getEmail(), u.getPhone(), u.getDepartment(), u.getJobTitle(),
+                u.getBio(), u.getAvatarType(), u.getAvatarValue(),
                 toJsonArray(u.getAllowedModelIds()), u.getSystemPrompt(), u.isDisabled() ? 1 : 0,
                 u.getDailyLimitType(), u.getDailyLimitValue(), toPromptPresetsJson(u.getPromptPresets()),
                 u.isTwoFactorEnabled() ? 1 : 0, u.getTwoFactorSecret(),
@@ -810,6 +910,14 @@ public class SqliteStorageService implements StorageService {
         c.setLastLoginAt(src.getLastLoginAt());
         c.setLastLoginIp(src.getLastLoginIp());
         c.setLastLoginBrowser(src.getLastLoginBrowser());
+        c.setDisplayName(src.getDisplayName());
+        c.setEmail(src.getEmail());
+        c.setPhone(src.getPhone());
+        c.setDepartment(src.getDepartment());
+        c.setJobTitle(src.getJobTitle());
+        c.setBio(src.getBio());
+        c.setAvatarType(src.getAvatarType());
+        c.setAvatarValue(src.getAvatarValue());
         c.setAllowedModelIds(src.getAllowedModelIds() == null
                 ? new ArrayList<>() : new ArrayList<>(src.getAllowedModelIds()));
         c.setSystemPrompt(src.getSystemPrompt());
@@ -831,6 +939,13 @@ public class SqliteStorageService implements StorageService {
         // admin 不可删除
         User user = getUserById(userId);
         if (user == null || "admin".equals(user.getRole())) return false;
+        jdbcTemplate.update("DELETE FROM t_token WHERE user_id = ?", userId);
+        jdbcTemplate.update("DELETE FROM t_chat_share WHERE user_id = ?", userId);
+        jdbcTemplate.update("DELETE FROM t_chat_session WHERE user_id = ?", userId);
+        jdbcTemplate.update("DELETE FROM t_chat_user_state WHERE user_id = ?", userId);
+        jdbcTemplate.update("DELETE FROM t_chat_history WHERE user_id = ?", userId);
+        jdbcTemplate.update("DELETE FROM t_file_asset_grant WHERE user_id = ?", userId);
+        jdbcTemplate.update("DELETE FROM t_file_asset WHERE owner_user_id = ?", userId);
         int deleted = jdbcTemplate.update("DELETE FROM t_user WHERE id = ?", userId);
         userCache.remove(userId);
         return deleted > 0;
@@ -839,9 +954,11 @@ public class SqliteStorageService implements StorageService {
     @Override
     public void updateUser(User user) {
         jdbcTemplate.update(
-                "UPDATE t_user SET username=?, password=?, role=?, created_at=?, last_login_at=?, last_login_ip=?, last_login_browser=?, allowed_model_ids=?, system_prompt=?, disabled=?, daily_limit_type=?, daily_limit_value=?, prompt_presets=? WHERE id=?",
+                "UPDATE t_user SET username=?, password=?, role=?, created_at=?, last_login_at=?, last_login_ip=?, last_login_browser=?, display_name=?, email=?, phone=?, department=?, job_title=?, bio=?, avatar_type=?, avatar_value=?, allowed_model_ids=?, system_prompt=?, disabled=?, daily_limit_type=?, daily_limit_value=?, prompt_presets=? WHERE id=?",
                 user.getUsername(), user.getPassword(), user.getRole(), user.getCreatedAt(),
                 user.getLastLoginAt(), user.getLastLoginIp(), user.getLastLoginBrowser(),
+                user.getDisplayName(), user.getEmail(), user.getPhone(), user.getDepartment(), user.getJobTitle(),
+                user.getBio(), user.getAvatarType(), user.getAvatarValue(),
                 toJsonArray(user.getAllowedModelIds()), user.getSystemPrompt(), user.isDisabled() ? 1 : 0,
                 user.getDailyLimitType(), user.getDailyLimitValue(), toPromptPresetsJson(user.getPromptPresets()), user.getId());
         userCache.remove(user.getId());
@@ -1079,23 +1196,31 @@ public class SqliteStorageService implements StorageService {
 
     /** 自动填充厂商信息 */
     private void fillProviderInfo(ModelConfig config) {
-        if (config.getProviderId() != null && !"custom".equals(config.getProviderId())
-                && !"__custom__".equals(config.getProviderId())) {
-            providers.stream()
-                    .filter(p -> p.getId().equals(config.getProviderId()))
-                    .findFirst()
-                    .ifPresent(p -> {
-                        String displayName = getProviderDisplayName(p.getId());
-                        if (config.getProviderName() == null || config.getProviderName().isEmpty()) {
-                            config.setProviderName(displayName);
-                        }
-                        if (config.getProviderIcon() == null || config.getProviderIcon().isEmpty()) {
-                            config.setProviderIcon(p.getIcon());
-                        }
-                        if (config.getThinkingParamType() == null || config.getThinkingParamType().isEmpty()) {
-                            config.setThinkingParamType(p.getThinkingParamType());
-                        }
-                    });
+        String providerId = config.getProviderId();
+        if (providerId == null || providerId.isBlank() || "custom".equals(providerId)
+                || "__custom__".equals(providerId)) {
+            providerId = ensureCustomProvider(config);
+            config.setProviderId(providerId);
+        }
+        Provider resolved = getResolvedProvider(providerId);
+        if (resolved == null) return;
+        if (config.getProviderName() == null || config.getProviderName().isBlank()) {
+            config.setProviderName(resolved.getName());
+        }
+        if (config.getProviderIcon() == null || config.getProviderIcon().isBlank()) {
+            config.setProviderIcon(resolved.getIcon());
+        }
+        if (config.getApiUrl() == null || config.getApiUrl().isBlank()) {
+            config.setApiUrl(resolved.getDefaultApiUrl());
+        }
+        if (config.getProtocol() == null || config.getProtocol().isBlank()) {
+            config.setProtocol(resolved.getProtocol());
+        }
+        if (config.getThinkingParamType() == null || config.getThinkingParamType().isBlank()) {
+            config.setThinkingParamType(resolved.getThinkingParamType());
+        }
+        if (providerId.startsWith("custom-")) {
+            appendCustomProviderModel(providerId, config);
         }
     }
 
@@ -1137,8 +1262,142 @@ public class SqliteStorageService implements StorageService {
         }
     }
 
+    /**
+     * 将旧版所有 provider_id=custom/__custom__ 的模型按厂商名称分组，创建唯一厂商记录并回写模型。
+     */
+    private synchronized void migrateLegacyCustomProviders() {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT provider_name, provider_icon, api_url, protocol, thinking_param_type " +
+                        "FROM t_model_config WHERE provider_id IN ('custom','__custom__') ORDER BY created_at");
+        Set<String> migratedNames = new LinkedHashSet<>();
+        for (Map<String, Object> row : rows) {
+            String name = cleanText(row.get("provider_name"));
+            if (name.isEmpty() || !migratedNames.add(name)) continue;
+            String id = findCustomProviderIdByName(name);
+            if (id == null) {
+                id = createCustomProvider(name, cleanText(row.get("provider_icon")),
+                        cleanText(row.get("api_url")), cleanText(row.get("protocol")),
+                        cleanText(row.get("thinking_param_type")));
+            }
+            jdbcTemplate.update("UPDATE t_model_config SET provider_id=?, provider_icon=COALESCE(NULLIF(provider_icon,''), ?) " +
+                    "WHERE provider_id IN ('custom','__custom__') AND provider_name=?", id,
+                    cleanText(row.get("provider_icon")), name);
+        }
+        if (!migratedNames.isEmpty()) {
+            modelConfigsCache = null;
+            for (String name : migratedNames) {
+                String id = findCustomProviderIdByName(name);
+                if (id != null) rebuildCustomProviderModels(id);
+            }
+            log.info("SQLite: 已迁移 {} 个历史自定义厂商为唯一 ID", migratedNames.size());
+        }
+    }
+
+    /**
+     * 为新自定义模型查找或创建厂商，返回唯一厂商 ID。
+     */
+    private synchronized String ensureCustomProvider(ModelConfig config) {
+        String name = config.getProviderName() == null ? "自定义厂商" : config.getProviderName().trim();
+        if (name.isEmpty()) name = "自定义厂商";
+        String existingId = findCustomProviderIdByName(name);
+        if (existingId != null) return existingId;
+        return createCustomProvider(name, config.getProviderIcon(), config.getApiUrl(),
+                config.getProtocol(), config.getThinkingParamType());
+    }
+
+    /**
+     * 新建自定义厂商并生成不可冲突的稳定 ID。
+     */
+    private String createCustomProvider(String name, String icon, String apiUrl,
+                                        String protocol, String thinkingParamType) {
+        String base = name.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "-")
+                .replaceAll("^-+|-+$", "");
+        if (base.isEmpty()) base = "provider";
+        String id;
+        do {
+            id = "custom-" + base + "-" + UUID.randomUUID().toString().substring(0, 8);
+        } while (getCustomProviderRow(id) != null);
+        String providerIcon = cleanText(icon);
+        if (providerIcon.isEmpty()) {
+            providerIcon = name.substring(0, name.offsetByCodePoints(0, 1)).toUpperCase(Locale.ROOT);
+        }
+        String now = nowString();
+        jdbcTemplate.update("INSERT INTO t_custom_provider " +
+                        "(id,name,icon,api_url,protocol,thinking_param_type,models_json,created_at,updated_at) " +
+                        "VALUES (?,?,?,?,?,?,?,?,?)",
+                id, name, providerIcon, cleanText(apiUrl),
+                cleanText(protocol).isEmpty() ? "openai" : cleanText(protocol),
+                cleanText(thinkingParamType).isEmpty() ? "default" : cleanText(thinkingParamType),
+                "[]", now, now);
+        return id;
+    }
+
+    /**
+     * 按显示名查询自定义厂商 ID，供旧数据迁移与“选择已有厂商”自动复用。
+     */
+    private String findCustomProviderIdByName(String name) {
+        List<String> ids = jdbcTemplate.queryForList(
+                "SELECT id FROM t_custom_provider WHERE name=? LIMIT 1", String.class, name);
+        return ids.isEmpty() ? null : ids.get(0);
+    }
+
+    /**
+     * 查询单个自定义厂商原始行。
+     */
+    private Map<String, Object> getCustomProviderRow(String id) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT * FROM t_custom_provider WHERE id=?", id);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    /**
+     * 把任意数据库值安全规整为去首尾空白字符串。
+     */
+    private String cleanText(Object value) {
+        return value == null ? "" : String.valueOf(value).trim();
+    }
+
+    /**
+     * 将一个已接入模型补入自定义厂商支持模型列表，避免图标/模型目录与模型配置脱节。
+     */
+    private synchronized void appendCustomProviderModel(String providerId, ModelConfig config) {
+        Provider provider = getResolvedProvider(providerId);
+        if (provider == null) return;
+        List<ProviderModel> models = provider.getModels() == null
+                ? new ArrayList<>() : new ArrayList<>(provider.getModels());
+        boolean exists = models.stream().anyMatch(m -> Objects.equals(m.getId(), config.getModelId()));
+        if (!exists && config.getModelId() != null && !config.getModelId().isBlank()) {
+            ProviderModel model = new ProviderModel();
+            model.setId(config.getModelId());
+            model.setName(config.getDisplayName() == null || config.getDisplayName().isBlank()
+                    ? config.getModelId() : config.getDisplayName());
+            model.setSupportsThinking(config.isSupportsThinking());
+            model.setSupportsMultimodal(config.isSupportsMultimodal());
+            models.add(model);
+            saveProviderModels(providerId, models);
+        }
+    }
+
+    /**
+     * 根据已接入模型重建自定义厂商模型目录，供旧数据迁移使用。
+     */
+    private void rebuildCustomProviderModels(String providerId) {
+        List<ProviderModel> models = new ArrayList<>();
+        for (ModelConfig config : getAllModelConfigs()) {
+            if (!providerId.equals(config.getProviderId())) continue;
+            ProviderModel model = new ProviderModel();
+            model.setId(config.getModelId());
+            model.setName(config.getDisplayName());
+            model.setSupportsThinking(config.isSupportsThinking());
+            model.setSupportsMultimodal(config.isSupportsMultimodal());
+            models.add(model);
+        }
+        saveProviderModels(providerId, models);
+    }
+
     @Override
     public List<Provider> getAllProviders() {
+        Map<String, List<ProviderModel>> modelOverrides = loadProviderModelOverrides();
         List<Provider> copy = new ArrayList<>();
         for (Provider p : providers) {
             Provider c = new Provider();
@@ -1148,10 +1407,33 @@ public class SqliteStorageService implements StorageService {
             c.setDefaultApiUrl(p.getDefaultApiUrl());
             c.setProtocol(p.getProtocol());
             c.setThinkingParamType(p.getThinkingParamType());
-            c.setModels(p.getModels());
+            c.setModels(modelOverrides.getOrDefault(p.getId(), p.getModels()));
             copy.add(c);
         }
         return copy;
+    }
+
+    /**
+     * 查询预置或自定义厂商的完整可用配置。
+     * @param providerId 厂商唯一 ID
+     * @return 厂商配置，不存在返回 null
+     */
+    public Provider getResolvedProvider(String providerId) {
+        if (providerId == null) return null;
+        for (Provider provider : getAllProviders()) {
+            if (providerId.equals(provider.getId())) return provider;
+        }
+        Map<String, Object> row = getCustomProviderRow(providerId);
+        if (row == null) return null;
+        Provider custom = new Provider();
+        custom.setId(cleanText(row.get("id")));
+        custom.setName(cleanText(row.get("name")));
+        custom.setIcon(cleanText(row.get("icon")));
+        custom.setDefaultApiUrl(cleanText(row.get("api_url")));
+        custom.setProtocol(cleanText(row.get("protocol")));
+        custom.setThinkingParamType(cleanText(row.get("thinking_param_type")));
+        custom.setModels(parseProviderModels(cleanText(row.get("models_json"))));
+        return custom;
     }
 
     @Override
@@ -1179,22 +1461,19 @@ public class SqliteStorageService implements StorageService {
             throw new IllegalArgumentException("厂商名称不能为空");
         }
         String trimmedIcon = newIcon == null ? "" : newIcon.trim();
-        if (providerId.startsWith("__custom__")) {
-            String targetOldName = oldName == null ? trimmed : oldName;
-            List<ModelConfig> configs = getAllModelConfigs();
-            int updated = 0;
-            for (ModelConfig c : configs) {
-                if ("__custom__".equals(c.getProviderId()) && targetOldName.equals(c.getProviderName())) {
-                    boolean nameChanged = !trimmed.equals(c.getProviderName());
-                    boolean iconChanged = !trimmedIcon.isEmpty() && !trimmedIcon.equals(c.getProviderIcon());
-                    if (nameChanged) c.setProviderName(trimmed);
-                    if (iconChanged) c.setProviderIcon(trimmedIcon);
-                    if (nameChanged || iconChanged) {
-                        updateModelConfig(c);
-                        updated++;
-                    }
-                }
+        if (providerId.startsWith("custom-") || providerId.startsWith("__custom__")) {
+            Map<String, Object> row = getCustomProviderRow(providerId);
+            if (row == null) throw new IllegalArgumentException("自定义厂商不存在: " + providerId);
+            if (!trimmed.equals(cleanText(row.get("name"))) && findCustomProviderIdByName(trimmed) != null) {
+                throw new IllegalArgumentException("已存在同名自定义厂商");
             }
+            String icon = trimmedIcon.isEmpty() ? cleanText(row.get("icon")) : trimmedIcon;
+            jdbcTemplate.update("UPDATE t_custom_provider SET name=?, icon=?, updated_at=? WHERE id=?",
+                    trimmed, icon, nowString(), providerId);
+            int updated = jdbcTemplate.update(
+                    "UPDATE t_model_config SET provider_name=?, provider_icon=? WHERE provider_id=?",
+                    trimmed, icon, providerId);
+            modelConfigsCache = null;
             return updated;
         }
         Provider p = providers.stream().filter(x -> x.getId().equals(providerId)).findFirst().orElse(null);
@@ -1220,42 +1499,85 @@ public class SqliteStorageService implements StorageService {
 
     @Override
     public List<Map<String, Object>> listCustomProviders() {
-        List<ModelConfig> configs = getAllModelConfigs();
-        Map<String, int[]> nameCount = new LinkedHashMap<>();
-        Map<String, Map<String, Integer>> nameIconCount = new LinkedHashMap<>();
-        for (ModelConfig c : configs) {
-            if ("__custom__".equals(c.getProviderId())) {
-                String n = c.getProviderName();
-                if (n == null || n.trim().isEmpty()) continue;
-                nameCount.computeIfAbsent(n, k -> new int[]{0})[0]++;
-                String ic = c.getProviderIcon();
-                if (ic == null || ic.trim().isEmpty()) continue;
-                Map<String, Integer> iconMap = nameIconCount.computeIfAbsent(n, k -> new LinkedHashMap<>());
-                iconMap.merge(ic, 1, Integer::sum);
-            }
-        }
         List<Map<String, Object>> result = new ArrayList<>();
-        nameCount.forEach((name, count) -> {
+        for (Map<String, Object> row : jdbcTemplate.queryForList(
+                "SELECT * FROM t_custom_provider ORDER BY created_at, name")) {
+            String id = cleanText(row.get("id"));
+            Provider provider = getResolvedProvider(id);
             Map<String, Object> m = new LinkedHashMap<>();
-            m.put("id", "__custom__");
-            m.put("name", name);
-            m.put("modelCount", count[0]);
-            String mainIcon = "";
-            int maxCount = 0;
-            Map<String, Integer> iconMap = nameIconCount.get(name);
-            if (iconMap != null) {
-                for (Map.Entry<String, Integer> e : iconMap.entrySet()) {
-                    if (e.getValue() > maxCount) {
-                        maxCount = e.getValue();
-                        mainIcon = e.getKey();
-                    }
-                }
-            }
-            m.put("icon", mainIcon);
+            m.put("id", id);
+            m.put("name", cleanText(row.get("name")));
+            m.put("modelCount", jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM t_model_config WHERE provider_id=?", Integer.class, id));
+            m.put("icon", cleanText(row.get("icon")));
+            m.put("defaultApiUrl", cleanText(row.get("api_url")));
+            m.put("protocol", cleanText(row.get("protocol")));
+            m.put("thinkingParamType", cleanText(row.get("thinking_param_type")));
+            m.put("models", provider == null || provider.getModels() == null
+                    ? Collections.emptyList() : provider.getModels());
             m.put("type", "custom");
             result.add(m);
-        });
+        }
         return result;
+    }
+
+    /**
+     * 保存厂商支持的模型目录；预置厂商写覆盖设置，自定义厂商写独立表。
+     * @param providerId 厂商唯一 ID
+     * @param models 上游返回并经管理员确认的模型列表
+     */
+    public synchronized void saveProviderModels(String providerId, List<ProviderModel> models) {
+        List<ProviderModel> safeModels = models == null ? new ArrayList<>() : models.stream()
+                .filter(Objects::nonNull)
+                .filter(m -> m.getId() != null && !m.getId().isBlank())
+                .collect(Collectors.toMap(ProviderModel::getId, m -> m, (a, b) -> a, LinkedHashMap::new))
+                .values().stream().toList();
+        try {
+            String json = objectMapper.writeValueAsString(safeModels);
+            if (providerId != null && providerId.startsWith("custom-")) {
+                if (jdbcTemplate.update("UPDATE t_custom_provider SET models_json=?, updated_at=? WHERE id=?",
+                        json, nowString(), providerId) == 0) {
+                    throw new IllegalArgumentException("自定义厂商不存在: " + providerId);
+                }
+                return;
+            }
+            Map<String, List<ProviderModel>> overrides = loadProviderModelOverrides();
+            overrides.put(providerId, safeModels);
+            setSetting("provider_model_overrides", objectMapper.writeValueAsString(overrides));
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalStateException("保存厂商模型目录失败", e);
+        }
+    }
+
+    /**
+     * 读取预置厂商的模型目录覆盖设置。
+     */
+    private Map<String, List<ProviderModel>> loadProviderModelOverrides() {
+        String json = getSetting("provider_model_overrides");
+        if (json == null || json.isBlank()) return new LinkedHashMap<>();
+        try {
+            return objectMapper.readValue(json,
+                    new TypeReference<LinkedHashMap<String, List<ProviderModel>>>() {});
+        } catch (Exception e) {
+            log.warn("读取厂商模型目录覆盖失败: {}", e.getMessage());
+            return new LinkedHashMap<>();
+        }
+    }
+
+    /**
+     * 解析自定义厂商模型目录 JSON。
+     */
+    private List<ProviderModel> parseProviderModels(String json) {
+        if (json == null || json.isBlank()) return new ArrayList<>();
+        try {
+            List<ProviderModel> parsed = objectMapper.readValue(json,
+                    new TypeReference<List<ProviderModel>>() {});
+            return parsed == null ? new ArrayList<>() : parsed;
+        } catch (Exception e) {
+            return new ArrayList<>();
+        }
     }
 
     // ========== 厂商显示名覆盖（持久化到 t_setting） ==========
@@ -1319,6 +1641,7 @@ public class SqliteStorageService implements StorageService {
     /** 使用记录行映射器 */
     private final RowMapper<UsageLog> usageLogRowMapper = (ResultSet rs, int rowNum) -> {
         UsageLog l = new UsageLog();
+        l.setRequestId(rs.getString("request_id"));
         l.setUserId(rs.getString("user_id"));
         l.setUsername(rs.getString("username"));
         l.setModelId(rs.getString("model_id"));
@@ -1337,8 +1660,8 @@ public class SqliteStorageService implements StorageService {
     @Override
     public void addUsageLog(UsageLog logEntry) {
         jdbcTemplate.update(
-                "INSERT INTO t_usage_log (user_id, username, model_id, model_name, timestamp, prompt_tokens, completion_tokens, cached_tokens, reasoning_tokens, deep_thinking, cost_cny) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                logEntry.getUserId(), logEntry.getUsername(), logEntry.getModelId(),
+                "INSERT INTO t_usage_log (request_id, user_id, username, model_id, model_name, timestamp, prompt_tokens, completion_tokens, cached_tokens, reasoning_tokens, deep_thinking, cost_cny) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                logEntry.getRequestId(), logEntry.getUserId(), logEntry.getUsername(), logEntry.getModelId(),
                 logEntry.getModelName(), logEntry.getTimestamp(),
                 logEntry.getPromptTokens(), logEntry.getCompletionTokens(),
                 logEntry.getCachedTokens(), logEntry.getReasoningTokens(),
@@ -1415,13 +1738,22 @@ public class SqliteStorageService implements StorageService {
 
     @Override
     public void updateUsageLog(UsageLog updatedLog) {
-        // 按 userId + timestamp + modelId 匹配更新
-        jdbcTemplate.update(
-                "UPDATE t_usage_log SET prompt_tokens=?, completion_tokens=?, cached_tokens=?, reasoning_tokens=?, deep_thinking=?, cost_cny=? WHERE user_id=? AND timestamp=? AND model_id=?",
-                updatedLog.getPromptTokens(), updatedLog.getCompletionTokens(),
-                updatedLog.getCachedTokens(), updatedLog.getReasoningTokens(),
-                updatedLog.isDeepThinking() ? 1 : 0, calculateCostCny(updatedLog),
-                updatedLog.getUserId(), updatedLog.getTimestamp(), updatedLog.getModelId());
+        double cost = calculateCostCny(updatedLog);
+        if (updatedLog.getRequestId() != null && !updatedLog.getRequestId().isBlank()) {
+            jdbcTemplate.update(
+                    "UPDATE t_usage_log SET prompt_tokens=?, completion_tokens=?, cached_tokens=?, reasoning_tokens=?, deep_thinking=?, cost_cny=? WHERE request_id=?",
+                    updatedLog.getPromptTokens(), updatedLog.getCompletionTokens(),
+                    updatedLog.getCachedTokens(), updatedLog.getReasoningTokens(),
+                    updatedLog.isDeepThinking() ? 1 : 0, cost, updatedLog.getRequestId());
+        } else {
+            // 兼容升级前已构造、没有 requestId 的调用。
+            jdbcTemplate.update(
+                    "UPDATE t_usage_log SET prompt_tokens=?, completion_tokens=?, cached_tokens=?, reasoning_tokens=?, deep_thinking=?, cost_cny=? WHERE user_id=? AND timestamp=? AND model_id=?",
+                    updatedLog.getPromptTokens(), updatedLog.getCompletionTokens(),
+                    updatedLog.getCachedTokens(), updatedLog.getReasoningTokens(),
+                    updatedLog.isDeepThinking() ? 1 : 0, cost,
+                    updatedLog.getUserId(), updatedLog.getTimestamp(), updatedLog.getModelId());
+        }
         updatedLog.setCostCny(calculateCostCny(updatedLog));
     }
 
@@ -1944,6 +2276,11 @@ public class SqliteStorageService implements StorageService {
         s.setTitle(rs.getString("title"));
         s.setCreatedAt(rs.getString("created_at"));
         s.setExpiresAt(rs.getString("expires_at"));
+        s.setSnapshotJson(rs.getString("snapshot_json"));
+        s.setPasswordHash(rs.getString("password_hash"));
+        s.setAccessCount(rs.getInt("access_count"));
+        s.setMaxViews(rs.getInt("max_views"));
+        s.setSanitized(rs.getInt("sanitized") == 1);
         return s;
     };
 
@@ -1960,8 +2297,10 @@ public class SqliteStorageService implements StorageService {
             s.setCreatedAt(nowString());
         }
         jdbcTemplate.update(
-                "INSERT INTO t_chat_share (id, chat_id, user_id, user_name, title, created_at, expires_at) VALUES (?,?,?,?,?,?,?)",
-                s.getId(), s.getChatId(), s.getUserId(), s.getUserName(), s.getTitle(), s.getCreatedAt(), s.getExpiresAt());
+                "INSERT INTO t_chat_share (id, chat_id, user_id, user_name, title, created_at, expires_at, snapshot_json, password_hash, access_count, max_views, sanitized) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                s.getId(), s.getChatId(), s.getUserId(), s.getUserName(), s.getTitle(), s.getCreatedAt(),
+                s.getExpiresAt(), s.getSnapshotJson(), s.getPasswordHash(), s.getAccessCount(),
+                s.getMaxViews(), s.isSanitized() ? 1 : 0);
         return s;
     }
 
@@ -2025,6 +2364,79 @@ public class SqliteStorageService implements StorageService {
      */
     public void updateChatShareExpiry(String id, String expiresAt) {
         jdbcTemplate.update("UPDATE t_chat_share SET expires_at = ? WHERE id = ?", expiresAt, id);
+    }
+
+    /** 执行最小只读查询，供健康检查确认数据库可用。 */
+    public boolean isReady() {
+        try {
+            Integer value = jdbcTemplate.queryForObject("SELECT 1", Integer.class);
+            return value != null && value == 1;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * 更新复用分享码的快照、有效期、密码与访问上限，并重置访问次数。
+     */
+    public void updateChatShareDetails(ChatShare share) {
+        jdbcTemplate.update("UPDATE t_chat_share SET title=?, expires_at=?, snapshot_json=?, password_hash=?, " +
+                        "access_count=0, max_views=?, sanitized=? WHERE id=?",
+                share.getTitle(), share.getExpiresAt(), share.getSnapshotJson(), share.getPasswordHash(),
+                share.getMaxViews(), share.isSanitized() ? 1 : 0, share.getId());
+        share.setAccessCount(0);
+    }
+
+    /**
+     * 原子占用一次分享访问额度，避免并发访问越过 maxViews。
+     * @param id 分享码
+     * @return true=允许访问并已计数
+     */
+    public boolean claimChatShareAccess(String id) {
+        return jdbcTemplate.update("UPDATE t_chat_share SET access_count=access_count+1 " +
+                "WHERE id=? AND (max_views<=0 OR access_count<max_views)", id) > 0;
+    }
+
+    // ========== 上传资源所有权 ==========
+
+    /** 记录新上传资源的所有者。 */
+    public void registerFileAsset(String url, String ownerUserId, String assetType) {
+        jdbcTemplate.update("INSERT INTO t_file_asset(url,owner_user_id,asset_type,created_at) VALUES(?,?,?,?) " +
+                        "ON CONFLICT(url) DO UPDATE SET owner_user_id=excluded.owner_user_id, asset_type=excluded.asset_type",
+                url, ownerUserId, assetType, nowString());
+    }
+
+    /** 为复制分享的用户授予既有资源访问权，不改变原始所有者。 */
+    public void grantFileAssetAccess(String url, String userId) {
+        String normalizedUrl = normalizeAssetUrl(url);
+        if (normalizedUrl.isEmpty() || userId == null || userId.isBlank()) return;
+        Integer tracked = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_file_asset WHERE url=?", Integer.class, normalizedUrl);
+        if (tracked == null || tracked == 0) return;
+        jdbcTemplate.update("INSERT OR IGNORE INTO t_file_asset_grant(url,user_id,created_at) VALUES(?,?,?)",
+                normalizedUrl, userId, nowString());
+    }
+
+    /**
+     * 判断用户是否可访问资源；存量无元数据文件返回 true 以保持升级兼容。
+     */
+    public boolean canAccessFileAsset(String url, String userId, boolean admin) {
+        String normalizedUrl = normalizeAssetUrl(url);
+        List<String> owners = jdbcTemplate.queryForList(
+                "SELECT owner_user_id FROM t_file_asset WHERE url=?", String.class, normalizedUrl);
+        if (owners.isEmpty() || admin || (userId != null && userId.equals(owners.get(0)))) return true;
+        if (userId == null) return false;
+        Integer grants = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_file_asset_grant WHERE url=? AND user_id=?",
+                Integer.class, normalizedUrl, userId);
+        return grants != null && grants > 0;
+    }
+
+    /** 去掉资源 URL 查询串，确保 shareId 等临时参数不能绕过所有权校验。 */
+    private String normalizeAssetUrl(String url) {
+        if (url == null) return "";
+        int queryIndex = url.indexOf('?');
+        return queryIndex >= 0 ? url.substring(0, queryIndex) : url;
     }
 
     // ========== 系统公告（恒走 SQLite，与存储模式开关无关） ==========

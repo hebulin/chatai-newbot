@@ -8,6 +8,9 @@ import com.chatai.newbot.service.StorageManager;
 import com.chatai.newbot.service.WebSearchService;
 import com.chatai.newbot.service.AuditLogService;
 import com.chatai.newbot.service.BillingSettingsService;
+import com.chatai.newbot.service.SvgAvatarService;
+import com.chatai.newbot.service.UpstreamModelCatalogService;
+import com.chatai.newbot.service.ObservabilityService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
@@ -35,17 +38,27 @@ public class AdminController {
     private final AuditLogService auditLogService;
     private final AdminSupport admin;
     private final BillingSettingsService billingSettingsService;
+    private final SvgAvatarService svgAvatarService;
+    private final UpstreamModelCatalogService upstreamModelCatalogService;
+    private final ObservabilityService observabilityService;
 
+    /** 注入后台管理所需的存储、安全校验、上游模型目录与运行指标服务。 */
     public AdminController(StorageManager storageService,
                            ChatHistoryService chatHistoryService, WebSearchService webSearchService,
                            AuditLogService auditLogService, AdminSupport admin,
-                           BillingSettingsService billingSettingsService) {
+                           BillingSettingsService billingSettingsService,
+                           SvgAvatarService svgAvatarService,
+                           UpstreamModelCatalogService upstreamModelCatalogService,
+                           ObservabilityService observabilityService) {
         this.storageService = storageService;
         this.chatHistoryService = chatHistoryService;
         this.webSearchService = webSearchService;
         this.auditLogService = auditLogService;
         this.admin = admin;
         this.billingSettingsService = billingSettingsService;
+        this.svgAvatarService = svgAvatarService;
+        this.upstreamModelCatalogService = upstreamModelCatalogService;
+        this.observabilityService = observabilityService;
     }
 
     // ========== 厂商信息 =========
@@ -173,6 +186,14 @@ public class AdminController {
             m.put("lastLoginAt", u.getLastLoginAt());
             m.put("lastLoginIp", u.getLastLoginIp());
             m.put("lastLoginBrowser", u.getLastLoginBrowser());
+            m.put("displayName", u.getDisplayName());
+            m.put("email", u.getEmail());
+            m.put("phone", u.getPhone());
+            m.put("department", u.getDepartment());
+            m.put("jobTitle", u.getJobTitle());
+            m.put("bio", u.getBio());
+            m.put("avatarType", u.getAvatarType());
+            m.put("avatarValue", u.getAvatarValue());
             m.put("allowedModelIds", u.getAllowedModelIds());
             m.put("disabled", u.isDisabled());
             m.put("dailyLimitType", u.getDailyLimitType());
@@ -275,6 +296,23 @@ public class AdminController {
             } else {
                 user.setDailyLimitType(null);
                 user.setDailyLimitValue(0);
+            }
+        }
+        // 用户资料字段按需更新，未提交的字段保持不变。
+        if (body.containsKey("displayName")) user.setDisplayName(adminProfileText(body, "displayName", 80));
+        if (body.containsKey("email")) user.setEmail(adminProfileText(body, "email", 160));
+        if (body.containsKey("phone")) user.setPhone(adminProfileText(body, "phone", 40));
+        if (body.containsKey("department")) user.setDepartment(adminProfileText(body, "department", 100));
+        if (body.containsKey("jobTitle")) user.setJobTitle(adminProfileText(body, "jobTitle", 100));
+        if (body.containsKey("bio")) user.setBio(adminProfileText(body, "bio", 500));
+        if (body.containsKey("avatarType") || body.containsKey("avatarValue")) {
+            String avatarType = adminProfileText(body, "avatarType", 20);
+            if ("svg".equals(avatarType)) {
+                user.setAvatarType("svg");
+                user.setAvatarValue(svgAvatarService.sanitize(adminProfileText(body, "avatarValue", 20_000)));
+            } else {
+                user.setAvatarType("default");
+                user.setAvatarValue("");
             }
         }
         storageService.updateUser(user);
@@ -567,7 +605,14 @@ public class AdminController {
             if (costLimitCny >= 0) storageService.setDailyCostLimitCny(costLimitCny);
             admin.audit(request, "settings.quota", "修改配额设置：每日上限 " + limit);
             result.put("success", true);
-            result.put("message", limit == 0 ? "已取消每日调用限制" : "每日调用上限已设为 " + limit + " 次");
+            List<String> messages = new ArrayList<>();
+            messages.add(limit == 0 ? "已取消每日调用限制" : "每日调用上限已设为 " + limit + " 次");
+            if (tokenLimit >= 0) messages.add(tokenLimit == 0 ? "已取消每日 Token 限制" : "每日 Token 上限已设为 " + tokenLimit);
+            if (costLimitCny >= 0) messages.add(costLimitCny == 0 ? "已取消每日金额限制" : "每日金额上限已设为 ¥" + costLimitCny);
+            if (ratePerMinute >= 0) messages.add(ratePerMinute == 0 ? "已取消每分钟限流" : "每分钟上限已设为 " + ratePerMinute + " 次");
+            if (contextMax >= 0) messages.add(contextMax == 0 ? "已取消上下文条数限制" : "上下文上限已设为 " + contextMax + " 条");
+            result.put("messages", messages);
+            result.put("message", String.join("；", messages));
         } catch (Exception e) {
             log.error("保存配额设置失败", e);
             result.put("success", false);
@@ -928,6 +973,10 @@ public class AdminController {
         Map<String, Object> result = new HashMap<>();
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("ipBindingEnabled", storageService.getIpBindingEnabled());
+        data.put("registrationEnabled", storageService.getRegistrationEnabled());
+        data.put("inviteCodeConfigured", storageService.hasRegistrationInviteCode());
+        data.put("registrationCaptchaEnabled", storageService.getRegistrationCaptchaEnabled());
+        data.put("botAvatarSvg", storageService.getBotAvatarSvg());
         result.put("success", true);
         result.put("data", data);
         return result;
@@ -942,21 +991,116 @@ public class AdminController {
                                                     HttpServletRequest request) {
         admin.requireAdmin(request);
         Map<String, Object> result = new HashMap<>();
-        Object raw = body == null ? null : body.get("ipBindingEnabled");
-        if (!(raw instanceof Boolean enabled)) {
+        if (body == null || body.isEmpty()) {
             result.put("success", false);
-            result.put("message", "请指定 ipBindingEnabled 参数（布尔值）");
+            result.put("message", "请指定要保存的安全设置");
             return result;
         }
-        storageService.setIpBindingEnabled(enabled);
-        admin.audit(request, "settings.security", "IP绑定校验" + (enabled ? "开启" : "关闭"));
-        log.info("IP绑定校验已{}", enabled ? "开启" : "关闭");
+        if (body.get("ipBindingEnabled") instanceof Boolean enabled) {
+            storageService.setIpBindingEnabled(enabled);
+        }
+        if (body.get("registrationEnabled") instanceof Boolean enabled) {
+            storageService.setRegistrationEnabled(enabled);
+        }
+        if (body.get("registrationCaptchaEnabled") instanceof Boolean enabled) {
+            storageService.setRegistrationCaptchaEnabled(enabled);
+        }
+        if (body.containsKey("inviteCode")) {
+            storageService.setRegistrationInviteCode(String.valueOf(body.get("inviteCode") == null ? "" : body.get("inviteCode")));
+        }
+        if (Boolean.TRUE.equals(body.get("clearInviteCode"))) {
+            storageService.setRegistrationInviteCode("");
+        }
+        if (body.containsKey("botAvatarSvg")) {
+            String svg = String.valueOf(body.get("botAvatarSvg") == null ? "" : body.get("botAvatarSvg"));
+            storageService.setBotAvatarSvg(svgAvatarService.sanitize(svg));
+        }
+        admin.audit(request, "settings.security", "保存安全、注册与 Bot 头像设置");
         result.put("success", true);
         result.put("message", "保存成功");
         return result;
     }
 
+    /**
+     * 从厂商上游读取最新模型目录。API Key 优先使用请求体，其次复用该厂商任一已接入模型的 Key。
+     */
+    @PostMapping("/providers/{providerId}/fetch-models")
+    public Map<String, Object> fetchProviderModels(@PathVariable String providerId,
+                                                    @RequestBody(required = false) Map<String, Object> body,
+                                                    HttpServletRequest request) {
+        admin.requireAdmin(request);
+        Provider provider = storageService.getResolvedProvider(providerId);
+        if (provider == null) return Map.of("success", false, "message", "厂商不存在");
+        String apiUrl = body != null && body.get("apiUrl") != null
+                ? String.valueOf(body.get("apiUrl")).trim() : provider.getDefaultApiUrl();
+        String apiKey = body != null && body.get("apiKey") != null
+                ? String.valueOf(body.get("apiKey")).trim() : "";
+        if (apiKey.isBlank()) {
+            apiKey = storageService.getAllModelConfigs().stream()
+                    .filter(model -> providerId.equals(model.getProviderId()))
+                    .map(ModelConfig::getApiKey)
+                    .filter(key -> key != null && !key.isBlank())
+                    .findFirst().orElse("");
+        }
+        try {
+            List<ProviderModel> models = upstreamModelCatalogService.fetch(apiUrl, apiKey);
+            admin.audit(request, "provider.fetchModels", "获取厂商 " + provider.getName()
+                    + " 上游模型目录（" + models.size() + " 个）");
+            return Map.of("success", true, "data", models,
+                    "endpoint", upstreamModelCatalogService.normalizeModelsEndpoint(apiUrl));
+        } catch (Exception e) {
+            return Map.of("success", false, "message", e.getMessage());
+        }
+    }
+
+    /**
+     * 保存管理员确认后的厂商模型目录，快速接入与模型管理会立即读取到更新结果。
+     */
+    @PutMapping("/providers/{providerId}/models")
+    public Map<String, Object> saveProviderModels(@PathVariable String providerId,
+                                                   @RequestBody Map<String, Object> body,
+                                                   HttpServletRequest request) {
+        admin.requireAdmin(request);
+        Provider provider = storageService.getResolvedProvider(providerId);
+        if (provider == null) return Map.of("success", false, "message", "厂商不存在");
+        List<ProviderModel> models = new ArrayList<>();
+        if (body != null && body.get("models") instanceof List<?> rawModels) {
+            for (Object raw : rawModels) {
+                if (!(raw instanceof Map<?, ?> map)) continue;
+                String id = map.get("id") == null ? "" : String.valueOf(map.get("id")).trim();
+                if (id.isEmpty()) continue;
+                ProviderModel model = new ProviderModel();
+                model.setId(id);
+                model.setName(map.get("name") == null ? id : String.valueOf(map.get("name")));
+                model.setSupportsThinking(Boolean.TRUE.equals(map.get("supportsThinking")));
+                model.setSupportsMultimodal(Boolean.TRUE.equals(map.get("supportsMultimodal")));
+                models.add(model);
+            }
+        }
+        storageService.saveProviderModels(providerId, models);
+        admin.audit(request, "provider.saveModels", "保存厂商 " + provider.getName()
+                + " 模型目录（" + models.size() + " 个）");
+        return Map.of("success", true, "message", "已保存 " + models.size() + " 个模型", "data", models);
+    }
+
+    /**
+     * 读取后台用户资料字段并限制长度。
+     */
+    private String adminProfileText(Map<String, Object> body, String key, int maxLength) {
+        String value = body.get(key) == null ? "" : String.valueOf(body.get(key)).trim();
+        if (value.length() > maxLength) throw new IllegalArgumentException(key + " 字段过长");
+        return value;
+    }
+
     // ========== 审计日志 ==========
+
+    /** 获取进程级请求、聊天流、延迟与内存指标快照。 */
+    @GetMapping("/observability")
+    public Map<String, Object> getObservability(HttpServletRequest request) {
+        admin.requireAdmin(request);
+        return Map.of("success", true, "healthy", storageService.isReady(),
+                "data", observabilityService.snapshot());
+    }
 
     /**
      * 分页查询审计日志（时间倒序）

@@ -67,7 +67,7 @@ import { APP_VERSION } from '@/config/version'
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
-const { toggleTheme, initTheme, getTheme } = useTheme()
+const { toggleTheme, initTheme } = useTheme()
 
 const activeTab = ref('quick-start')
 

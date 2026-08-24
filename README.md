@@ -88,13 +88,14 @@ chatai-newbot/
 │   │       ├── AuditLogService.java      # 审计日志记录与查询
 │   │       ├── LoginAttemptService.java  # 登录防爆破
 │   │       ├── RateLimitService.java     # 聊天短期限流
+│   │       ├── BudgetReservationService.java # 并发预算/用量预占
+│   │       ├── ObservabilityService.java # 请求、聊天流与 JVM 运行指标
 │   │       ├── DataCleanupService.java   # 过期数据定时清理
 │   │       └── ApiKeyCrypto.java         # API Key AES-256-GCM 加解密
 │   ├── src/main/resources/
 │   │   ├── application.yml
 │   │   ├── logback-spring.xml            # 滚动日志配置
-│   │   ├── providers.json                # 内置厂商 & 模型定义
-│   │   └── static/                       # 前端构建产物（由 web/dist 复制）
+│   │   └── providers.json                # 内置厂商 & 模型定义（源码不保存前端 static）
 │   ├── scripts/deploy.sh                 # 服务器端部署脚本（软链切换 + 回滚）
 │   └── pom.xml
 ├── web/                                  # 前端 (Vue 3 + Vite)
@@ -127,11 +128,13 @@ cd chatai-newbot
 # 1. 构建前端
 cd web
 npm install
-npm run build          # 产物输出并同步到后端 static 目录
+npm run lint
+npm test
+npm run build          # 产物仅输出到 web/dist
 
-# 2. 构建后端
+# 2. 构建后端（Maven 自动把 ../web/dist 打入 JAR 的 static 目录）
 cd ../chatai-with-newbot
-mvn clean package -DskipTests
+mvn clean verify
 
 # 3. 运行（空白部署无需预建任何目录/文件，首次启动自动初始化）
 java -jar target/*.jar

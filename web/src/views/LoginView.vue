@@ -116,7 +116,8 @@
                     <span class="check-box"><span class="check-tick"></span></span>
                     <span class="check-label">{{ t('login.rememberMe') }}</span>
                   </label>
-                  <button type="button" class="link-quiet link-button" @click="isRegister = true">{{ t('login.createAccountLink') }}</button>
+                  <button v-if="registerConfig.enabled" type="button" class="link-quiet link-button" @click="openRegister">{{ t('login.createAccountLink') }}</button>
+                  <span v-else class="link-quiet">注册已关闭</span>
                 </div>
                 <button ref="loginSubmitButton" class="submit-cta" type="submit" :disabled="loginLoading" aria-haspopup="dialog">
                   <span class="cta-text" v-if="!loginLoading">{{ t('login.enterCta') }}</span>
@@ -130,28 +131,43 @@
               <!-- 注册表单 -->
               <form class="atelier-form" :class="{ 'form-pane-active': isRegister }" @submit.prevent="handleRegister" autocomplete="off">
                 <div class="field">
-                  <label class="field-label"><span class="field-num">01</span><span class="field-name">{{ t('login.username') }}</span></label>
+                  <label class="field-label" for="reg-username"><span class="field-num">01</span><span class="field-name">{{ t('login.username') }}</span></label>
                   <div class="field-input-wrap">
-                    <input type="text" v-model="regForm.username" :placeholder="t('login.regUsernamePlaceholder')" autocomplete="username" class="field-input" @blur="validateField('regUsername')" @input="errors.regUsername = ''">
+                    <input id="reg-username" type="text" v-model="regForm.username" :placeholder="t('login.regUsernamePlaceholder')" autocomplete="username" class="field-input" @blur="validateField('regUsername')" @input="errors.regUsername = ''">
                     <span class="field-bar"></span>
                   </div>
                   <span class="field-error" v-if="errors.regUsername">{{ errors.regUsername }}</span>
                 </div>
                 <div class="field">
-                  <label class="field-label"><span class="field-num">02</span><span class="field-name">{{ t('login.password') }}</span></label>
+                  <label class="field-label" for="reg-password"><span class="field-num">02</span><span class="field-name">{{ t('login.password') }}</span></label>
                   <div class="field-input-wrap">
-                    <input type="password" v-model="regForm.password" :placeholder="t('login.regPasswordPlaceholder')" autocomplete="new-password" class="field-input" @blur="validateField('regPassword')" @input="errors.regPassword = ''">
+                    <input id="reg-password" type="password" v-model="regForm.password" :placeholder="t('login.regPasswordPlaceholder')" autocomplete="new-password" class="field-input" @blur="validateField('regPassword')" @input="errors.regPassword = ''">
                     <span class="field-bar"></span>
                   </div>
                   <span class="field-error" v-if="errors.regPassword">{{ errors.regPassword }}</span>
                 </div>
                 <div class="field">
-                  <label class="field-label"><span class="field-num">03</span><span class="field-name">{{ t('login.confirm') }}</span></label>
+                  <label class="field-label" for="reg-password-confirm"><span class="field-num">03</span><span class="field-name">{{ t('login.confirm') }}</span></label>
                   <div class="field-input-wrap">
-                    <input type="password" v-model="regForm.password2" :placeholder="t('login.regPassword2Placeholder')" autocomplete="new-password" class="field-input" @blur="validateField('regPassword2')" @input="errors.regPassword2 = ''">
+                    <input id="reg-password-confirm" type="password" v-model="regForm.password2" :placeholder="t('login.regPassword2Placeholder')" autocomplete="new-password" class="field-input" @blur="validateField('regPassword2')" @input="errors.regPassword2 = ''">
                     <span class="field-bar"></span>
                   </div>
                   <span class="field-error" v-if="errors.regPassword2">{{ errors.regPassword2 }}</span>
+                </div>
+                <div v-if="registerConfig.inviteRequired" class="field">
+                  <label class="field-label" for="reg-invite"><span class="field-num">04</span><span class="field-name">邀请码</span></label>
+                  <div class="field-input-wrap">
+                    <input id="reg-invite" type="text" v-model="regForm.inviteCode" autocomplete="off" class="field-input" placeholder="请输入管理员提供的邀请码">
+                    <span class="field-bar"></span>
+                  </div>
+                </div>
+                <div v-if="registerConfig.captchaEnabled" class="field">
+                  <label class="field-label" for="reg-captcha"><span class="field-num">05</span><span class="field-name">验证码：{{ registerConfig.captcha?.question }}</span></label>
+                  <div class="field-input-wrap captcha-input-wrap">
+                    <input id="reg-captcha" type="text" inputmode="numeric" v-model="regForm.captchaAnswer" autocomplete="off" class="field-input" placeholder="请输入计算结果">
+                    <button type="button" class="link-quiet link-button captcha-refresh" @click="loadRegisterConfig">刷新</button>
+                    <span class="field-bar"></span>
+                  </div>
                 </div>
                 <button class="submit-cta" type="submit" :disabled="regLoading">
                   <span class="cta-text" v-if="!regLoading">{{ t('login.createCta') }}</span>
@@ -224,7 +240,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
-import { login, register, getMe, verifyTwoFactorLogin } from '@/api/auth'
+import { login, register, getMe, verifyTwoFactorLogin, getRegisterConfig } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
 import { useTheme } from '@/composables/useTheme'
 import { APP_VERSION } from '@/config/version'
@@ -251,7 +267,8 @@ const twoFactorModal = ref(null)
 const loginSubmitButton = ref(null)
 
 const loginForm = ref({ username: '', password: '' })
-const regForm = ref({ username: '', password: '', password2: '' })
+const regForm = ref({ username: '', password: '', password2: '', inviteCode: '', captchaAnswer: '' })
+const registerConfig = ref({ enabled: true, inviteRequired: false, captchaEnabled: false, captcha: null })
 
 // 字段级实时校验错误信息
 const errors = ref({ loginUsername: '', loginPassword: '', regUsername: '', regPassword: '', regPassword2: '' })
@@ -270,6 +287,7 @@ const currentDate = computed(() => {
 
 // 已登录自动跳转（token 存于 HttpOnly Cookie，以 username 本地标记预判，再请求后端确认）
 onMounted(async () => {
+  await loadRegisterConfig()
   if (safeGet('username')) {
     try {
       const data = await getMe()
@@ -295,6 +313,25 @@ onMounted(async () => {
   document.addEventListener('focusin', onFocusIn)
   document.addEventListener('focusout', scheduleViewportResync)
 })
+
+// 刷新公开注册配置及一次性验证码挑战
+async function loadRegisterConfig() {
+  try {
+    const res = await getRegisterConfig()
+    if (res?.success) registerConfig.value = res.data || registerConfig.value
+  } catch (e) { /* 登录页仍可正常登录 */ }
+}
+
+// 进入注册表单前重新获取挑战，避免使用过期验证码
+async function openRegister() {
+  await loadRegisterConfig()
+  if (!registerConfig.value.enabled) {
+    ElMessage.info('系统当前已关闭注册')
+    return
+  }
+  regForm.value.captchaAnswer = ''
+  isRegister.value = true
+}
 
 onUnmounted(() => {
   if (window.visualViewport) {
@@ -403,7 +440,7 @@ function validateField(field) {
   } else if (field === 'regPassword') {
     const v = regForm.value.password
     if (!v) e.regPassword = t('login.errPasswordRequired')
-    else if (v.length < 4) e.regPassword = t('login.errPasswordLen')
+    else if (v.length < 8 || !/[A-Za-z]/.test(v) || !/\d/.test(v)) e.regPassword = '密码至少 8 位，且需同时包含字母和数字'
     else e.regPassword = ''
   } else if (field === 'regPassword2') {
     const v = regForm.value.password2
@@ -570,7 +607,13 @@ async function handleRegister() {
   if (!validateRegister()) return
   regLoading.value = true
   try {
-    const data = await register({ username: regForm.value.username, password: regForm.value.password })
+    const data = await register({
+      username: regForm.value.username,
+      password: regForm.value.password,
+      inviteCode: regForm.value.inviteCode,
+      captchaId: registerConfig.value.captcha?.challengeId || '',
+      captchaAnswer: regForm.value.captchaAnswer
+    })
     if (data.success) {
       authStore.setAuth(data)
       // 同 handleLogin：跳转完成前保持 loading，防止重复提交
@@ -578,6 +621,10 @@ async function handleRegister() {
       return
     }
     ElMessage.error(data.message || t('login.registerFailed'))
+    if (registerConfig.value.captchaEnabled) {
+      regForm.value.captchaAnswer = ''
+      await loadRegisterConfig()
+    }
   } catch (e) {
     ElMessage.error(t('login.networkError'))
   }
@@ -594,6 +641,8 @@ async function handleRegister() {
   color: #ef4444;
   letter-spacing: 0.02em;
 }
+.captcha-input-wrap { display: flex; align-items: center; }
+.captcha-refresh { flex: 0 0 auto; margin-left: 10px; }
 /* 复选框键盘聚焦可见 */
 .check-rail:focus-visible {
   outline: 2px solid var(--primary, #6366f1);

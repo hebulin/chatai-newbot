@@ -2,15 +2,19 @@ package com.chatai.newbot.controller;
 
 import com.chatai.newbot.model.*;
 import com.chatai.newbot.service.ChatHistoryService;
+import com.chatai.newbot.service.BudgetReservationService;
 import com.chatai.newbot.service.RateLimitService;
 import com.chatai.newbot.service.StorageManager;
 import com.chatai.newbot.service.UnifiedChatService;
+import com.chatai.newbot.service.SvgAvatarService;
+import com.chatai.newbot.service.ObservabilityService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.SignalType;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.LocalDateTime;
@@ -25,18 +29,30 @@ public class ChatController {
     private final StorageManager storageService;
     private final ChatHistoryService chatHistoryService;
     private final RateLimitService rateLimitService;
+    private final BudgetReservationService budgetReservationService;
+    private final SvgAvatarService svgAvatarService;
+    private final ObservabilityService observabilityService;
 
+    /** 注入聊天、历史、预算预占、头像校验和运行指标服务。 */
     public ChatController(UnifiedChatService chatService, StorageManager storageService,
-                          ChatHistoryService chatHistoryService, RateLimitService rateLimitService) {
+                          ChatHistoryService chatHistoryService, RateLimitService rateLimitService,
+                          BudgetReservationService budgetReservationService,
+                          SvgAvatarService svgAvatarService,
+                          ObservabilityService observabilityService) {
         this.chatService = chatService;
         this.storageService = storageService;
         this.chatHistoryService = chatHistoryService;
         this.rateLimitService = rateLimitService;
+        this.budgetReservationService = budgetReservationService;
+        this.svgAvatarService = svgAvatarService;
+        this.observabilityService = observabilityService;
     }
 
     @GetMapping("/heartbeat")
     public ResponseEntity<Void> heartbeat() {
-        return ResponseEntity.ok().build();
+        return storageService.isReady()
+                ? ResponseEntity.ok().build()
+                : ResponseEntity.status(503).build();
     }
 
     @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -70,7 +86,8 @@ public class ChatController {
             }
         }
 
-        // 限流与配额检查（admin 豁免）
+        String requestId = UUID.randomUUID().toString();
+        // 限流与预算预占（admin 豁免）
         if (!user.isAdmin()) {
             // 1) 每分钟短时限流（滑动窗口）
             int ratePerMinute = storageService.getRateLimitPerMinute();
@@ -78,44 +95,20 @@ public class ChatController {
                 return Flux.just("{\"error\":{\"message\":\"操作过于频繁，请稍后再试（每分钟最多 " + ratePerMinute + " 次）\",\"type\":\"rate_limit_error\"}}");
             }
 
-            // 2) 每日限额：用户个人限额（次数/Token，二选一）优先，未设置则回退全局配额
-            String today = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
-            String personalType = user.getDailyLimitType();
-            int personalValue = user.getDailyLimitValue();
-            if ("count".equals(personalType) && personalValue > 0) {
-                int used = storageService.countUsageByUserAndDay(user.getId(), today);
-                if (used >= personalValue) {
-                    return Flux.just("{\"error\":{\"message\":\"今日调用次数已达上限（" + personalValue + " 次），请明日再试\",\"type\":\"quota_error\"}}");
-                }
-            } else if ("token".equals(personalType) && personalValue > 0) {
-                long usedTokens = storageService.sumTokensByUserAndDay(user.getId(), today);
-                if (usedTokens >= personalValue) {
-                    return Flux.just("{\"error\":{\"message\":\"今日 Token 用量已达上限（" + personalValue + "），请明日再试\",\"type\":\"quota_error\"}}");
-                }
-            } else {
-                // 无个人限额，回退到全局每日调用次数配额
-                int limit = storageService.getDailyChatLimit();
-                if (limit > 0) {
-                    int used = storageService.countUsageByUserAndDay(user.getId(), today);
-                    if (used >= limit) {
-                        return Flux.just("{\"error\":{\"message\":\"今日调用次数已达上限（" + limit + " 次），请明日再试\",\"type\":\"quota_error\"}}");
-                    }
-                }
-                long tokenLimit = storageService.getDailyTokenLimit();
-                if (tokenLimit > 0 && storageService.sumTokensByUserAndDay(user.getId(), today) >= tokenLimit) {
-                    return Flux.just("{\"error\":{\"message\":\"今日 Token 用量已达全局上限，请明日再试\",\"type\":\"quota_error\"}}");
-                }
-                double costLimitCny = storageService.getDailyCostLimitCny();
-                if (costLimitCny > 0 && storageService.sumCostCnyByUserAndDay(user.getId(), today) >= costLimitCny) {
-                    return Flux.just("{\"error\":{\"message\":\"今日金额用量已达全局预算上限，请明日再试\",\"type\":\"quota_error\"}}");
-                }
+            BudgetReservationService.ReservationResult reservation =
+                    budgetReservationService.reserve(user, request, config);
+            if (!reservation.allowed()) {
+                return Flux.just("{\"error\":{\"message\":\"" + reservation.message()
+                        + "\",\"type\":\"quota_error\"}}");
             }
+            requestId = reservation.requestId();
         }
 
         // 记录使用（仅构建对象，不立即入库）：由 UnifiedChatService 在流终止阶段
         // 按实际消耗情况写入——正常完成/客户端取消/已输出后失败才落库，
         // 请求直接失败（未产生任何输出）不写入、不占每日配额
         UsageLog usageLog = new UsageLog();
+        usageLog.setRequestId(requestId);
         usageLog.setUserId(user.getId());
         usageLog.setUsername(user.getUsername());
         usageLog.setModelId(config.getId());
@@ -123,7 +116,13 @@ public class ChatController {
         usageLog.setTimestamp(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
         usageLog.setDeepThinking(request.isDeepThinking());
 
-        return chatService.chat(request, modelConfigId, usageLog);
+        String finalRequestId = requestId;
+        observabilityService.chatStarted();
+        return chatService.chat(request, modelConfigId, usageLog)
+                .doFinally(signal -> {
+                    budgetReservationService.release(finalRequestId);
+                    observabilityService.chatFinished(signal == SignalType.ON_ERROR);
+                });
     }
 
     /**
@@ -154,10 +153,86 @@ public class ChatController {
         result.put("success", true);
         result.put("data", modelList);
         result.put("defaultModelId", storageService.getDefaultModelId());
+        result.put("botAvatarSvg", storageService.getBotAvatarSvg());
         // 联网搜索能力：全局开启且已配置 Key 时，聊天输入框才展示“联网”开关
         result.put("webSearchEnabled", storageService.getWebSearchEnabled()
                 && storageService.getTavilyApiKey() != null && !storageService.getTavilyApiKey().trim().isEmpty());
         return result;
+    }
+
+    /**
+     * 获取当前用户可维护的个人资料与头像。
+     */
+    @GetMapping("/user/profile")
+    public Map<String, Object> getUserProfile(HttpServletRequest request) {
+        User current = (User) request.getAttribute("currentUser");
+        User user = storageService.getUserById(current.getId());
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("success", true);
+        result.put("data", toProfileMap(user));
+        return result;
+    }
+
+    /**
+     * 更新当前用户个人资料；用户名、角色、配额等安全字段不在本接口修改。
+     */
+    @PutMapping("/user/profile")
+    public Map<String, Object> updateUserProfile(@RequestBody Map<String, Object> body,
+                                                  HttpServletRequest request) {
+        User current = (User) request.getAttribute("currentUser");
+        User user = storageService.getUserById(current.getId());
+        applyProfile(user, body);
+        storageService.updateUser(user);
+        return Map.of("success", true, "message", "个人资料已保存", "data", toProfileMap(user));
+    }
+
+    /**
+     * 将用户资料转换为不含凭据与安全配置的公开 Map。
+     */
+    private Map<String, Object> toProfileMap(User user) {
+        Map<String, Object> profile = new LinkedHashMap<>();
+        profile.put("username", user.getUsername());
+        profile.put("displayName", valueOrEmpty(user.getDisplayName()));
+        profile.put("email", valueOrEmpty(user.getEmail()));
+        profile.put("phone", valueOrEmpty(user.getPhone()));
+        profile.put("department", valueOrEmpty(user.getDepartment()));
+        profile.put("jobTitle", valueOrEmpty(user.getJobTitle()));
+        profile.put("bio", valueOrEmpty(user.getBio()));
+        profile.put("avatarType", valueOrEmpty(user.getAvatarType()).isEmpty() ? "default" : user.getAvatarType());
+        profile.put("avatarValue", valueOrEmpty(user.getAvatarValue()));
+        return profile;
+    }
+
+    /**
+     * 从请求体应用有限长度的用户资料，并对 SVG 代码执行安全检查。
+     */
+    private void applyProfile(User user, Map<String, Object> body) {
+        user.setDisplayName(profileText(body, "displayName", 80));
+        user.setEmail(profileText(body, "email", 160));
+        user.setPhone(profileText(body, "phone", 40));
+        user.setDepartment(profileText(body, "department", 100));
+        user.setJobTitle(profileText(body, "jobTitle", 100));
+        user.setBio(profileText(body, "bio", 500));
+        String avatarType = profileText(body, "avatarType", 20);
+        if ("svg".equals(avatarType)) {
+            user.setAvatarType("svg");
+            user.setAvatarValue(svgAvatarService.sanitize(profileText(body, "avatarValue", 20_000)));
+        } else {
+            user.setAvatarType("default");
+            user.setAvatarValue("");
+        }
+    }
+
+    /** 读取并限制个人资料文本字段长度。 */
+    private String profileText(Map<String, Object> body, String key, int maxLength) {
+        String value = body != null && body.get(key) != null ? String.valueOf(body.get(key)).trim() : "";
+        if (value.length() > maxLength) throw new IllegalArgumentException(key + " 字段过长");
+        return value;
+    }
+
+    /** 将 null 转为空字符串，保持前端表单类型稳定。 */
+    private String valueOrEmpty(String value) {
+        return value == null ? "" : value;
     }
 
     /**

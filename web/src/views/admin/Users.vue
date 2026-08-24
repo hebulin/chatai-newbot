@@ -27,6 +27,15 @@
                 @selection-change="onSelectionChange" row-key="id">
         <el-table-column type="selection" width="44" align="center" reserve-selection :selectable="isRowSelectable" />
         <el-table-column prop="username" label="用户名" :width="colW.username" show-overflow-tooltip />
+        <el-table-column prop="displayName" label="显示名称" min-width="120" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.displayName || '-' }}</template>
+        </el-table-column>
+        <el-table-column prop="email" label="邮箱" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.email || '-' }}</template>
+        </el-table-column>
+        <el-table-column prop="department" label="部门" min-width="120" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.department || '-' }}</template>
+        </el-table-column>
         <el-table-column label="角色" :width="colW.role" align="center">
           <template #default="{ row }">
             <span class="status-badge" :class="row.role === 'admin' ? 'status-enabled' : 'vis-admin'">
@@ -78,7 +87,7 @@
                 @click="handleToggleDisabled(row)"
               >
                 <!-- icon 展示当前状态：正常=绿色解锁，禁用=红色锁定 -->
-                <el-icon><component :is="row.disabled ? 'Lock' : 'Unlock'" /></el-icon>
+                <el-icon><Lock v-if="row.disabled" /><Unlock v-else /></el-icon>
               </el-button>
             </el-button-group>
           </template>
@@ -113,8 +122,8 @@
     </el-dialog>
 
     <!-- 编辑用户弹窗 -->
-    <el-dialog v-model="editVisible" :title="'编辑用户 - ' + editForm.username" width="420px" destroy-on-close>
-      <el-form label-width="70px">
+    <el-dialog v-model="editVisible" :title="'编辑用户 - ' + editForm.username" width="720px" destroy-on-close>
+      <el-form label-width="90px">
         <el-form-item label="用户名">
           <el-input :model-value="editForm.username" disabled />
         </el-form-item>
@@ -154,6 +163,19 @@
         <el-form-item v-if="editForm.username !== 'admin'" label=" ">
           <span style="font-size:12px;color:var(--ink-3);line-height:1.6;">二选其一：按每日调用次数或每日 Token 总量限制。选“不单独限制”则回退全局配额。仅对普通用户生效。</span>
         </el-form-item>
+        <el-divider content-position="left">用户资料</el-divider>
+        <div class="user-profile-grid">
+          <el-form-item label="显示名称"><el-input v-model="editForm.displayName" maxlength="80" /></el-form-item>
+          <el-form-item label="邮箱"><el-input v-model="editForm.email" maxlength="160" /></el-form-item>
+          <el-form-item label="联系电话"><el-input v-model="editForm.phone" maxlength="40" /></el-form-item>
+          <el-form-item label="部门"><el-input v-model="editForm.department" maxlength="100" /></el-form-item>
+          <el-form-item label="职位"><el-input v-model="editForm.jobTitle" maxlength="100" /></el-form-item>
+          <el-form-item label="头像类型">
+            <el-select v-model="editForm.avatarType" style="width:100%"><el-option label="默认头像" value="default" /><el-option label="SVG 代码" value="svg" /></el-select>
+          </el-form-item>
+        </div>
+        <el-form-item label="个人简介"><el-input v-model="editForm.bio" type="textarea" :rows="3" maxlength="500" /></el-form-item>
+        <el-form-item v-if="editForm.avatarType === 'svg'" label="SVG 代码"><el-input v-model="editForm.avatarValue" type="textarea" :rows="5" maxlength="20000" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="editVisible = false">取消</el-button>
@@ -282,7 +304,15 @@ function editUser(row) {
     password: '',
     role: row.role,
     dailyLimitType: row.dailyLimitType || '',
-    dailyLimitValue: row.dailyLimitValue || 0
+    dailyLimitValue: row.dailyLimitValue || 0,
+    displayName: row.displayName || '',
+    email: row.email || '',
+    phone: row.phone || '',
+    department: row.department || '',
+    jobTitle: row.jobTitle || '',
+    bio: row.bio || '',
+    avatarType: row.avatarType || 'default',
+    avatarValue: row.avatarValue || ''
   }
   editVisible.value = true
 }
@@ -299,7 +329,17 @@ function onLimitTypeChange(type) {
 async function saveUser() {
   submitting.value = true
   try {
-    const payload = { role: editForm.value.role }
+    const payload = {
+      role: editForm.value.role,
+      displayName: editForm.value.displayName,
+      email: editForm.value.email,
+      phone: editForm.value.phone,
+      department: editForm.value.department,
+      jobTitle: editForm.value.jobTitle,
+      bio: editForm.value.bio,
+      avatarType: editForm.value.avatarType,
+      avatarValue: editForm.value.avatarValue
+    }
     if (editForm.value.password.trim()) payload.password = editForm.value.password.trim()
     // 每日限额（二选其一）：未选类型则传空以清除个人限额
     if (editForm.value.dailyLimitType) {
@@ -464,3 +504,14 @@ onActivated(() => {
   loadModels()
 })
 </script>
+
+<style scoped>
+.user-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 14px;
+}
+@media (max-width: 720px) {
+  .user-profile-grid { grid-template-columns: 1fr; }
+}
+</style>

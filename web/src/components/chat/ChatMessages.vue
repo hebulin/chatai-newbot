@@ -62,6 +62,9 @@
           <button class="footer-copy-btn" @click="$emit('copy', msg.content)" :title="t('messages.copy')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
           </button>
+          <button v-if="!isStreaming" class="footer-copy-btn" @click="$emit('branch', idx)" title="从此处创建会话分支" aria-label="从此处创建会话分支">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3v7a4 4 0 0 0 4 4h8"/><path d="m15 11 3 3-3 3"/><circle cx="6" cy="3" r="2"/></svg>
+          </button>
           <!-- AI 消息：TTS 朗读（播放中显示停止、暂停中显示继续，状态由全局 useSpeech 驱动） -->
           <button v-if="msg.role === 'assistant' && !msg.isError && speechSupported" class="footer-copy-btn" :class="{ speaking: speechIsCurrent(idx) }" @click="speechToggle(idx, msg.content)" :title="speechBtnTitle(idx)">
             <svg v-if="speechIsPlaying(idx)" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
@@ -112,6 +115,8 @@ import { useI18n } from 'vue-i18n'
 import { renderMarkdown, escapeHtml, renderMermaidBlocks, processSpecialContent, handleMermaidToolbarClick } from '@/composables/useMarkdown'
 import { useSpeech } from '@/composables/useSpeech'
 import { useTheme } from '@/composables/useTheme'
+import { useModelsStore } from '@/stores/models'
+import { getUserProfile } from '@/api/user'
 
 const props = defineProps({
   messages: { type: Array, default: () => [] },
@@ -127,15 +132,21 @@ const props = defineProps({
   searchActiveIndex: { type: Number, default: -1 }
 })
 
-const emit = defineEmits(['copy', 'lightbox', 'regenerate', 'edit-resend', 'preview-html'])
+const emit = defineEmits(['copy', 'lightbox', 'regenerate', 'edit-resend', 'preview-html', 'branch'])
 
 const { t } = useI18n()
 
 const { getTheme } = useTheme()
+const modelsStore = useModelsStore()
 const containerRef = ref(null)
+const avatarProfile = ref({ avatarType: 'default', avatarValue: '' })
 
-const userAvatarSrc = computed(() => getTheme() === 'dark' ? '/icons/user_ss.svg' : '/icons/user.svg')
-const aiAvatarSrc = computed(() => getTheme() === 'dark' ? '/icons/AIBot_ss.svg' : '/icons/AIBot.svg')
+const userAvatarSrc = computed(() => avatarProfile.value.avatarType === 'svg' && avatarProfile.value.avatarValue
+  ? 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(avatarProfile.value.avatarValue)
+  : (getTheme() === 'dark' ? '/icons/user_ss.svg' : '/icons/user.svg'))
+const aiAvatarSrc = computed(() => modelsStore.botAvatarSvg
+  ? 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(modelsStore.botAvatarSvg)
+  : (getTheme() === 'dark' ? '/icons/AIBot_ss.svg' : '/icons/AIBot.svg'))
 
 // 渲染 Markdown；仅历史消息正文传入展示下标并叠加搜索高亮，思考过程与流式消息保持原样
 function renderMd(text, displayIdx = -1) {
@@ -284,15 +295,29 @@ function onLightbox(e) {
 function onHtmlPreview(e) {
   if (e.detail && e.detail.code != null) emit('preview-html', e.detail.code)
 }
+// 刷新用户头像资料
+async function loadAvatarProfile() {
+  try {
+    const res = await getUserProfile()
+    if (res?.success) avatarProfile.value = { ...avatarProfile.value, ...(res.data || {}) }
+  } catch (e) { /* 回退默认头像 */ }
+}
+// 接收个人设置保存后的头像更新
+function onProfileUpdated(event) {
+  avatarProfile.value = { ...avatarProfile.value, ...(event.detail || {}) }
+}
 onMounted(() => {
   containerRef.value?.addEventListener('click', onContainerClick)
   containerRef.value?.addEventListener('lightbox', onLightbox)
   containerRef.value?.addEventListener('html-preview', onHtmlPreview)
+  window.addEventListener('user-profile-updated', onProfileUpdated)
+  loadAvatarProfile()
 })
 onUnmounted(() => {
   containerRef.value?.removeEventListener('click', onContainerClick)
   containerRef.value?.removeEventListener('lightbox', onLightbox)
   containerRef.value?.removeEventListener('html-preview', onHtmlPreview)
+  window.removeEventListener('user-profile-updated', onProfileUpdated)
   if (renderTimer) clearTimeout(renderTimer)
 })
 </script>

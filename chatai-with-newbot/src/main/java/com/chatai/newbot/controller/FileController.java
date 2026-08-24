@@ -1,8 +1,15 @@
 package com.chatai.newbot.controller;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.chatai.newbot.service.DocumentParseService;
 import com.chatai.newbot.service.FileStorageService;
 import com.chatai.newbot.service.PdfRenderService;
+import com.chatai.newbot.service.StorageManager;
+import com.chatai.newbot.model.ChatShare;
+import com.chatai.newbot.model.User;
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -30,23 +37,33 @@ public class FileController {
     private final FileStorageService fileStorageService;
     private final DocumentParseService documentParseService;
     private final PdfRenderService pdfRenderService;
+    private final StorageManager storageManager;
+    private final ObjectMapper objectMapper;
 
+    /** 注入文件处理、所有权校验与分享快照解析依赖。 */
     public FileController(FileStorageService fileStorageService,
                           DocumentParseService documentParseService,
-                          PdfRenderService pdfRenderService) {
+                          PdfRenderService pdfRenderService,
+                          StorageManager storageManager,
+                          ObjectMapper objectMapper) {
         this.fileStorageService = fileStorageService;
         this.documentParseService = documentParseService;
         this.pdfRenderService = pdfRenderService;
+        this.storageManager = storageManager;
+        this.objectMapper = objectMapper;
     }
 
     /**
      * 上传聊天图片（最大5MB，仅图片类型）
      */
     @PostMapping("/api/upload/image")
-    public Map<String, Object> uploadImage(@RequestParam("file") MultipartFile file) {
+    public Map<String, Object> uploadImage(@RequestParam("file") MultipartFile file,
+                                            HttpServletRequest request) {
         Map<String, Object> result = new HashMap<>();
         try {
             String url = fileStorageService.saveImage(file);
+            User user = (User) request.getAttribute("currentUser");
+            storageManager.registerFileAsset(url, user.getId(), "image");
             result.put("success", true);
             result.put("url", url);
         } catch (IllegalArgumentException e) {
@@ -63,11 +80,14 @@ public class FileController {
      * 上传附件文档（最大10MB）：解析为纯文本后落盘，返回引用 URL 与文本字数
      */
     @PostMapping("/api/upload/document")
-    public Map<String, Object> uploadDocument(@RequestParam("file") MultipartFile file) {
+    public Map<String, Object> uploadDocument(@RequestParam("file") MultipartFile file,
+                                               HttpServletRequest request) {
         Map<String, Object> result = new HashMap<>();
         try {
             String text = documentParseService.parse(file);
             String url = fileStorageService.saveDocumentText(text);
+            User user = (User) request.getAttribute("currentUser");
+            storageManager.registerFileAsset(url, user.getId(), "document");
             result.put("success", true);
             result.put("url", url);
             result.put("name", file.getOriginalFilename());
@@ -92,13 +112,19 @@ public class FileController {
      * 注意：MultipartFile 的内容在异步执行前已由容器缓存于内存/临时文件，异步读取安全。
      */
     @PostMapping("/api/upload/pdf")
-    public Callable<Map<String, Object>> uploadPdf(@RequestParam("file") MultipartFile file) {
+    public Callable<Map<String, Object>> uploadPdf(@RequestParam("file") MultipartFile file,
+                                                    HttpServletRequest request) {
         // 提前读取文件名（异步阶段请求上下文可能已失效）
         String originalName = file.getOriginalFilename();
+        User current = (User) request.getAttribute("currentUser");
+        String ownerUserId = current.getId();
         return () -> {
             Map<String, Object> result = new HashMap<>();
             try {
                 PdfRenderService.RenderResult r = pdfRenderService.render(file);
+                for (String url : r.images()) {
+                    storageManager.registerFileAsset(url, ownerUserId, "pdf-page");
+                }
                 result.put("success", true);
                 result.put("images", r.images());
                 result.put("name", originalName);
@@ -120,14 +146,23 @@ public class FileController {
      * 读取已上传的图片（浏览器可长缓存：文件名唯一且内容不变）
      */
     @GetMapping("/api/files/img/{month}/{filename:.+}")
-    public ResponseEntity<byte[]> getImage(@PathVariable String month, @PathVariable String filename) {
+    public ResponseEntity<byte[]> getImage(@PathVariable String month, @PathVariable String filename,
+                                            @RequestParam(required = false) String shareId,
+                                            HttpServletRequest request) {
+        String url = FileStorageService.IMG_URL_PREFIX + month + "/" + filename;
+        User user = resolveRequestUser(request);
+        boolean ownerAllowed = storageManager.canAccessFileAsset(url,
+                user == null ? null : user.getId(), user != null && user.isAdmin());
+        if (!ownerAllowed && !isAllowedByShare(url, shareId)) {
+            return ResponseEntity.status(403).build();
+        }
         byte[] bytes = fileStorageService.readImage(month, filename);
         if (bytes == null) {
             return ResponseEntity.notFound().build();
         }
         ResponseEntity.BodyBuilder builder = ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(fileStorageService.mimeOf(filename)))
-                .cacheControl(CacheControl.maxAge(30, TimeUnit.DAYS).cachePublic());
+                .cacheControl(CacheControl.maxAge(30, TimeUnit.DAYS).cachePrivate());
         // 存量 svg 兜底：新上传已禁止 SVG，但历史文件仍可能存在。SVG 顶级导航打开会执行
         // 内嵌脚本（存储型 XSS），故强制以附件下载而非内联渲染，并附加沙箱 CSP 双重防护
         if (fileStorageService.isSvg(filename)) {
@@ -135,5 +170,53 @@ public class FileController {
                     .header("Content-Security-Policy", "sandbox");
         }
         return builder.body(bytes);
+    }
+
+    /**
+     * 从 Authorization/Cookie 中解析当前用户；图片路由本身保持匿名可达以支持分享页。
+     */
+    private User resolveRequestUser(HttpServletRequest request) {
+        String token = request.getHeader("Authorization");
+        if (token != null && token.startsWith("Bearer ")) token = token.substring(7);
+        if ((token == null || token.isBlank()) && request.getCookies() != null) {
+            for (Cookie cookie : request.getCookies()) {
+                if ("token".equals(cookie.getName())) {
+                    token = cookie.getValue();
+                    break;
+                }
+            }
+        }
+        return storageManager.getUserByToken(token);
+    }
+
+    /**
+     * 校验匿名分享是否确实包含目标图片 URL，防止仅凭文件名跨分享读取其他资源。
+     */
+    private boolean isAllowedByShare(String url, String shareId) {
+        if (shareId == null || shareId.isBlank()) return false;
+        ChatShare share = storageManager.getChatShareById(shareId);
+        if (share == null || share.getSnapshotJson() == null) return false;
+        if (share.getExpiresAt() != null && !share.getExpiresAt().isBlank()) {
+            try {
+                if (java.time.LocalDateTime.now().isAfter(java.time.LocalDateTime.parse(
+                        share.getExpiresAt(), java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")))) {
+                    return false;
+                }
+            } catch (Exception ignore) { }
+        }
+        try {
+            JsonNode messages = objectMapper.readTree(share.getSnapshotJson());
+            if (!messages.isArray()) return false;
+            for (JsonNode message : messages) {
+                JsonNode images = message.get("images");
+                if (images == null || !images.isArray()) continue;
+                for (JsonNode image : images) {
+                    if (image.isTextual() && url.equals(image.asText())) return true;
+                }
+            }
+            return false;
+        } catch (Exception ignore) {
+            return false;
+        }
     }
 }

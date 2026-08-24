@@ -22,6 +22,16 @@
         <button class="new-folder-btn" @click="onCreateFolder" :title="t('sidebar.newFolder')" :aria-label="t('sidebar.newFolder')">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="10" x2="12" y2="16"/><line x1="9" y1="13" x2="15" y2="13"/></svg>
         </button>
+        <button class="new-folder-btn" :class="{ active: multiSelectMode }" @click="toggleMultiSelect" title="多选会话" aria-label="多选会话">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="5" height="5" rx="1"/><rect x="3" y="15" width="5" height="5" rx="1"/><path d="M12 6h9M12 17h9"/><path d="m4.5 6.5 1 1 2-2"/></svg>
+        </button>
+      </div>
+
+      <div v-if="multiSelectMode" class="multi-select-toolbar" aria-live="polite">
+        <span>已选 {{ selectedChatIds.length }} 项</span>
+        <button type="button" :disabled="!selectedChatIds.length" @click="bulkMove">移动</button>
+        <button type="button" class="danger" :disabled="!selectedChatIds.length" @click="bulkDelete">删除</button>
+        <button type="button" @click="toggleMultiSelect">完成</button>
       </div>
 
       <div class="chat-search-box">
@@ -80,12 +90,15 @@
           <div
             v-else
             class="chat-item"
-            :class="{ active: row.chat.id === chatStore.currentChatId, 'in-folder': row.inFolder }"
-            @click="$emit('switch-chat', row.chat.id)"
+            :class="{ active: row.chat.id === chatStore.currentChatId, selected: selectedChatIds.includes(row.chat.id), 'in-folder': row.inFolder }"
+            role="button" tabindex="0"
+            @click="handleChatClick(row.chat.id)"
+            @keydown.enter.prevent="handleChatClick(row.chat.id)"
           >
+            <input v-if="multiSelectMode" class="chat-select-checkbox" type="checkbox" :checked="selectedChatIds.includes(row.chat.id)" :aria-label="'选择会话 ' + row.chat.title" @click.stop="toggleChatSelection(row.chat.id)" />
             <svg v-if="row.chat.pinned" class="pin-marker" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M16 3l5 5-3 1-4 4-1 6-2-2-4 4-1-1 4-4-2-2 6-1 4-4z"/></svg>
             <span class="title">{{ row.chat.title }}</span>
-            <button class="chat-more-btn" @click.stop="toggleChatMenu(row.chat.id)" :title="t('sidebar.more')">
+            <button v-if="!multiSelectMode" class="chat-more-btn" @click.stop="toggleChatMenu(row.chat.id)" :title="t('sidebar.more')">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
             </button>
             <div class="chat-item-menu" :class="{ 'is-move-menu': moveMenuId === row.chat.id }" v-if="openMenuId === row.chat.id" @click.stop>
@@ -124,7 +137,7 @@
           <div class="user-avatar-wrap">
             <img class="avatar-icon" :src="userAvatarSrc" style="width:14px;height:14px;border-radius:50%" />
           </div>
-          <span>{{ authStore.username || t('sidebar.user') }}</span>
+          <span>{{ userProfile.displayName || authStore.username || t('sidebar.user') }}</span>
           <span class="user-info-spacer"></span>
           <span class="user-info-more">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
@@ -172,6 +185,7 @@ import { useChatStore } from '@/stores/chat'
 import { useAuthStore } from '@/stores/auth'
 import { useTheme } from '@/composables/useTheme'
 import { searchChatHistory } from '@/api/chat'
+import { getUserProfile } from '@/api/user'
 import { APP_VERSION } from '@/config/version'
 
 const router = useRouter()
@@ -181,6 +195,9 @@ const authStore = useAuthStore()
 const { getTheme } = useTheme()
 
 const userMenuOpen = ref(false)
+const multiSelectMode = ref(false)
+const selectedChatIds = ref([])
+const userProfile = ref({ displayName: '', avatarType: 'default', avatarValue: '' })
 
 // 会话列表滚动态：滚动时临时显示滚动条，停止后自动隐藏
 const listScrolling = ref(false)
@@ -285,6 +302,47 @@ async function onCreateFolder() {
   await promptCreateFolder()
 }
 
+// 进入或退出会话多选模式，退出时清空选择
+function toggleMultiSelect() {
+  multiSelectMode.value = !multiSelectMode.value
+  selectedChatIds.value = []
+  openMenuId.value = null
+}
+
+// 切换单个会话的选中状态
+function toggleChatSelection(chatId) {
+  selectedChatIds.value = selectedChatIds.value.includes(chatId)
+    ? selectedChatIds.value.filter(id => id !== chatId)
+    : [...selectedChatIds.value, chatId]
+}
+
+// 多选态点击会话只切换勾选，普通态仍切换会话
+function handleChatClick(chatId) {
+  if (multiSelectMode.value) toggleChatSelection(chatId)
+  else emit('switch-chat', chatId)
+}
+
+// 批量移动到已有或新建文件夹
+async function bulkMove() {
+  if (!selectedChatIds.value.length) return
+  const folderId = await promptCreateFolder()
+  if (!folderId) return
+  chatStore.moveChatsToFolder(selectedChatIds.value, folderId)
+  selectedChatIds.value = []
+}
+
+// 二次确认后批量删除选中会话
+async function bulkDelete() {
+  if (!selectedChatIds.value.length) return
+  try {
+    await ElMessageBox.confirm(`确定删除选中的 ${selectedChatIds.value.length} 个会话吗？`, '批量删除会话', {
+      confirmButtonText: t('common.delete'), cancelButtonText: t('common.cancel'), type: 'warning'
+    })
+    chatStore.deleteChats(selectedChatIds.value)
+    selectedChatIds.value = []
+  } catch { /* 取消 */ }
+}
+
 // 文件夹标题行菜单开关
 function toggleFolderMenu(folderId) {
   openMenuId.value = null
@@ -386,8 +444,24 @@ watch(() => chatStore.searchKeyword, (kw) => {
 })
 
 const userAvatarSrc = computed(() => {
+  if (userProfile.value.avatarType === 'svg' && userProfile.value.avatarValue) {
+    return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(userProfile.value.avatarValue)
+  }
   return getTheme() === 'dark' ? '/icons/user_ss.svg' : '/icons/user.svg'
 })
+
+// 加载侧边栏用户显示名与头像
+async function loadUserProfile() {
+  try {
+    const res = await getUserProfile()
+    if (res?.success) userProfile.value = { ...userProfile.value, ...(res.data || {}) }
+  } catch (e) { /* 侧边栏回退用户名与默认头像 */ }
+}
+
+// 接收个人设置保存后的即时资料更新
+function onUserProfileUpdated(event) {
+  userProfile.value = { ...userProfile.value, ...(event.detail || {}) }
+}
 
 function toggleUserMenu() {
   userMenuOpen.value = !userMenuOpen.value
@@ -426,10 +500,13 @@ function closeMenuOnOutside(e) {
 
 onMounted(() => {
   document.addEventListener('click', closeMenuOnOutside)
+  window.addEventListener('user-profile-updated', onUserProfileUpdated)
+  loadUserProfile()
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', closeMenuOnOutside)
+  window.removeEventListener('user-profile-updated', onUserProfileUpdated)
   if (scrollHideTimer) clearTimeout(scrollHideTimer)
 })
 
@@ -446,6 +523,14 @@ const emit = defineEmits(['toggle', 'new-chat', 'switch-chat', 'delete-chat', 'o
 .chat-item {
   position: relative;
 }
+.chat-item.selected { background: color-mix(in srgb, var(--primary,#6366f1) 12%, transparent); }
+.chat-select-checkbox { width:15px; height:15px; flex:0 0 auto; accent-color:var(--primary,#6366f1); }
+.new-folder-btn.active { color:var(--primary,#6366f1); border-color:var(--primary,#6366f1); }
+.multi-select-toolbar { display:flex; align-items:center; gap:6px; padding:8px 10px; margin-bottom:8px; border:1px solid var(--border,#333); border-radius:6px; color:var(--ink-2,#ccc); font-size:11px; }
+.multi-select-toolbar span { margin-right:auto; }
+.multi-select-toolbar button { border:0; background:transparent; color:var(--primary,#6366f1); cursor:pointer; font-size:11px; }
+.multi-select-toolbar button.danger { color:#ef4444; }
+.multi-select-toolbar button:disabled { opacity:.4; cursor:not-allowed; }
 .chat-more-btn {
   background: none;
   border: none;

@@ -22,10 +22,66 @@ export const useChatStore = defineStore('chat', () => {
   let pendingSyncWhileSuspended = false
   // 上传请求进行中标记：自动同步刷新需避开上传窗口，防止服务端旧快照覆盖本地新变更
   let syncInFlight = false
+  // 本地变更版本与串行上传状态：任一时刻最多一个保存请求，避免响应乱序覆盖最后修改
+  let localRevision = 0
+  let savedRevision = 0
+  let flushPending = false
+  let syncRetryDelay = 0
   // 已知的服务端版本号（updated_at_ts 最大值）：多端自动同步的变更检测基准
   let remoteVersion = 0
   // 自动刷新进行中标记，防重入
   let refreshing = false
+
+  // 当前账号的未同步恢复快照键，避免不同用户之间读取彼此草稿
+  function recoveryKey() {
+    let username = 'anonymous'
+    try { username = localStorage.getItem('username') || 'anonymous' } catch (e) { /* ignore */ }
+    return `chatai-chat-recovery:${username}`
+  }
+
+  // 生成当前增量保存载荷
+  function buildSyncPayload() {
+    return {
+      lastChatId: currentChatId.value,
+      chats: chats.value,
+      chatMeta: chatMeta.value,
+      deletedChatIds: deletedChatIds.value,
+      folders: folders.value
+    }
+  }
+
+  // 写入刷新/断网恢复快照；保存成功且无后续变更时才清除
+  function persistRecoveryDraft(payload) {
+    try {
+      localStorage.setItem(recoveryKey(), JSON.stringify({ revision: localRevision, savedAt: Date.now(), payload }))
+    } catch (e) { /* 存储空间不足时仍继续服务端同步 */ }
+  }
+
+  // 将尚未成功上传的本地恢复快照合并进服务端摘要状态
+  function restoreRecoveryDraft() {
+    try {
+      const raw = localStorage.getItem(recoveryKey())
+      if (!raw) return
+      const draft = JSON.parse(raw)
+      if (!draft?.payload || Date.now() - Number(draft.savedAt || 0) > 7 * 86400000) {
+        localStorage.removeItem(recoveryKey())
+        return
+      }
+      const payload = draft.payload
+      Object.entries(payload.chats || {}).forEach(([id, messages]) => {
+        const serverCount = Number(chatSummaries.value[id]?.count || 0)
+        if (Array.isArray(messages) && (messages.length >= serverCount || !chatSummaries.value[id])) {
+          chats.value[id] = messages
+        }
+      })
+      chatMeta.value = { ...chatMeta.value, ...(payload.chatMeta || {}) }
+      deletedChatIds.value = [...new Set([...deletedChatIds.value, ...(payload.deletedChatIds || [])])]
+      if (Array.isArray(payload.folders)) folders.value = normalizeFolders(payload.folders)
+      if (payload.lastChatId) currentChatId.value = payload.lastChatId
+      localRevision = Number(draft.revision || 1)
+      flushPending = true
+    } catch (e) { /* 损坏草稿忽略，服务端数据仍可使用 */ }
+  }
 
   // 按日期分组的会话列表（已加载会话按消息实时推导，未加载会话用服务端摘要）
   const sortedChatList = computed(() => {
@@ -187,8 +243,12 @@ export const useChatStore = defineStore('chat', () => {
         const map = {}
         ;(data.summaries || []).forEach(s => { if (s && s.id) map[s.id] = s })
         chatSummaries.value = map
+        restoreRecoveryDraft()
         const lastId = data.lastChatId
-        if (lastId && map[lastId]) {
+        const recoveredId = currentChatId.value
+        if (recoveredId && chats.value[recoveredId] !== undefined) {
+          currentChatId.value = recoveredId
+        } else if (lastId && map[lastId]) {
           await ensureChatLoaded(lastId)
           currentChatId.value = lastId
         } else {
@@ -206,6 +266,7 @@ export const useChatStore = defineStore('chat', () => {
       newChat()
     }
     isChatHistoryLoaded.value = true
+    if (flushPending) syncToServer()
   }
 
   // 按需加载会话正文：未加载时从服务端拉取单会话消息；加载失败时抛出异常，
@@ -243,32 +304,51 @@ export const useChatStore = defineStore('chat', () => {
   // 同步到服务端（500ms防抖）
   function syncToServer() {
     if (!isChatHistoryLoaded.value) return
+    localRevision++
+    persistRecoveryDraft(buildSyncPayload())
     if (syncSuspended) {
       pendingSyncWhileSuspended = true
       return
     }
     if (syncTimer) clearTimeout(syncTimer)
-    syncTimer = setTimeout(async () => {
-      syncTimer = null
-      syncInFlight = true
-      try {
-        const res = await saveChatHistory({
-          lastChatId: currentChatId.value,
-          chats: chats.value,
-          chatMeta: chatMeta.value,
-          deletedChatIds: deletedChatIds.value,
-          folders: folders.value
-        })
-        // 记住保存后的版本基准，自己的写入不触发下一轮自动同步重拉
-        if (res && res.success && res.version) {
-          remoteVersion = res.version
+    syncTimer = setTimeout(flushSyncQueue, 500)
+  }
+
+  // 串行执行保存：上传期间发生的新修改会在当前请求结束后立即再保存一次
+  async function flushSyncQueue() {
+    syncTimer = null
+    if (syncInFlight) {
+      flushPending = true
+      return
+    }
+    const revision = localRevision
+    const payload = buildSyncPayload()
+    syncInFlight = true
+    flushPending = false
+    try {
+      const res = await saveChatHistory(payload)
+      if (res?.success) {
+        syncRetryDelay = 0
+        savedRevision = revision
+        if (res.version) remoteVersion = res.version
+        if (savedRevision === localRevision) {
+          try { localStorage.removeItem(recoveryKey()) } catch (e) { /* ignore */ }
         }
-      } catch (e) {
-        console.error('会话同步失败:', e)
-      } finally {
-        syncInFlight = false
+      } else {
+        flushPending = true
+        syncRetryDelay = 3000
       }
-    }, 500)
+    } catch (e) {
+      flushPending = true
+      syncRetryDelay = 3000
+      console.error('会话同步失败:', e)
+    } finally {
+      syncInFlight = false
+      if (flushPending || savedRevision < localRevision) {
+        flushPending = false
+        syncTimer = setTimeout(flushSyncQueue, syncRetryDelay)
+      }
+    }
   }
 
   // 挂起全量同步（发送消息前调用）
@@ -425,6 +505,43 @@ export const useChatStore = defineStore('chat', () => {
         newChat()
       }
     }
+  }
+
+  // 批量删除会话并仅触发一次服务端同步
+  function deleteChats(ids) {
+    const uniqueIds = [...new Set(Array.isArray(ids) ? ids : [])]
+    uniqueIds.forEach(id => {
+      delete chats.value[id]
+      delete chatSummaries.value[id]
+      delete chatMeta.value[id]
+      if (!deletedChatIds.value.includes(id)) deletedChatIds.value.push(id)
+    })
+    if (uniqueIds.includes(currentChatId.value)) {
+      currentChatId.value = findEmptyChatId()
+      if (!currentChatId.value) {
+        currentChatId.value = Date.now().toString()
+        chats.value[currentChatId.value] = []
+      }
+    }
+    syncToServer()
+  }
+
+  // 从指定消息位置创建独立会话分支，原会话与后续回答保持不变
+  function createBranch(chatId, throughIndex) {
+    const source = chats.value[chatId]
+    if (!Array.isArray(source)) return null
+    const newId = `branch_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`
+    chats.value[newId] = JSON.parse(JSON.stringify(source.slice(0, Math.max(0, throughIndex + 1))))
+    const oldMeta = chatMeta.value[chatId] || {}
+    chatMeta.value[newId] = {
+      ...oldMeta,
+      title: `${chatTitle(chatId)} · 分支`,
+      parentChatId: chatId,
+      branchFromIndex: throughIndex
+    }
+    currentChatId.value = newId
+    syncToServer()
+    return newId
   }
 
   function deleteAllChats() {
@@ -705,6 +822,18 @@ export const useChatStore = defineStore('chat', () => {
     syncToServer()
   }
 
+  // 将多个会话批量移入同一文件夹并只同步一次
+  function moveChatsToFolder(chatIds, folderId) {
+    const valid = !folderId || folders.value.some(folder => folder.id === folderId)
+    if (!valid) return
+    ;[...new Set(Array.isArray(chatIds) ? chatIds : [])].forEach(chatId => {
+      const meta = chatMeta.value[chatId] || (chatMeta.value[chatId] = {})
+      if (folderId) meta.folderId = folderId
+      else delete meta.folderId
+    })
+    syncToServer()
+  }
+
   // 设置会话标题（仅当未手动命名时生效，用于 AI 自动命名）
   function setAutoTitleIfEmpty(id, title) {
     const t = (title || '').trim()
@@ -742,9 +871,9 @@ export const useChatStore = defineStore('chat', () => {
     sortedChatList, currentMessages,
     loadFromServer, syncToServer, suspendSync, resumeSync, syncCurrentChatFromServer, refreshFromServer,
     ensureChatLoaded, ensureAllChatsLoaded,
-    newChat, switchChat, switchChatLazy, deleteChat, deleteAllChats,
+    newChat, switchChat, switchChatLazy, deleteChat, deleteChats, deleteAllChats, createBranch,
     addMessage, truncateMessages, updateLastAssistantMessage, exportChats, exportChatsJson, importChatsJson, countValidChats, findEmptyChatId,
     togglePin, renameChat, setAutoTitleIfEmpty, exportChatMarkdown, setChatPromptPreset,
-    createFolder, renameFolder, deleteFolder, toggleFolderCollapsed, moveChatToFolder
+    createFolder, renameFolder, deleteFolder, toggleFolderCollapsed, moveChatToFolder, moveChatsToFolder
   }
 })

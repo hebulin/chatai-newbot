@@ -35,6 +35,11 @@ export function setSecuritySettings(payload) {
   return request.put('/admin/settings/security', payload)
 }
 
+// 获取当前进程的请求、聊天流和 JVM 内存诊断指标
+export function getObservability() {
+  return request.get('/admin/observability')
+}
+
 // 获取联网搜索设置（Key 仅返回掩码）
 export function getWebSearchSettings() {
   return request.get('/admin/settings/websearch')

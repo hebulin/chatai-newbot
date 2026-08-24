@@ -15,6 +15,22 @@ public class User {
     private String lastLoginAt;
     private String lastLoginIp;
     private String lastLoginBrowser;
+    /** 用户显示名称；为空时前端回退为 username */
+    private String displayName;
+    /** 用户常用联系邮箱 */
+    private String email;
+    /** 用户常用联系电话 */
+    private String phone;
+    /** 用户所属部门 */
+    private String department;
+    /** 用户职位/职务 */
+    private String jobTitle;
+    /** 用户个人简介 */
+    private String bio;
+    /** 头像类型：default 或 svg */
+    private String avatarType;
+    /** 经过服务端清理的 SVG 源码；前端仅通过 img data URL 展示 */
+    private String avatarValue;
     private List<String> allowedModelIds = new ArrayList<>(); // 特别授权的模型ID列表
     /** 用户自定义全局提示词（System Prompt）。旧版单条提示词字段，已被 promptPresets 取代，仅用于历史数据兼容/迁移 */
     private String systemPrompt;

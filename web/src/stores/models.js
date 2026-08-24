@@ -11,6 +11,7 @@ export const useModelsStore = defineStore('models', () => {
   const currentModelSupportsThinking = ref(false)
   // 联网搜索能力（后台总开关开启且已配 Key 时为 true，控制输入框“联网”按钮显隐）
   const webSearchEnabled = ref(false)
+  const botAvatarSvg = ref('')
 
   // 按厂商分组
   const groupedModels = computed(() => {
@@ -74,6 +75,7 @@ export const useModelsStore = defineStore('models', () => {
         models.value = data.data || []
         defaultModelId.value = data.defaultModelId || null
         webSearchEnabled.value = !!data.webSearchEnabled
+        botAvatarSvg.value = data.botAvatarSvg || ''
         // 初始模型：优先默认模型，否则取第一个
         const initial = (models.value.length > 0)
           ? (findModelById(defaultModelId.value) || models.value[0])
@@ -101,7 +103,7 @@ export const useModelsStore = defineStore('models', () => {
 
   return {
     models, defaultModelId, currentModelId, currentModelName,
-    currentModelSupportsMultimodal, currentModelSupportsThinking, webSearchEnabled,
+    currentModelSupportsMultimodal, currentModelSupportsThinking, webSearchEnabled, botAvatarSvg,
     groupedModels, currentModel,
     loadModels, selectModel, applyDefaultModel, findModelById, inferProviderId
   }

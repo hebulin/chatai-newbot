@@ -100,6 +100,7 @@
             @lightbox="lightboxSrc = $event"
             @regenerate="handleRegenerate"
             @edit-resend="handleEditResend"
+            @branch="handleCreateBranch"
             @preview-html="handlePreviewHtml"
           />
         </div>
@@ -317,7 +318,6 @@ async function confirmSpeechStopIfPlaying() {
 const isDeepThinking = ref(false)
 // 本轮对话是否开启联网搜索（重新生成/编辑重发时沿用上次选择）
 const isWebSearch = ref(false)
-const pendingImages = ref([])
 
 const streamingMsg = ref(null)
 const syncTipVisible = ref(false)
@@ -378,6 +378,9 @@ async function loadEarlier() {
 }
 
 const brandIconSrc = computed(() => {
+  if (modelsStore.botAvatarSvg) {
+    return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(modelsStore.botAvatarSvg)
+  }
   const theme = getTheme()
   return theme === 'dark' ? '/icons/AIBot_ss.svg' : '/icons/AIBot.svg'
 })
@@ -542,6 +545,9 @@ async function doShare(chatId) {
     return
   }
   let expireDays = 0
+  let password = ''
+  let maxViews = 0
+  let sanitized = false
   try {
     const { value } = await ElMessageBox.prompt(t('chat.sharePrompt'), t('chat.shareTitle'), {
       confirmButtonText: t('chat.genLink'),
@@ -556,6 +562,21 @@ async function doShare(chatId) {
     expireDays = isNaN(n) ? 0 : n
   } catch { return }
   try {
+    const { value } = await ElMessageBox.prompt('可选：设置访问密码，留空表示无需密码', '分享访问密码', {
+      confirmButtonText: '下一步', cancelButtonText: t('common.cancel'), inputType: 'password', inputValue: '',
+      inputValidator: value => String(value || '').length <= 100 || '密码不能超过 100 个字符'
+    })
+    password = String(value || '').trim()
+    const maxResult = await ElMessageBox.prompt('限制该分享最多成功读取多少次，0 表示不限制', '分享访问次数', {
+      confirmButtonText: '下一步', cancelButtonText: t('common.cancel'), inputValue: '0',
+      inputValidator: value => /^\d+$/.test(String(value || '0').trim()) || t('chat.nonNegInt')
+    })
+    maxViews = Math.max(0, parseInt(String(maxResult.value || '0'), 10) || 0)
+  } catch { return }
+  sanitized = await ElMessageBox.confirm('是否在分享快照中自动隐藏常见 API Key、邮箱和手机号？', '敏感信息脱敏', {
+    confirmButtonText: '启用脱敏', cancelButtonText: '保留原文', distinguishCancelAndClose: false
+  }).then(() => true).catch(() => false)
+  try {
     // 绕过 500ms 防抖，确保服务端已持有最新会话
     await saveChatHistory({
       lastChatId: chatStore.currentChatId,
@@ -563,7 +584,7 @@ async function doShare(chatId) {
       chatMeta: chatStore.chatMeta,
       deletedChatIds: chatStore.deletedChatIds
     })
-    const res = await createShare(chatId, expireDays)
+    const res = await createShare(chatId, { expireDays, password, maxViews, sanitized })
     if (res && res.success) {
       const url = location.origin + '/share/' + res.data.id
       let copied = false
@@ -1046,11 +1067,12 @@ async function handleRegenerate(idx) {
     ElMessage.warning(t('chat.pickModel'))
     return
   }
-  const chatId = chatStore.currentChatId
+  const sourceChatId = chatStore.currentChatId
+  const chatId = chatStore.createBranch(sourceChatId, idx - 1)
+  if (!chatId) return
   // 同样挂起全量同步，bot 输出结束后再统一上传（截断+新回复一次性同步）
   chatStore.suspendSync()
   try {
-    chatStore.truncateMessages(chatId, idx)
     nextTick(() => scrollFollow.scrollToBottomImmediate())
     await startStream(chatId, isDeepThinking.value)
   } finally {
@@ -1070,8 +1092,8 @@ async function handleEditResend(idx) {
     ElMessage.warning(t('chat.pickModel'))
     return
   }
-  const chatId = chatStore.currentChatId
-  const msg = (chatStore.chats[chatId] || [])[idx]
+  const sourceChatId = chatStore.currentChatId
+  const msg = (chatStore.chats[sourceChatId] || [])[idx]
   if (!msg || msg.role !== 'user') return
 
   let newText
@@ -1089,10 +1111,11 @@ async function handleEditResend(idx) {
   // 保留原消息携带的图片与附件
   const images = msg.images && msg.images.length ? msg.images.slice() : null
   const attachments = msg.attachments && msg.attachments.length ? msg.attachments.slice() : null
+  const chatId = chatStore.createBranch(sourceChatId, idx - 1)
+  if (!chatId) return
   // 同样挂起全量同步，bot 输出结束后再统一上传
   chatStore.suspendSync()
   try {
-    chatStore.truncateMessages(chatId, idx)
     const userMsg = { role: 'user', content: newText, time: nowStr() }
     if (images) userMsg.images = images
     if (attachments) userMsg.attachments = attachments
@@ -1101,6 +1124,16 @@ async function handleEditResend(idx) {
     await startStream(chatId, isDeepThinking.value)
   } finally {
     chatStore.resumeSync()
+  }
+}
+
+// 从任意消息位置创建可独立继续对话的会话分支
+function handleCreateBranch(idx) {
+  const absoluteIndex = idx + hiddenCount.value
+  const branchId = chatStore.createBranch(chatStore.currentChatId, absoluteIndex)
+  if (branchId) {
+    nextTick(() => scrollFollow.scrollToBottomImmediate())
+    ElMessage.success('已创建会话分支，原会话内容保持不变')
   }
 }
 

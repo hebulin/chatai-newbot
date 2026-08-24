@@ -12,8 +12,9 @@ export function batchDeleteMyShares(ids) {
 
 // 为指定会话创建分享（同一会话复用已有分享码）
 // expireDays：<=0 或缺省=永久有效
-export function createShare(chatId, expireDays) {
-  return request.post('/share', { chatId, expireDays })
+export function createShare(chatId, options = {}) {
+  const payload = typeof options === 'number' ? { expireDays: options } : options
+  return request.post('/share', { chatId, ...payload })
 }
 
 // 撤销分享
@@ -22,8 +23,15 @@ export function deleteShare(id) {
 }
 
 // 匿名查看分享内容（无需登录）
-export function getSharedChat(id) {
-  return request.get(`/share/view/${id}`)
+export function getSharedChat(id, password = '') {
+  return password
+    ? request.post(`/share/view/${id}`, { password })
+    : request.get(`/share/view/${id}`)
+}
+
+// 把分享快照复制到当前登录用户的会话列表
+export function cloneSharedChat(id, password = '') {
+  return request.post(`/share/${id}/clone`, { password })
 }
 
 // ===== 后台管理（仅管理员） =====

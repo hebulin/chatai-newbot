@@ -63,6 +63,7 @@
           </template>
         </el-table-column>
         <el-table-column prop="providerName" label="厂商" :width="colW.provider" show-overflow-tooltip />
+        <el-table-column prop="apiUrl" label="API 地址" min-width="220" show-overflow-tooltip />
         <el-table-column label="模型" :width="colW.modelId" show-overflow-tooltip>
           <template #default="{ row }">
             <span class="model-id-text">{{ row.modelId }}</span>
@@ -204,15 +205,15 @@
       <el-form label-width="90px">
         <el-form-item label="厂商">
           <el-select v-model="addForm.providerId" style="width:100%" @change="onProviderChange">
-            <el-option v-for="p in presetProviders" :key="p.id" :label="p.name" :value="p.id" />
-            <el-option label="自定义厂商..." value="__custom__" />
+            <el-option v-for="p in allProviders" :key="p.id" :label="p.name + (p.type === 'custom' ? '（自定义）' : '')" :value="p.id" />
+            <el-option label="新建自定义厂商..." value="__custom__" />
           </el-select>
         </el-form-item>
         <!-- 自定义厂商名称 -->
         <el-form-item v-if="addForm.providerId === '__custom__'" label="厂商名称">
           <el-input v-model="addForm.customProviderName" placeholder="如：OpenAI" />
         </el-form-item>
-        <!-- 内置厂商模型选择 -->
+        <!-- 已有厂商模型选择 -->
         <el-form-item v-if="addForm.providerId !== '__custom__' && addForm.providerId" label="模型">
           <el-select v-model="addForm.modelSelect" style="width:100%" @change="onModelSelectChange">
             <el-option v-for="pm in currentProviderModels" :key="pm.id" :label="pm.name + (pm.supportsThinking ? ' (思考)' : '') + (pm.supportsMultimodal ? ' (多模态)' : '') + (isModelAdded(pm.id) ? ' ✓已接入' : '')" :value="pm.id" />
@@ -338,8 +339,6 @@ const selectedRows = ref([])
 const filters = ref({ name: '', providerId: '', modelId: '', thinking: '', multimodal: '', enabled: '', visible: '' })
 // 手机端筛选条件展开状态（默认收起，仅展示前两个条件）
 const filterExpanded = ref(false)
-
-const presetProviders = computed(() => allProviders.value.filter(p => p.type !== 'custom'))
 
 const providerFilterOptions = computed(() => {
   const map = {}
@@ -556,7 +555,7 @@ const addForm = ref({
   reasoningPriceCny: 0
 })
 
-const currentProvider = computed(() => presetProviders.value.find(p => p.id === addForm.value.providerId))
+const currentProvider = computed(() => allProviders.value.find(p => p.id === addForm.value.providerId))
 const currentProviderModels = computed(() => currentProvider.value?.models || [])
 const selectedPresetModel = computed(() => currentProviderModels.value.find(pm => pm.id === addForm.value.modelSelect))
 const isPresetMode = computed(() => addForm.value.providerId !== '__custom__' && addForm.value.modelSelect && addForm.value.modelSelect !== '__custom__')
@@ -573,17 +572,20 @@ function showAddModel() {
 function onProviderChange() {
   addForm.value.modelSelect = ''
   addForm.value.apiUrl = ''
+  addForm.value.apiKey = ''
   addForm.value.displayName = ''
   addForm.value.modelId = ''
   if (addForm.value.providerId !== '__custom__' && currentProvider.value) {
     addForm.value.apiUrl = currentProvider.value.defaultApiUrl || ''
-    // 默认选第一个预设模型
+    addForm.value.protocol = currentProvider.value.protocol || 'openai'
+    // 自定义厂商默认进入“自定义模型”，预置厂商默认选择目录第一项
     const models = currentProvider.value.models || []
-    if (models.length > 0) {
+    if (currentProvider.value.type !== 'custom' && models.length > 0) {
       addForm.value.modelSelect = models[0].id
       onModelSelectChange(models[0].id)
     } else {
       addForm.value.modelSelect = '__custom__'
+      onModelSelectChange('__custom__')
     }
   }
 }
@@ -653,7 +655,7 @@ async function submitAddModel() {
       reasoningPriceCny: addForm.value.reasoningPriceCny || 0
     }
   } else {
-    // 内置厂商 + 自定义模型
+    // 已有厂商 + 自定义模型；后端按 providerId 自动补齐厂商名称、图标、API 地址与协议
     if (!addForm.value.modelId.trim()) { ElMessage.warning('请输入模型ID'); return }
     if (!addForm.value.apiKey.trim()) { ElMessage.warning('请输入 API Key'); return }
     payload = {

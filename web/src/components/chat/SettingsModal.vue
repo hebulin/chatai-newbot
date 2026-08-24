@@ -14,6 +14,14 @@
         <div class="settings-modal">
           <!-- 导航：el-tabs 仅作菜单栏（内容区隐藏），桌面端左侧竖排、窄屏顶部横排可滑动 -->
           <el-tabs v-model="tab" :tab-position="isMobile ? 'top' : 'left'" class="settings-tabs-nav" @tab-change="onTabChange">
+            <el-tab-pane name="profile">
+              <template #label>
+                <span class="settings-tab-label">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+                  <span>个人资料</span>
+                </span>
+              </template>
+            </el-tab-pane>
             <el-tab-pane name="general">
               <template #label>
                 <span class="settings-tab-label">
@@ -72,6 +80,39 @@
             </el-tab-pane>
           </el-tabs>
           <div ref="settingsContent" class="settings-content">
+            <div v-if="tab === 'profile'" class="settings-panel">
+              <h3 class="settings-panel-title">个人资料</h3>
+              <div class="profile-avatar-row">
+                <div class="profile-avatar-preview" aria-label="头像预览">
+                  <img v-if="profileAvatarSrc" :src="profileAvatarSrc" alt="用户头像预览" />
+                  <span v-else>{{ (profileForm.displayName || profileForm.username || 'U').slice(0, 1).toUpperCase() }}</span>
+                </div>
+                <div class="settings-form-group profile-avatar-control">
+                  <label for="profile-avatar-type">头像类型</label>
+                  <select id="profile-avatar-type" v-model="profileForm.avatarType" class="settings-input">
+                    <option value="default">默认头像</option>
+                    <option value="svg">SVG 代码</option>
+                  </select>
+                </div>
+              </div>
+              <div v-if="profileForm.avatarType === 'svg'" class="settings-form-group">
+                <label for="profile-avatar-svg">SVG 头像代码</label>
+                <textarea id="profile-avatar-svg" v-model="profileForm.avatarValue" class="settings-input settings-textarea" rows="6" maxlength="20000" placeholder="粘贴完整的 <svg>...</svg> 代码"></textarea>
+                <div class="settings-form-note">SVG 会在服务端清理危险标签与事件，并只通过图片方式展示。</div>
+              </div>
+              <div class="profile-form-grid">
+                <div class="settings-form-group"><label for="profile-display-name">显示名称</label><input id="profile-display-name" v-model="profileForm.displayName" class="settings-input" maxlength="80" /></div>
+                <div class="settings-form-group"><label for="profile-email">邮箱</label><input id="profile-email" v-model="profileForm.email" type="email" class="settings-input" maxlength="160" /></div>
+                <div class="settings-form-group"><label for="profile-phone">联系电话</label><input id="profile-phone" v-model="profileForm.phone" type="tel" class="settings-input" maxlength="40" /></div>
+                <div class="settings-form-group"><label for="profile-department">部门</label><input id="profile-department" v-model="profileForm.department" class="settings-input" maxlength="100" /></div>
+                <div class="settings-form-group"><label for="profile-job-title">职位</label><input id="profile-job-title" v-model="profileForm.jobTitle" class="settings-input" maxlength="100" /></div>
+              </div>
+              <div class="settings-form-group"><label for="profile-bio">个人简介</label><textarea id="profile-bio" v-model="profileForm.bio" class="settings-input settings-textarea" rows="4" maxlength="500"></textarea></div>
+              <div class="settings-form-actions">
+                <button type="button" class="settings-btn settings-btn-primary" :disabled="profileSaving" @click="submitProfile">{{ profileSaving ? '保存中...' : '保存个人资料' }}</button>
+              </div>
+            </div>
+
             <!-- 通用：界面语言切换（用户端中英双语，管理后台保持中文） -->
             <div v-if="tab === 'general'" class="settings-panel">
               <h3 class="settings-panel-title">{{ t('settings.tabGeneral') }}</h3>
@@ -343,7 +384,7 @@ import {
   changePassword, getSessions, kickSession, getTwoFactorStatus, setupTwoFactor,
   enableTwoFactor, disableTwoFactor, regenerateRecoveryCodes
 } from '@/api/auth'
-import { getPromptPresets, savePromptPresets } from '@/api/user'
+import { getPromptPresets, savePromptPresets, getUserProfile, saveUserProfile } from '@/api/user'
 import { getMyShares, deleteShare, batchDeleteMyShares } from '@/api/share'
 import { useChatStore } from '@/stores/chat'
 
@@ -354,7 +395,11 @@ const modalContainer = ref(null)
 const settingsContent = ref(null)
 
 // 默认展示"通用"页（个人设置弹窗打开后默认进入通用设置，而非修改密码）
-const tab = ref('general')
+const tab = ref('profile')
+const profileSaving = ref(false)
+const profileForm = ref({ username: '', displayName: '', email: '', phone: '', department: '', jobTitle: '', bio: '', avatarType: 'default', avatarValue: '' })
+const profileAvatarSrc = computed(() => profileForm.value.avatarType === 'svg' && profileForm.value.avatarValue.trim()
+  ? 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(profileForm.value.avatarValue.trim()) : '')
 
 // 通用：界面语言下拉（切换即时生效并持久化，见 @/i18n 的 setLocale）
 const uiLocale = ref(getLocale())
@@ -365,6 +410,7 @@ const isMobile = ref(mobileQuery.matches)
 const onMobileChange = e => { isMobile.value = e.matches }
 onMounted(() => {
   mobileQuery.addEventListener('change', onMobileChange)
+  loadProfile()
   nextTick(() => modalContainer.value?.focus())
 })
 onBeforeUnmount(() => mobileQuery.removeEventListener('change', onMobileChange))
@@ -374,9 +420,33 @@ async function onTabChange(name) {
   await nextTick()
   if (settingsContent.value) settingsContent.value.scrollTop = 0
   if (name === 'systemPrompt') loadPresets()
+  else if (name === 'profile') loadProfile()
   else if (name === 'loginDevices') loadSessions()
   else if (name === 'shareManage') loadShares()
   else if (name === 'twoFactor') loadTwoFactorStatus()
+}
+
+// 加载当前用户资料
+async function loadProfile() {
+  try {
+    const res = await getUserProfile()
+    if (res?.success) profileForm.value = { ...profileForm.value, ...(res.data || {}) }
+  } catch (e) { /* 请求层统一提示 */ }
+}
+
+// 保存个人资料并通知侧边栏即时刷新头像与显示名
+async function submitProfile() {
+  profileSaving.value = true
+  try {
+    const res = await saveUserProfile(profileForm.value)
+    if (res?.success) {
+      profileForm.value = { ...profileForm.value, ...(res.data || {}) }
+      window.dispatchEvent(new CustomEvent('user-profile-updated', { detail: res.data || {} }))
+      ElMessage.success(res.message || '个人资料已保存')
+    } else ElMessage.error(res?.message || '保存失败')
+  } finally {
+    profileSaving.value = false
+  }
 }
 
 // 修改密码
@@ -1154,6 +1224,12 @@ async function doBatchDeleteShares(ids) {
   color: var(--ink-4, #666);
 }
 
+.profile-avatar-row { display:flex; align-items:center; gap:16px; margin-bottom:16px; }
+.profile-avatar-preview { width:64px; height:64px; display:flex; align-items:center; justify-content:center; flex:0 0 auto; overflow:hidden; border:1px solid var(--border,#333); border-radius:50%; background:var(--paper,#252536); color:var(--ink,#eee); font-size:22px; }
+.profile-avatar-preview img { width:100%; height:100%; object-fit:cover; }
+.profile-avatar-control { flex:1; margin-bottom:0; }
+.profile-form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 14px; }
+
 /* === 双重验证：状态、扫码和恢复码 === */
 .security-status {
   display: flex;
@@ -1620,5 +1696,6 @@ async function doBatchDeleteShares(ids) {
   .recovery-code-grid {
     grid-template-columns: 1fr;
   }
+  .profile-form-grid { grid-template-columns:1fr; }
 }
 </style>

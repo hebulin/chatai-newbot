@@ -403,6 +403,57 @@ public class StorageManager implements StorageService {
         ipBindingEnabledCache = enabled;
     }
 
+    /** 获取注册总开关，未配置时默认允许注册以兼容现有部署。 */
+    public boolean getRegistrationEnabled() {
+        return !"false".equals(sqliteStorage.getSetting("registration_enabled"));
+    }
+
+    /** 设置注册总开关。 */
+    public void setRegistrationEnabled(boolean enabled) {
+        sqliteStorage.setSetting("registration_enabled", String.valueOf(enabled));
+    }
+
+    /** 获取注册验证码开关。 */
+    public boolean getRegistrationCaptchaEnabled() {
+        return "true".equals(sqliteStorage.getSetting("registration_captcha_enabled"));
+    }
+
+    /** 设置注册验证码开关。 */
+    public void setRegistrationCaptchaEnabled(boolean enabled) {
+        sqliteStorage.setSetting("registration_captcha_enabled", String.valueOf(enabled));
+    }
+
+    /** 判断是否已配置注册邀请码。 */
+    public boolean hasRegistrationInviteCode() {
+        String hash = sqliteStorage.getSetting("registration_invite_hash");
+        return hash != null && !hash.isBlank();
+    }
+
+    /** 保存注册邀请码摘要；空字符串表示清除邀请码限制。 */
+    public void setRegistrationInviteCode(String inviteCode) {
+        String value = inviteCode == null ? "" : inviteCode.trim();
+        sqliteStorage.setSetting("registration_invite_hash",
+                value.isEmpty() ? null : PasswordHasher.hash(value));
+    }
+
+    /** 校验注册邀请码，未配置邀请码时直接通过。 */
+    public boolean matchesRegistrationInviteCode(String inviteCode) {
+        String hash = sqliteStorage.getSetting("registration_invite_hash");
+        return hash == null || hash.isBlank()
+                || PasswordHasher.matches(inviteCode == null ? "" : inviteCode.trim(), hash);
+    }
+
+    /** 获取 Bot 侧 SVG 头像源码，空字符串表示使用前端默认头像。 */
+    public String getBotAvatarSvg() {
+        String value = sqliteStorage.getSetting("bot_avatar_svg");
+        return value == null ? "" : value;
+    }
+
+    /** 保存 Bot 侧 SVG 头像源码。 */
+    public void setBotAvatarSvg(String svg) {
+        sqliteStorage.setSetting("bot_avatar_svg", svg == null || svg.isBlank() ? null : svg);
+    }
+
     // ========== 联网搜索配置（Tavily，存于 t_setting） ==========
 
     /**
@@ -777,6 +828,15 @@ public class StorageManager implements StorageService {
         return sqliteStorage.getProvider(providerId);
     }
 
+    /**
+     * 获取预置或自定义厂商的完整配置。
+     * @param providerId 厂商唯一 ID
+     * @return 厂商配置，不存在返回 null
+     */
+    public Provider getResolvedProvider(String providerId) {
+        return sqliteStorage.getResolvedProvider(providerId);
+    }
+
     @Override
     public String getProviderDisplayName(String providerId) {
         return sqliteStorage.getProviderDisplayName(providerId);
@@ -790,6 +850,15 @@ public class StorageManager implements StorageService {
     @Override
     public List<Map<String, Object>> listCustomProviders() {
         return sqliteStorage.listCustomProviders();
+    }
+
+    /**
+     * 保存厂商支持的模型目录。
+     * @param providerId 厂商唯一 ID
+     * @param models 支持模型列表
+     */
+    public void saveProviderModels(String providerId, List<ProviderModel> models) {
+        sqliteStorage.saveProviderModels(providerId, models);
     }
 
     // ========== 委托方法：使用记录相关 ==========
@@ -862,6 +931,11 @@ public class StorageManager implements StorageService {
     /** 按模型当前人民币单价计算一条使用记录的成本。 */
     public double calculateUsageCostCny(UsageLog logEntry) {
         return sqliteStorage.calculateCostCny(logEntry);
+    }
+
+    /** 返回 SQLite 是否可执行最小只读查询。 */
+    public boolean isReady() {
+        return sqliteStorage.isReady();
     }
 
     @Override
@@ -972,6 +1046,31 @@ public class StorageManager implements StorageService {
      */
     public void updateChatShareExpiry(String id, String expiresAt) {
         sqliteStorage.updateChatShareExpiry(id, expiresAt);
+    }
+
+    /** 更新分享快照与访问规则。 */
+    public void updateChatShareDetails(ChatShare share) {
+        sqliteStorage.updateChatShareDetails(share);
+    }
+
+    /** 原子占用一次分享访问额度。 */
+    public boolean claimChatShareAccess(String id) {
+        return sqliteStorage.claimChatShareAccess(id);
+    }
+
+    /** 记录上传资源所有者。 */
+    public void registerFileAsset(String url, String ownerUserId, String assetType) {
+        sqliteStorage.registerFileAsset(url, ownerUserId, assetType);
+    }
+
+    /** 为复制分享的用户授予资源读取权。 */
+    public void grantFileAssetAccess(String url, String userId) {
+        sqliteStorage.grantFileAssetAccess(url, userId);
+    }
+
+    /** 判断用户是否可访问上传资源。 */
+    public boolean canAccessFileAsset(String url, String userId, boolean admin) {
+        return sqliteStorage.canAccessFileAsset(url, userId, admin);
     }
 
     /**

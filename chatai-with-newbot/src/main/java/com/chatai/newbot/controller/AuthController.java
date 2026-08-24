@@ -6,6 +6,7 @@ import com.chatai.newbot.service.LoginAttemptService;
 import com.chatai.newbot.service.StorageManager;
 import com.chatai.newbot.service.ApiKeyCrypto;
 import com.chatai.newbot.service.TwoFactorAuthService;
+import com.chatai.newbot.service.RegistrationChallengeService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -29,13 +30,34 @@ public class AuthController {
     private final LoginAttemptService loginAttemptService;
     private final AuditLogService auditLogService;
     private final TwoFactorAuthService twoFactorAuthService;
+    private final RegistrationChallengeService registrationChallengeService;
 
+    /** 注入认证、审计、双重验证与注册挑战服务。 */
     public AuthController(StorageManager storageService, LoginAttemptService loginAttemptService,
-                          AuditLogService auditLogService, TwoFactorAuthService twoFactorAuthService) {
+                          AuditLogService auditLogService, TwoFactorAuthService twoFactorAuthService,
+                          RegistrationChallengeService registrationChallengeService) {
         this.storageService = storageService;
         this.loginAttemptService = loginAttemptService;
         this.auditLogService = auditLogService;
         this.twoFactorAuthService = twoFactorAuthService;
+        this.registrationChallengeService = registrationChallengeService;
+    }
+
+    /**
+     * 获取公开注册配置；验证码启用时同时签发一次性挑战。
+     */
+    @GetMapping("/register-config")
+    public Map<String, Object> getRegisterConfig() {
+        Map<String, Object> result = new HashMap<>();
+        Map<String, Object> data = new HashMap<>();
+        boolean captchaEnabled = storageService.getRegistrationCaptchaEnabled();
+        data.put("enabled", storageService.getRegistrationEnabled());
+        data.put("inviteRequired", storageService.hasRegistrationInviteCode());
+        data.put("captchaEnabled", captchaEnabled);
+        if (captchaEnabled) data.put("captcha", registrationChallengeService.createChallenge());
+        result.put("success", true);
+        result.put("data", data);
+        return result;
     }
 
     @PostMapping("/login")
@@ -171,6 +193,25 @@ public class AuthController {
         String username = body.get("username");
         String password = body.get("password");
         String ip = getClientIp(request);
+
+        if (!storageService.getRegistrationEnabled()) {
+            result.put("success", false);
+            result.put("message", "系统当前已关闭注册");
+            return result;
+        }
+
+        if (!storageService.matchesRegistrationInviteCode(body.get("inviteCode"))) {
+            result.put("success", false);
+            result.put("message", "邀请码无效");
+            return result;
+        }
+
+        if (storageService.getRegistrationCaptchaEnabled()
+                && !registrationChallengeService.verify(body.get("captchaId"), body.get("captchaAnswer"))) {
+            result.put("success", false);
+            result.put("message", "验证码无效或已过期，请刷新后重试");
+            return result;
+        }
 
         if (username == null || password == null || username.trim().isEmpty() || password.trim().isEmpty()) {
             result.put("success", false);

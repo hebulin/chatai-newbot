@@ -133,6 +133,57 @@ class SqliteStorageServiceTest {
         assertNull(service.getModelConfigById("not-exist-id"));
     }
 
+    /** 新自定义厂商必须获得唯一 ID、默认图标，并在后续模型中复用完整厂商配置。 */
+    @Test
+    void customProvider_唯一标识与配置自动复用() {
+        ModelConfig first = new ModelConfig();
+        first.setProviderId("custom");
+        first.setProviderName("厂商" + uniqueName("alpha"));
+        first.setModelId("model-a");
+        first.setDisplayName("模型 A");
+        first.setApiUrl("https://example.test/v1");
+        first.setApiKey("sk-a");
+        first.setEnabled(true);
+        service.addModelConfig(first);
+
+        ModelConfig otherProvider = new ModelConfig();
+        otherProvider.setProviderId("custom");
+        otherProvider.setProviderName("厂商" + uniqueName("beta"));
+        otherProvider.setModelId("model-b");
+        otherProvider.setDisplayName("模型 B");
+        otherProvider.setApiUrl("https://other.test/v1");
+        otherProvider.setApiKey("sk-b");
+        otherProvider.setEnabled(true);
+        service.addModelConfig(otherProvider);
+
+        assertNotEquals(first.getProviderId(), otherProvider.getProviderId());
+        assertTrue(first.getProviderId().startsWith("custom-"));
+        assertFalse(first.getProviderIcon().isBlank());
+
+        ModelConfig reused = new ModelConfig();
+        reused.setProviderId(first.getProviderId());
+        reused.setModelId("model-a-2");
+        reused.setDisplayName("模型 A2");
+        reused.setApiKey("sk-new");
+        reused.setEnabled(true);
+        service.addModelConfig(reused);
+        assertEquals(first.getProviderName(), reused.getProviderName());
+        assertEquals(first.getProviderIcon(), reused.getProviderIcon());
+        assertEquals(first.getApiUrl(), reused.getApiUrl());
+    }
+
+    /** 分享复制授权应允许被授权用户读取，同时查询参数不能绕过所有权校验。 */
+    @Test
+    void fileAsset_所有权与复制授权边界() {
+        String url = "/api/files/img/asset-test.png";
+        service.registerFileAsset(url, "owner-user", "image");
+        assertTrue(service.canAccessFileAsset(url, "owner-user", false));
+        assertFalse(service.canAccessFileAsset(url + "?shareId=guess", "other-user", false));
+
+        service.grantFileAssetAccess(url, "other-user");
+        assertTrue(service.canAccessFileAsset(url + "?shareId=valid", "other-user", false));
+    }
+
     @Test
     void calculateCostCny_按分类Token计费且不重复计算() {
         ModelConfig model = new ModelConfig();

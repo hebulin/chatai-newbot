@@ -15,6 +15,11 @@ export function register(data) {
   return request.post('/auth/register', data)
 }
 
+// 获取注册总开关、邀请码要求与一次性验证码挑战
+export function getRegisterConfig() {
+  return request.get('/auth/register-config')
+}
+
 // 退出登录
 export function logout() {
   return request.post('/auth/logout')
