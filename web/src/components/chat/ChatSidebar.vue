@@ -35,61 +35,7 @@
         </button>
       </div>
 
-      <div
-        v-if="sidebarSearchOpen"
-        id="sidebar-chat-search-panel"
-        class="sidebar-search-panel"
-        @keydown.esc.stop.prevent="closeSidebarSearch()"
-      >
-        <label class="sidebar-search-label" for="sidebar-chat-search-input">{{ t('sidebar.searchInputLabel') }}</label>
-        <div class="sidebar-search-input-wrap">
-          <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.2" y2="16.2"/></svg>
-          <input
-            id="sidebar-chat-search-input"
-            ref="sidebarSearchInputRef"
-            v-model="sidebarSearchKeyword"
-            class="sidebar-search-input"
-            :placeholder="t('sidebar.searchPlaceholder')"
-            aria-describedby="sidebar-chat-search-status"
-            aria-controls="sidebar-chat-list"
-            autocomplete="off"
-            @keydown.enter.prevent="selectFirstSidebarSearchResult"
-          />
-          <button v-if="sidebarSearchKeyword" type="button" class="sidebar-search-clear" @click="clearSidebarSearch" :aria-label="t('sidebar.clear')">
-            <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-        </div>
-        <div id="sidebar-chat-search-status" class="sidebar-search-status" role="status" aria-live="polite">
-          <span v-if="searching">{{ t('sidebar.searching') }}</span>
-          <span v-else-if="sidebarSearchKeyword.trim()">{{ t('sidebar.searchResultCount', { count: searchResults.length }) }}</span>
-          <span v-else>{{ t('sidebar.searchHint') }}</span>
-        </div>
-      </div>
-
       <div id="sidebar-chat-list" class="chat-list" :class="{ 'is-scrolling': listScrolling }" @scroll.passive="onChatListScroll">
-        <template v-if="sidebarSearchOpen && sidebarSearchKeyword.trim()">
-          <div class="sidebar-search-results" :aria-busy="searching" @keydown.esc.stop.prevent="closeSidebarSearch()">
-            <button
-              v-for="result in searchResults"
-              :key="result.resultType + '-' + result.chatId + '-' + (result.messageIndex ?? 'title')"
-              type="button"
-              class="sidebar-search-result"
-              @click="selectSidebarSearchResult(result)"
-            >
-              <span class="sidebar-search-result-head">
-                <strong>{{ result.chatTitle }}</strong>
-                <span class="sidebar-search-result-type">{{ result.resultType === 'title' ? t('sidebar.titleMatch') : t('sidebar.contentMatch') }}</span>
-              </span>
-              <span class="sidebar-search-result-snippet" :class="{ empty: !result.snippet }">
-                {{ result.snippet ? ((result.role === 'user' ? t('sidebar.mePrefix') : t('sidebar.aiPrefix')) + result.snippet) : t('sidebar.noMessagePreview') }}
-              </span>
-            </button>
-            <div v-if="!searching && searchResults.length === 0" class="sidebar-search-empty">
-              {{ t('sidebar.noMatch') }}
-            </div>
-          </div>
-        </template>
-        <template v-else>
         <!-- 加载骨架屏：会话历史未加载完成时显示 -->
         <div v-if="!chatStore.isChatHistoryLoaded" class="chat-list-skeleton">
           <div v-for="n in 5" :key="n" class="chat-skeleton-item"></div>
@@ -176,7 +122,69 @@
             </div>
           </div>
         </template>
-        </template>
+      </div>
+
+      <!-- 搜索遮罩层：点击右上角放大镜后覆盖整个侧边栏，
+           左上角返回、下方搜索框与结果列表；点击结果后保持展开可连续跳转 -->
+      <div
+        v-if="sidebarSearchOpen"
+        id="sidebar-chat-search-panel"
+        class="sidebar-search-overlay"
+        @keydown.esc.stop.prevent="closeSidebarSearch()"
+      >
+        <div class="sidebar-search-topbar">
+          <button type="button" class="sidebar-search-back" @click="closeSidebarSearch()" :aria-label="t('sidebar.back')">
+            <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+            <span>{{ t('sidebar.back') }}</span>
+          </button>
+        </div>
+        <div class="sidebar-search-panel">
+          <label class="sidebar-search-label" for="sidebar-chat-search-input">{{ t('sidebar.searchInputLabel') }}</label>
+          <div class="sidebar-search-input-wrap">
+            <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.2" y2="16.2"/></svg>
+            <input
+              id="sidebar-chat-search-input"
+              ref="sidebarSearchInputRef"
+              v-model="sidebarSearchKeyword"
+              class="sidebar-search-input"
+              :placeholder="t('sidebar.searchPlaceholder')"
+              aria-describedby="sidebar-chat-search-status"
+              aria-controls="sidebar-chat-search-results"
+              autocomplete="off"
+              @keydown.enter.prevent="selectFirstSidebarSearchResult"
+            />
+            <button v-if="sidebarSearchKeyword" type="button" class="sidebar-search-clear" @click="clearSidebarSearch" :aria-label="t('sidebar.clear')">
+              <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <div id="sidebar-chat-search-status" class="sidebar-search-status" role="status" aria-live="polite">
+            <span v-if="searching">{{ t('sidebar.searching') }}</span>
+            <span v-else-if="sidebarSearchKeyword.trim()">{{ t('sidebar.searchResultCount', { count: searchResults.length }) }}</span>
+            <span v-else>{{ t('sidebar.searchHint') }}</span>
+          </div>
+        </div>
+        <div id="sidebar-chat-search-results" class="sidebar-search-results-area">
+          <div v-if="sidebarSearchKeyword.trim()" class="sidebar-search-results" :aria-busy="searching">
+            <button
+              v-for="result in searchResults"
+              :key="result.resultType + '-' + result.chatId + '-' + (result.messageIndex ?? 'title')"
+              type="button"
+              class="sidebar-search-result"
+              @click="selectSidebarSearchResult(result)"
+            >
+              <span class="sidebar-search-result-head">
+                <strong>{{ result.chatTitle }}</strong>
+                <span class="sidebar-search-result-type">{{ result.resultType === 'title' ? t('sidebar.titleMatch') : t('sidebar.contentMatch') }}</span>
+              </span>
+              <span class="sidebar-search-result-snippet" :class="{ empty: !result.snippet }">
+                {{ result.snippet ? ((result.role === 'user' ? t('sidebar.mePrefix') : t('sidebar.aiPrefix')) + result.snippet) : t('sidebar.noMessagePreview') }}
+              </span>
+            </button>
+            <div v-if="!searching && searchResults.length === 0" class="sidebar-search-empty">
+              {{ t('sidebar.noMatch') }}
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="sidebar-footer">
@@ -527,10 +535,10 @@ function clearSidebarSearch() {
   nextTick(() => sidebarSearchInputRef.value?.focus())
 }
 
-// 选择搜索结果后收起搜索区域，并把会话与消息下标交给聊天页执行精确跳转
+// 选择搜索结果后保持搜索区域展开（关键字与结果列表保留，可继续点击其他结果），
+// 并把会话与消息下标交给聊天页执行精确跳转
 function selectSidebarSearchResult(result) {
   const payload = { ...result, keyword: sidebarSearchKeyword.value.trim() }
-  closeSidebarSearch(false)
   emit('search-result-select', payload)
 }
 
@@ -825,8 +833,38 @@ defineExpose({ openSidebarSearch })
   overflow-y: auto;
 }
 
-/* 侧边栏内联搜索：输入区固定在会话列表上方，结果复用会话列表滚动区域 */
-.sidebar-search-panel { flex:0 0 auto; margin:-6px 0 10px; }
+/* 侧边栏搜索遮罩层：覆盖整个侧边栏内容区（.sidebar-content 为相对定位容器），
+   左上角返回按钮 + 下方搜索框 + 可滚动的结果列表 */
+.sidebar-search-overlay {
+  position:absolute;
+  inset:0;
+  z-index:50;
+  display:flex;
+  flex-direction:column;
+  padding:16px 18px 18px;
+  background:var(--surface,#fff);
+  animation:sidebarSearchIn .18s ease;
+}
+@keyframes sidebarSearchIn { from { opacity:0; } to { opacity:1; } }
+.sidebar-search-topbar { flex:0 0 auto; display:flex; align-items:center; margin-bottom:10px; }
+.sidebar-search-back {
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  padding:5px 10px 5px 7px;
+  border:0;
+  border-radius:6px;
+  background:transparent;
+  color:var(--ink-2,#555);
+  font:inherit;
+  font-size:12.5px;
+  cursor:pointer;
+  transition:background .15s,color .15s;
+}
+.sidebar-search-back:hover { background:var(--primary-soft,#eef3ff); color:var(--primary,#4a7dff); }
+.sidebar-search-back:focus-visible { outline:2px solid var(--primary,#4a7dff); outline-offset:1px; }
+.sidebar-search-panel { flex:0 0 auto; }
+.sidebar-search-results-area { flex:1 1 auto; min-height:0; overflow-y:auto; }
 .sidebar-search-label {
   position:absolute;
   width:1px;
