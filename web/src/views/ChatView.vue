@@ -31,10 +31,12 @@
 
     <!-- 侧边栏 -->
     <ChatSidebar
+      ref="chatSidebarRef"
       :class="{ open: sidebarOpen, collapsed: sidebarCollapsed }"
       @toggle="toggleSidebar"
       @new-chat="handleNewChat"
       @switch-chat="handleSwitchChat"
+      @search-result-select="handleGlobalSearchResult"
       @delete-chat="handleDeleteChat"
       @share-chat="doShare"
       @open-settings="showSettings = true"
@@ -229,6 +231,7 @@ const scrollFollow = useScrollFollow(chatContainerRef)
 
 const sidebarOpen = ref(false)
 const sidebarCollapsed = ref(false)
+const chatSidebarRef = ref(null)
 const isMobile = ref(window.innerWidth <= 768)
 const showSettings = ref(false)
 const showAbout = ref(false)
@@ -436,16 +439,13 @@ onUnmounted(() => {
   speech.stop()
 })
 
-// 全局快捷键：Ctrl/Cmd+K 聚焦侧边栏会话搜索；Ctrl/Cmd+F 打开会话内搜索；
+// 全局快捷键：Ctrl/Cmd+K 打开跨会话搜索浮层；Ctrl/Cmd+F 打开会话内搜索；
 // Esc 依次关闭搜索栏、HTML 预览面板
 function handleGlobalKeydown(e) {
   const key = (e.key || '').toLowerCase()
   if ((e.ctrlKey || e.metaKey) && key === 'k') {
     e.preventDefault()
-    // 确保侧边栏可见后再聚焦搜索框
-    if (isMobile.value) sidebarOpen.value = true
-    else if (sidebarCollapsed.value) sidebarCollapsed.value = false
-    nextTick(() => document.querySelector('.chat-search-input')?.focus())
+    chatSidebarRef.value?.openGlobalSearch()
     return
   }
   if ((e.ctrlKey || e.metaKey) && key === 'f') {
@@ -624,17 +624,18 @@ async function handleNewChat() {
   }
 }
 
-async function handleSwitchChat(id) {
+// 切换目标会话并按调用方选项决定是否滚动到底部；返回值用于后续定位流程判断是否切换成功
+async function handleSwitchChat(id, options = {}) {
   if (streamChat.isStreaming.value) {
     ElMessage.warning(t('chat.waitAnswer'))
-    return
+    return false
   }
   if (id === chatStore.currentChatId) {
     if (isMobile.value) sidebarOpen.value = false
-    return
+    return true
   }
   // 有正在播放的朗读时先确认，继续切换将停止播放
-  if (!(await confirmSpeechStopIfPlaying())) return
+  if (!(await confirmSpeechStopIfPlaying())) return false
   // 中断上一次尚未完成的会话正文加载，防止陈旧请求堆积并在超时后误报
   if (switchAbort) switchAbort.abort()
   const controller = new AbortController()
@@ -647,21 +648,32 @@ async function handleSwitchChat(id) {
   try {
     await chatStore.switchChatLazy(id, { signal: controller.signal })
     // 已被更晚的切换取代：放弃本次结果，避免覆盖最新会话
-    if (mySeq !== switchSeq) return
+    if (mySeq !== switchSeq) return false
     if (isMobile.value) {
       sidebarOpen.value = false
     }
     // 等新会话消息渲染上屏后再撤 loading，渲染较慢时也有视觉缓冲
     await nextTick()
-    scrollFollow.scrollToBottomImmediate()
+    if (options.scrollToBottom !== false) scrollFollow.scrollToBottomImmediate()
+    return true
   } catch (e) {
     // 被主动中断（快速切走）或已被更晚切换取代：静默忽略，仅当前目标真正失败才提示
-    if (e?.name === 'CanceledError' || mySeq !== switchSeq) return
+    if (e?.name === 'CanceledError' || mySeq !== switchSeq) return false
     ElMessage.error(t('chat.switchFailed'))
+    return false
   } finally {
     // 仅最新一次切换负责收起 loading，防止旧切换提前撤销缓冲层
     if (mySeq === switchSeq) chatSwitchLoading.value = false
   }
+}
+
+// 打开全局搜索结果：标题命中只切换会话，消息命中在加载会话后按绝对下标定位并高亮
+async function handleGlobalSearchResult(result) {
+  if (!result?.chatId) return
+  const messageIndex = Number.isInteger(result.messageIndex) ? result.messageIndex : null
+  const switched = await handleSwitchChat(result.chatId, { scrollToBottom: messageIndex === null })
+  if (!switched || messageIndex === null) return
+  await jumpToAbsIndex(messageIndex)
 }
 
 // 按绝对下标跳转定位到主聊天区对应消息并高亮

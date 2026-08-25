@@ -7,8 +7,8 @@
       <div class="sidebar-header">
         <span class="sb-eyebrow">{{ t('sidebar.eyebrow') }}</span>
         <div class="sidebar-header-actions">
-          <button class="sidebar-header-action" :class="{ active: multiSelectMode }" @click="toggleMultiSelect" :title="t('sidebar.multiSelect')" :aria-label="t('sidebar.multiSelect')">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="5" height="5" rx="1"/><rect x="3" y="15" width="5" height="5" rx="1"/><path d="M12 6h9M12 17h9"/><path d="m4.5 6.5 1 1 2-2"/></svg>
+          <button ref="globalSearchTriggerRef" class="sidebar-header-action" @click="openGlobalSearch" :title="t('sidebar.globalSearch')" :aria-label="t('sidebar.globalSearch')">
+            <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.2" y2="16.2"/></svg>
           </button>
           <button class="icon-btn close-sidebar-btn" @click="$emit('toggle')" :title="t('common.close')" :aria-label="t('common.close')">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -26,48 +26,29 @@
         </button>
       </div>
 
-      <div v-if="multiSelectMode" class="multi-select-toolbar" aria-live="polite">
-        <span>已选 {{ selectedChatIds.length }} 项</span>
-        <button type="button" :disabled="!selectedChatIds.length" @click="bulkMove">移动</button>
-        <button type="button" class="danger" :disabled="!selectedChatIds.length" @click="bulkDelete">删除</button>
-        <button type="button" @click="toggleMultiSelect">完成</button>
-      </div>
-
-      <div class="chat-search-box">
-        <svg class="chat-search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input type="text" v-model="chatStore.searchKeyword" class="chat-search-input" :placeholder="t('sidebar.searchPlaceholder')" autocomplete="off" />
-        <button v-if="chatStore.searchKeyword" class="chat-search-clear" @click="chatStore.searchKeyword = ''" :aria-label="t('sidebar.clear')">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
-      </div>
-
       <div class="chat-list" :class="{ 'is-scrolling': listScrolling }" @scroll.passive="onChatListScroll">
         <!-- 加载骨架屏：会话历史未加载完成时显示 -->
         <div v-if="!chatStore.isChatHistoryLoaded" class="chat-list-skeleton">
           <div v-for="n in 5" :key="n" class="chat-skeleton-item"></div>
         </div>
-        <div v-if="chatStore.isChatHistoryLoaded && !chatStore.searchKeyword" class="chat-date-header folder-section-title">
-          <span>{{ t('sidebar.folders') }}</span>
-          <button class="folder-title-action" @click="onCreateFolder" :title="t('sidebar.newFolder')" :aria-label="t('sidebar.newFolder')">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="10" x2="12" y2="16"/><line x1="9" y1="13" x2="15" y2="13"/></svg>
+        <div v-if="chatStore.isChatHistoryLoaded" class="chat-date-header chat-section-title">
+          <span>{{ t('sidebar.chats') }}</span>
+          <button class="section-title-action" :class="{ active: multiSelectMode }" @click="toggleMultiSelect" :title="t('sidebar.multiSelect')" :aria-label="t('sidebar.multiSelect')">
+            <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="5" height="5" rx="1"/><rect x="3" y="15" width="5" height="5" rx="1"/><path d="M12 6h9M12 17h9"/><path d="m4.5 6.5 1 1 2-2"/></svg>
           </button>
         </div>
-        <!-- 全文搜索结果（服务端检索消息内容） -->
-        <template v-if="chatStore.searchKeyword && searchResults.length">
-          <div class="chat-date-header">{{ t('sidebar.messageMatch') }} · {{ searchResults.length }}</div>
-          <div
-            v-for="(r, i) in searchResults"
-            :key="'hit-' + i"
-            class="chat-item search-hit"
-            :class="{ active: r.chatId === chatStore.currentChatId }"
-            @click="$emit('switch-chat', r.chatId)"
-          >
-            <div class="search-hit-body">
-              <span class="title">{{ r.chatTitle }}</span>
-              <span class="search-hit-snippet">{{ (r.role === 'user' ? t('sidebar.mePrefix') : t('sidebar.aiPrefix')) + r.snippet }}</span>
-            </div>
-          </div>
-        </template>
+        <div v-if="multiSelectMode" class="multi-select-toolbar" aria-live="polite">
+          <span>已选 {{ selectedChatIds.length }} 项</span>
+          <button type="button" :disabled="!selectedChatIds.length" @click="bulkMove">移动</button>
+          <button type="button" class="danger" :disabled="!selectedChatIds.length" @click="bulkDelete">删除</button>
+          <button type="button" @click="toggleMultiSelect">完成</button>
+        </div>
+        <div v-if="chatStore.isChatHistoryLoaded" class="chat-date-header folder-section-title">
+          <span>{{ t('sidebar.folders') }}</span>
+          <button class="section-title-action" @click="onCreateFolder" :title="t('sidebar.newFolder')" :aria-label="t('sidebar.newFolder')">
+            <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="10" x2="12" y2="16"/><line x1="9" y1="13" x2="15" y2="13"/></svg>
+          </button>
+        </div>
         <template v-for="(row, rIdx) in renderRows" :key="row.type + '-' + (row.id || rIdx)">
           <!-- 日期分组标题 -->
           <div v-if="row.type === 'dateHeader'" class="chat-date-header">{{ row.label }}</div>
@@ -132,9 +113,6 @@
             </div>
           </div>
         </template>
-        <div v-if="chatStore.isChatHistoryLoaded && chatStore.searchKeyword && !searching && chatStore.sortedChatList.total === 0 && searchResults.length === 0" class="chat-search-empty">
-          {{ t('sidebar.noMatch') }}
-        </div>
       </div>
 
       <div class="sidebar-footer">
@@ -179,10 +157,66 @@
       </div>
     </div>
   </aside>
+
+  <!-- 全局会话搜索：Element Plus Dialog 负责遮罩、焦点圈定与 Esc 关闭 -->
+  <el-dialog
+    v-model="globalSearchOpen"
+    class="global-chat-search-dialog"
+    :title="t('sidebar.globalSearchTitle')"
+    width="min(680px, calc(100vw - 32px))"
+    align-center
+    append-to-body
+    destroy-on-close
+    @opened="focusGlobalSearchInput"
+    @closed="resetGlobalSearch"
+  >
+    <label class="global-search-label" for="global-chat-search-input">{{ t('sidebar.globalSearchInputLabel') }}</label>
+    <div class="global-search-input-wrap">
+      <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.2" y2="16.2"/></svg>
+      <input
+        id="global-chat-search-input"
+        ref="globalSearchInputRef"
+        v-model="globalSearchKeyword"
+        class="global-search-input"
+        :placeholder="t('sidebar.globalSearchPlaceholder')"
+        :aria-describedby="'global-chat-search-status'"
+        autocomplete="off"
+        @keydown.enter.prevent="selectFirstGlobalSearchResult"
+      />
+      <button v-if="globalSearchKeyword" type="button" class="global-search-clear" @click="globalSearchKeyword = ''" :aria-label="t('sidebar.clear')">
+        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div id="global-chat-search-status" class="global-search-status" role="status" aria-live="polite">
+      <span v-if="searching">{{ t('sidebar.searching') }}</span>
+      <span v-else-if="globalSearchKeyword.trim()">{{ t('sidebar.searchResultCount', { count: searchResults.length }) }}</span>
+      <span v-else>{{ t('sidebar.globalSearchHint') }}</span>
+    </div>
+    <div class="global-search-results" :aria-busy="searching">
+      <button
+        v-for="result in searchResults"
+        :key="result.resultType + '-' + result.chatId + '-' + (result.messageIndex ?? 'title')"
+        type="button"
+        class="global-search-result"
+        @click="selectGlobalSearchResult(result)"
+      >
+        <span class="global-search-result-head">
+          <strong>{{ result.chatTitle }}</strong>
+          <span class="global-search-result-type">{{ result.resultType === 'title' ? t('sidebar.titleMatch') : t('sidebar.contentMatch') }}</span>
+        </span>
+        <span v-if="result.resultType === 'message'" class="global-search-result-snippet">
+          {{ (result.role === 'user' ? t('sidebar.mePrefix') : t('sidebar.aiPrefix')) + result.snippet }}
+        </span>
+      </button>
+      <div v-if="globalSearchKeyword.trim() && !searching && searchResults.length === 0" class="global-search-empty">
+        {{ t('sidebar.noMatch') }}
+      </div>
+    </div>
+  </el-dialog>
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessageBox } from 'element-plus'
@@ -203,6 +237,10 @@ const userMenuOpen = ref(false)
 const multiSelectMode = ref(false)
 const selectedChatIds = ref([])
 const userProfile = ref({ displayName: '', avatarType: 'default', avatarValue: '' })
+const globalSearchOpen = ref(false)
+const globalSearchKeyword = ref('')
+const globalSearchInputRef = ref(null)
+const globalSearchTriggerRef = ref(null)
 
 // 会话列表滚动态：滚动时临时显示滚动条，停止后自动隐藏
 const listScrolling = ref(false)
@@ -420,12 +458,14 @@ function onDelete(id) {
   emit('delete-chat', id)
 }
 
-// 跨会话全文搜索：关键字变化后 300ms 防抖调用服务端检索
+// 跨会话搜索：关键字变化后 300ms 防抖调用服务端检索标题与消息内容
 const searchResults = ref([])
 const searching = ref(false)
 let searchTimer = null
-watch(() => chatStore.searchKeyword, (kw) => {
+let searchRequestSeq = 0
+watch(globalSearchKeyword, (kw) => {
   if (searchTimer) clearTimeout(searchTimer)
+  const requestSeq = ++searchRequestSeq
   const q = (kw || '').trim()
   if (!q) {
     searchResults.value = []
@@ -437,16 +477,48 @@ watch(() => chatStore.searchKeyword, (kw) => {
     try {
       const res = await searchChatHistory(q)
       // 只保留当前关键字的结果（避免慢请求覆盖新输入）
-      if (q === chatStore.searchKeyword.trim()) {
+      if (requestSeq === searchRequestSeq && q === globalSearchKeyword.value.trim()) {
         searchResults.value = res?.success ? (res.data || []) : []
       }
     } catch {
-      searchResults.value = []
+      if (requestSeq === searchRequestSeq) searchResults.value = []
     } finally {
-      searching.value = false
+      if (requestSeq === searchRequestSeq) searching.value = false
     }
   }, 300)
 })
+
+// 打开全局会话搜索浮层；供标题图标与 Ctrl/Cmd+K 快捷键共用
+function openGlobalSearch() {
+  globalSearchOpen.value = true
+}
+
+// 浮层完成布局后把焦点放入搜索输入框
+function focusGlobalSearchInput() {
+  globalSearchInputRef.value?.focus()
+}
+
+// 关闭浮层后清理查询状态并把焦点还给触发按钮
+function resetGlobalSearch() {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchRequestSeq++
+  globalSearchKeyword.value = ''
+  searchResults.value = []
+  searching.value = false
+  nextTick(() => globalSearchTriggerRef.value?.focus())
+}
+
+// 选择搜索结果后关闭浮层，并把会话与消息下标交给聊天页执行精确跳转
+function selectGlobalSearchResult(result) {
+  const payload = { ...result, keyword: globalSearchKeyword.value.trim() }
+  globalSearchOpen.value = false
+  emit('search-result-select', payload)
+}
+
+// 在输入框按 Enter 时打开当前排序下的第一条搜索结果
+function selectFirstGlobalSearchResult() {
+  if (searchResults.value.length) selectGlobalSearchResult(searchResults.value[0])
+}
 
 const userAvatarSrc = computed(() => {
   if (userProfile.value.avatarType === 'svg' && userProfile.value.avatarValue) {
@@ -513,9 +585,11 @@ onUnmounted(() => {
   document.removeEventListener('click', closeMenuOnOutside)
   window.removeEventListener('user-profile-updated', onUserProfileUpdated)
   if (scrollHideTimer) clearTimeout(scrollHideTimer)
+  if (searchTimer) clearTimeout(searchTimer)
 })
 
-const emit = defineEmits(['toggle', 'new-chat', 'switch-chat', 'delete-chat', 'open-settings', 'open-about', 'open-stats', 'logout', 'share-chat'])
+const emit = defineEmits(['toggle', 'new-chat', 'switch-chat', 'search-result-select', 'delete-chat', 'open-settings', 'open-about', 'open-stats', 'logout', 'share-chat'])
+defineExpose({ openGlobalSearch })
 </script>
 
 <style scoped>
@@ -547,7 +621,7 @@ const emit = defineEmits(['toggle', 'new-chat', 'switch-chat', 'delete-chat', 'o
 }
 .sidebar-header-action:hover,
 .sidebar-header-action.active { background:var(--primary-soft,#eef3ff); color:var(--primary,#4a7dff); }
-.multi-select-toolbar { display:flex; align-items:center; gap:6px; padding:8px 10px; margin-bottom:8px; border:1px solid var(--border,#333); border-radius:6px; color:var(--ink-2,#ccc); font-size:11px; }
+.multi-select-toolbar { display:flex; align-items:center; gap:6px; padding:8px 10px; margin:0 0 4px; border:1px solid var(--border,#333); border-radius:6px; color:var(--ink-2,#ccc); font-size:11px; }
 .multi-select-toolbar span { margin-right:auto; }
 .multi-select-toolbar button { border:0; background:transparent; color:var(--primary,#6366f1); cursor:pointer; font-size:11px; }
 .multi-select-toolbar button.danger { color:#ef4444; }
@@ -611,9 +685,10 @@ const emit = defineEmits(['toggle', 'new-chat', 'switch-chat', 'delete-chat', 'o
   margin-bottom: 0;
 }
 
-/* 文件夹一级分组标题与日期标题保持相同层级，右侧只保留小型新建入口 */
+/* 会话与文件夹一级分组标题保持相同层级，操作入口固定在右侧 */
+.chat-section-title,
 .folder-section-title { display:flex; align-items:center; justify-content:space-between; }
-.folder-title-action {
+.section-title-action {
   display:inline-flex;
   width:22px;
   height:22px;
@@ -627,7 +702,8 @@ const emit = defineEmits(['toggle', 'new-chat', 'switch-chat', 'delete-chat', 'o
   cursor:pointer;
   transition:background .15s;
 }
-.folder-title-action:hover { background:var(--primary-soft,#eef3ff); }
+.section-title-action:hover,
+.section-title-action.active { background:var(--primary-soft,#eef3ff); }
 
 /* 文件夹分组标题行 */
 .chat-folder-header {
@@ -730,24 +806,47 @@ const emit = defineEmits(['toggle', 'new-chat', 'switch-chat', 'delete-chat', 'o
   overflow-y: auto;
 }
 
-/* 全文搜索命中项：标题 + 匹配片段两行展示 */
-.search-hit {
-  height: auto;
-  padding-top: 6px;
-  padding-bottom: 6px;
+/* 全局搜索浮层内容；遮罩、居中和焦点圈定由 el-dialog 提供 */
+.global-search-label { display:block; margin-bottom:8px; color:var(--ink-2,#666); font-size:12px; }
+.global-search-input-wrap {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:11px 13px;
+  border:1px solid var(--border,#ddd);
+  border-radius:var(--radius,10px);
+  background:var(--surface-2,#f7f7f7);
+  color:var(--ink-3,#999);
 }
-.search-hit-body {
-  min-width: 0;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.global-search-input-wrap:focus-within { border-color:var(--primary,#4a7dff); box-shadow:0 0 0 2px var(--primary-soft,#eef3ff); }
+.global-search-input { min-width:0; flex:1; border:0; outline:0; background:transparent; color:var(--ink-1,#222); font:inherit; font-size:14px; }
+.global-search-input::placeholder { color:var(--ink-4,#aaa); }
+.global-search-clear { display:inline-flex; width:26px; height:26px; align-items:center; justify-content:center; padding:0; border:0; border-radius:6px; background:transparent; color:var(--ink-3,#999); cursor:pointer; }
+.global-search-clear:hover { background:var(--primary-soft,#eef3ff); color:var(--primary,#4a7dff); }
+.global-search-status { min-height:20px; padding:10px 2px 6px; color:var(--ink-3,#999); font-size:12px; }
+.global-search-results { display:flex; max-height:min(440px,50dvh); flex-direction:column; gap:6px; overflow-y:auto; }
+.global-search-result {
+  display:flex;
+  width:100%;
+  flex-direction:column;
+  gap:5px;
+  padding:11px 12px;
+  border:1px solid transparent;
+  border-radius:8px;
+  background:transparent;
+  color:var(--ink-1,#222);
+  text-align:left;
+  cursor:pointer;
 }
-.search-hit-snippet {
-  font-size: 11px;
-  color: var(--ink-3, #999);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.global-search-result:hover,
+.global-search-result:focus-visible { border-color:var(--border,#ddd); background:var(--surface-2,#f7f7f7); outline:none; }
+.global-search-result-head { display:flex; min-width:0; align-items:center; justify-content:space-between; gap:12px; }
+.global-search-result-head strong { overflow:hidden; font-size:13px; text-overflow:ellipsis; white-space:nowrap; }
+.global-search-result-type { flex:0 0 auto; color:var(--primary,#4a7dff); font-size:10px; }
+.global-search-result-snippet { overflow:hidden; color:var(--ink-3,#999); font-size:12px; line-height:1.5; text-overflow:ellipsis; white-space:nowrap; }
+.global-search-empty { padding:36px 12px; color:var(--ink-3,#999); font-size:13px; text-align:center; }
+:global(.global-chat-search-dialog .el-dialog__body) { padding-top:12px; }
+@media (max-width: 640px) {
+  .global-search-results { max-height:55dvh; }
 }
 </style>

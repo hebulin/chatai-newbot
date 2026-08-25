@@ -285,4 +285,26 @@ class SqliteStorageServiceTest {
         assertFalse(service.deleteUser(admin.getId()), "内置 admin 应受保护不可删除");
         assertFalse(service.deleteUser("not-exist-user"), "不存在用户删除应返回 false");
     }
+
+    /** 跨会话搜索应同时命中标题和消息正文，并返回可直接跳转的消息绝对下标。 */
+    @Test
+    void chatSearch_标题与消息内容均可定位() {
+        String userId = uniqueName("chat_search");
+        String messages = "[{\"role\":\"user\",\"content\":\"项目背景\"},"
+                + "{\"role\":\"assistant\",\"content\":\"Needle response\",\"time\":\"08:00\"}]";
+        service.upsertChatSession(userId, "chat-search", messages, "{}",
+                "Release Planning", "项目背景", "08:00", 2,
+                "2026-08-25 08:00:00", System.currentTimeMillis());
+        ChatHistoryService historyService = new ChatHistoryService(service);
+
+        List<Map<String, Object>> titleResults = historyService.searchChatHistory(userId, "release", 50);
+        assertEquals(1, titleResults.size());
+        assertEquals("title", titleResults.get(0).get("resultType"));
+        assertEquals("chat-search", titleResults.get(0).get("chatId"));
+
+        List<Map<String, Object>> messageResults = historyService.searchChatHistory(userId, "NEEDLE", 50);
+        assertEquals(1, messageResults.size());
+        assertEquals("message", messageResults.get(0).get("resultType"));
+        assertEquals(1, ((Number) messageResults.get(0).get("messageIndex")).intValue());
+    }
 }

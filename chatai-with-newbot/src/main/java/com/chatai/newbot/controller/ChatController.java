@@ -335,8 +335,8 @@ public class ChatController {
     }
 
     /**
-     * 跨会话全文搜索当前用户的会话消息
-     * 参数: q=关键字；返回最多 50 条匹配（chatId/chatTitle/role/time/snippet）
+     * 跨会话搜索当前用户的会话标题与消息内容。
+     * 参数: q=关键字；返回最多 50 条匹配，消息命中项包含 messageIndex 供前端精确定位。
      */
     @GetMapping("/chat/history/search")
     public Map<String, Object> searchChatHistory(@RequestParam(required = false) String q,

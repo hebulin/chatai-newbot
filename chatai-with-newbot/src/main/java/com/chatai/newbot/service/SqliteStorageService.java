@@ -2113,9 +2113,9 @@ public class SqliteStorageService implements StorageService {
     }
 
     /**
-     * 按关键字粗筛消息正文命中的会话行（SQL LIKE 下推，跨会话全文搜索用）。
-     * 仅做候选集收窄：LIKE 命中的是消息 JSON 全文（可能误命中字段名等非内容文本），
-     * 调用方需对消息内容做精确二次匹配。按最近更新时间倒序，限定候选会话数防止重度用户全表解析。
+     * 按关键字粗筛标题或消息正文命中的会话行（SQL LIKE 下推，跨会话全文搜索用）。
+     * 仅做候选集收窄：消息 LIKE 命中的是 JSON 全文（可能误命中字段名等非内容文本），
+     * 调用方需对标题和消息内容做精确二次匹配。按最近更新时间倒序，限定候选会话数防止重度用户全表解析。
      * @param userId 用户ID
      * @param keyword 关键字（不含 %/_ 通配符语义，原样作为子串匹配）
      * @param sessionLimit 候选会话数上限
@@ -2124,8 +2124,8 @@ public class SqliteStorageService implements StorageService {
     public List<Map<String, Object>> searchChatSessionsByKeyword(String userId, String keyword, int sessionLimit) {
         return jdbcTemplate.queryForList(
                 "SELECT chat_id, title, messages FROM t_chat_session " +
-                "WHERE user_id = ? AND messages LIKE ? ORDER BY updated_at_ts DESC LIMIT ?",
-                userId, "%" + keyword + "%", sessionLimit);
+                "WHERE user_id = ? AND (title LIKE ? OR messages LIKE ?) ORDER BY updated_at_ts DESC LIMIT ?",
+                userId, "%" + keyword + "%", "%" + keyword + "%", sessionLimit);
     }
 
     /**

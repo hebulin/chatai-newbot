@@ -387,21 +387,21 @@ public class ChatHistoryService {
     private static final int SEARCH_SESSION_SCAN_LIMIT = 200;
 
     /**
-     * 跨会话全文搜索：先用 SQL LIKE 在 t_chat_session 消息正文列粗筛候选会话
-     * （避免全量加载用户所有会话到内存），再对候选会话的消息内容做忽略大小写的精确匹配。
-     * LIKE 命中范围是消息 JSON 全文（可能误命中字段名等非内容文本），以 Java 侧
-     * content 精确匹配为准；候选会话按最近更新时间倒序，新会话的匹配优先返回。
+     * 跨会话全文搜索：先用 SQL LIKE 在 t_chat_session 标题与消息正文列粗筛候选会话
+     * （避免全量加载用户所有会话到内存），再对候选会话的标题与消息内容做忽略大小写的精确匹配。
+     * LIKE 命中范围包含标题与消息 JSON 全文（消息 JSON 可能误命中字段名等非内容文本），
+     * 以 Java 侧标题或 content 精确匹配为准；候选会话按最近更新时间倒序，新会话的匹配优先返回。
      * @param userId 用户ID
      * @param keyword 搜索关键字
      * @param limit 最大返回条数
-     * @return 匹配列表，每项含 chatId/chatTitle/role/time/snippet
+     * @return 匹配列表；标题项含 resultType=title，消息项额外含 role/time/messageIndex/snippet
      */
     public List<Map<String, Object>> searchChatHistory(String userId, String keyword, int limit) {
         List<Map<String, Object>> results = new ArrayList<>();
         if (keyword == null || keyword.trim().isEmpty()) {
             return results;
         }
-        String kw = keyword.trim().toLowerCase();
+        String kw = keyword.trim().toLowerCase(Locale.ROOT);
         try {
             ensureSessionMigrated(userId);
             List<Map<String, Object>> candidates =
@@ -409,30 +409,39 @@ public class ChatHistoryService {
             for (Map<String, Object> row : candidates) {
                 if (results.size() >= limit) break;
                 String chatId = (String) row.get("chat_id");
-                if (!(row.get("messages") instanceof String messagesJson) || messagesJson.isEmpty()) continue;
-                List<Map<String, Object>> msgs;
-                try {
-                    msgs = objectMapper.readValue(messagesJson,
-                            new TypeReference<List<Map<String, Object>>>() {});
-                } catch (Exception e) {
-                    continue; // 单条会话消息损坏不影响其余搜索
+                List<Map<String, Object>> msgs = Collections.emptyList();
+                if (row.get("messages") instanceof String messagesJson && !messagesJson.isEmpty()) {
+                    try {
+                        msgs = objectMapper.readValue(messagesJson,
+                                new TypeReference<List<Map<String, Object>>>() {});
+                    } catch (Exception e) {
+                        // 单条会话消息损坏时仍允许按标题命中
+                    }
                 }
                 String chatTitle = row.get("title") instanceof String t && !t.isEmpty()
                         ? t : buildChatTitle(msgs);
-                for (Map<String, Object> msg : msgs) {
+                if (chatTitle.toLowerCase(Locale.ROOT).contains(kw)) {
+                    Map<String, Object> titleItem = new LinkedHashMap<>();
+                    titleItem.put("resultType", "title");
+                    titleItem.put("chatId", chatId);
+                    titleItem.put("chatTitle", chatTitle);
+                    titleItem.put("snippet", chatTitle);
+                    results.add(titleItem);
+                }
+                for (int messageIndex = 0; messageIndex < msgs.size() && results.size() < limit; messageIndex++) {
+                    Map<String, Object> msg = msgs.get(messageIndex);
                     if (!(msg.get("content") instanceof String content)) continue;
-                    int pos = content.toLowerCase().indexOf(kw);
+                    int pos = content.toLowerCase(Locale.ROOT).indexOf(kw);
                     if (pos < 0) continue;
                     Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("resultType", "message");
                     item.put("chatId", chatId);
                     item.put("chatTitle", chatTitle);
+                    item.put("messageIndex", messageIndex);
                     item.put("role", msg.get("role"));
                     item.put("time", msg.get("time"));
                     item.put("snippet", buildSnippet(content, pos, kw.length()));
                     results.add(item);
-                    if (results.size() >= limit) {
-                        break;
-                    }
                 }
             }
         } catch (Exception e) {
