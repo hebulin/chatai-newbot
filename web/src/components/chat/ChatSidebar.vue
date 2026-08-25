@@ -7,7 +7,16 @@
       <div class="sidebar-header">
         <span class="sb-eyebrow">{{ t('sidebar.eyebrow') }}</span>
         <div class="sidebar-header-actions">
-          <button ref="globalSearchTriggerRef" class="sidebar-header-action" @click="openGlobalSearch" :title="t('sidebar.globalSearch')" :aria-label="t('sidebar.globalSearch')">
+          <button
+            ref="sidebarSearchTriggerRef"
+            class="sidebar-header-action"
+            :class="{ active: sidebarSearchOpen }"
+            :aria-expanded="sidebarSearchOpen"
+            aria-controls="sidebar-chat-search-panel"
+            @click="toggleSidebarSearch"
+            :title="t('sidebar.searchChats')"
+            :aria-label="t('sidebar.searchChats')"
+          >
             <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.2" y2="16.2"/></svg>
           </button>
           <button class="icon-btn close-sidebar-btn" @click="$emit('toggle')" :title="t('common.close')" :aria-label="t('common.close')">
@@ -26,7 +35,61 @@
         </button>
       </div>
 
-      <div class="chat-list" :class="{ 'is-scrolling': listScrolling }" @scroll.passive="onChatListScroll">
+      <div
+        v-if="sidebarSearchOpen"
+        id="sidebar-chat-search-panel"
+        class="sidebar-search-panel"
+        @keydown.esc.stop.prevent="closeSidebarSearch()"
+      >
+        <label class="sidebar-search-label" for="sidebar-chat-search-input">{{ t('sidebar.searchInputLabel') }}</label>
+        <div class="sidebar-search-input-wrap">
+          <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.2" y2="16.2"/></svg>
+          <input
+            id="sidebar-chat-search-input"
+            ref="sidebarSearchInputRef"
+            v-model="sidebarSearchKeyword"
+            class="sidebar-search-input"
+            :placeholder="t('sidebar.searchPlaceholder')"
+            aria-describedby="sidebar-chat-search-status"
+            aria-controls="sidebar-chat-list"
+            autocomplete="off"
+            @keydown.enter.prevent="selectFirstSidebarSearchResult"
+          />
+          <button v-if="sidebarSearchKeyword" type="button" class="sidebar-search-clear" @click="clearSidebarSearch" :aria-label="t('sidebar.clear')">
+            <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div id="sidebar-chat-search-status" class="sidebar-search-status" role="status" aria-live="polite">
+          <span v-if="searching">{{ t('sidebar.searching') }}</span>
+          <span v-else-if="sidebarSearchKeyword.trim()">{{ t('sidebar.searchResultCount', { count: searchResults.length }) }}</span>
+          <span v-else>{{ t('sidebar.searchHint') }}</span>
+        </div>
+      </div>
+
+      <div id="sidebar-chat-list" class="chat-list" :class="{ 'is-scrolling': listScrolling }" @scroll.passive="onChatListScroll">
+        <template v-if="sidebarSearchOpen && sidebarSearchKeyword.trim()">
+          <div class="sidebar-search-results" :aria-busy="searching" @keydown.esc.stop.prevent="closeSidebarSearch()">
+            <button
+              v-for="result in searchResults"
+              :key="result.resultType + '-' + result.chatId + '-' + (result.messageIndex ?? 'title')"
+              type="button"
+              class="sidebar-search-result"
+              @click="selectSidebarSearchResult(result)"
+            >
+              <span class="sidebar-search-result-head">
+                <strong>{{ result.chatTitle }}</strong>
+                <span class="sidebar-search-result-type">{{ result.resultType === 'title' ? t('sidebar.titleMatch') : t('sidebar.contentMatch') }}</span>
+              </span>
+              <span class="sidebar-search-result-snippet" :class="{ empty: !result.snippet }">
+                {{ result.snippet ? ((result.role === 'user' ? t('sidebar.mePrefix') : t('sidebar.aiPrefix')) + result.snippet) : t('sidebar.noMessagePreview') }}
+              </span>
+            </button>
+            <div v-if="!searching && searchResults.length === 0" class="sidebar-search-empty">
+              {{ t('sidebar.noMatch') }}
+            </div>
+          </div>
+        </template>
+        <template v-else>
         <!-- 加载骨架屏：会话历史未加载完成时显示 -->
         <div v-if="!chatStore.isChatHistoryLoaded" class="chat-list-skeleton">
           <div v-for="n in 5" :key="n" class="chat-skeleton-item"></div>
@@ -113,6 +176,7 @@
             </div>
           </div>
         </template>
+        </template>
       </div>
 
       <div class="sidebar-footer">
@@ -158,61 +222,6 @@
     </div>
   </aside>
 
-  <!-- 全局会话搜索：Element Plus Dialog 负责遮罩、焦点圈定与 Esc 关闭 -->
-  <el-dialog
-    v-model="globalSearchOpen"
-    class="global-chat-search-dialog"
-    :title="t('sidebar.globalSearchTitle')"
-    width="min(680px, calc(100vw - 32px))"
-    align-center
-    append-to-body
-    destroy-on-close
-    @opened="focusGlobalSearchInput"
-    @closed="resetGlobalSearch"
-  >
-    <label class="global-search-label" for="global-chat-search-input">{{ t('sidebar.globalSearchInputLabel') }}</label>
-    <div class="global-search-input-wrap">
-      <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.2" y2="16.2"/></svg>
-      <input
-        id="global-chat-search-input"
-        ref="globalSearchInputRef"
-        v-model="globalSearchKeyword"
-        class="global-search-input"
-        :placeholder="t('sidebar.globalSearchPlaceholder')"
-        :aria-describedby="'global-chat-search-status'"
-        autocomplete="off"
-        @keydown.enter.prevent="selectFirstGlobalSearchResult"
-      />
-      <button v-if="globalSearchKeyword" type="button" class="global-search-clear" @click="globalSearchKeyword = ''" :aria-label="t('sidebar.clear')">
-        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </button>
-    </div>
-    <div id="global-chat-search-status" class="global-search-status" role="status" aria-live="polite">
-      <span v-if="searching">{{ t('sidebar.searching') }}</span>
-      <span v-else-if="globalSearchKeyword.trim()">{{ t('sidebar.searchResultCount', { count: searchResults.length }) }}</span>
-      <span v-else>{{ t('sidebar.globalSearchHint') }}</span>
-    </div>
-    <div class="global-search-results" :aria-busy="searching">
-      <button
-        v-for="result in searchResults"
-        :key="result.resultType + '-' + result.chatId + '-' + (result.messageIndex ?? 'title')"
-        type="button"
-        class="global-search-result"
-        @click="selectGlobalSearchResult(result)"
-      >
-        <span class="global-search-result-head">
-          <strong>{{ result.chatTitle }}</strong>
-          <span class="global-search-result-type">{{ result.resultType === 'title' ? t('sidebar.titleMatch') : t('sidebar.contentMatch') }}</span>
-        </span>
-        <span v-if="result.resultType === 'message'" class="global-search-result-snippet">
-          {{ (result.role === 'user' ? t('sidebar.mePrefix') : t('sidebar.aiPrefix')) + result.snippet }}
-        </span>
-      </button>
-      <div v-if="globalSearchKeyword.trim() && !searching && searchResults.length === 0" class="global-search-empty">
-        {{ t('sidebar.noMatch') }}
-      </div>
-    </div>
-  </el-dialog>
 </template>
 
 <script setup>
@@ -237,10 +246,10 @@ const userMenuOpen = ref(false)
 const multiSelectMode = ref(false)
 const selectedChatIds = ref([])
 const userProfile = ref({ displayName: '', avatarType: 'default', avatarValue: '' })
-const globalSearchOpen = ref(false)
-const globalSearchKeyword = ref('')
-const globalSearchInputRef = ref(null)
-const globalSearchTriggerRef = ref(null)
+const sidebarSearchOpen = ref(false)
+const sidebarSearchKeyword = ref('')
+const sidebarSearchInputRef = ref(null)
+const sidebarSearchTriggerRef = ref(null)
 
 // 会话列表滚动态：滚动时临时显示滚动条，停止后自动隐藏
 const listScrolling = ref(false)
@@ -463,7 +472,7 @@ const searchResults = ref([])
 const searching = ref(false)
 let searchTimer = null
 let searchRequestSeq = 0
-watch(globalSearchKeyword, (kw) => {
+watch(sidebarSearchKeyword, (kw) => {
   if (searchTimer) clearTimeout(searchTimer)
   const requestSeq = ++searchRequestSeq
   const q = (kw || '').trim()
@@ -473,11 +482,12 @@ watch(globalSearchKeyword, (kw) => {
     return
   }
   searching.value = true
+  searchResults.value = []
   searchTimer = setTimeout(async () => {
     try {
       const res = await searchChatHistory(q)
       // 只保留当前关键字的结果（避免慢请求覆盖新输入）
-      if (requestSeq === searchRequestSeq && q === globalSearchKeyword.value.trim()) {
+      if (requestSeq === searchRequestSeq && q === sidebarSearchKeyword.value.trim()) {
         searchResults.value = res?.success ? (res.data || []) : []
       }
     } catch {
@@ -488,36 +498,45 @@ watch(globalSearchKeyword, (kw) => {
   }, 300)
 })
 
-// 打开全局会话搜索浮层；供标题图标与 Ctrl/Cmd+K 快捷键共用
-function openGlobalSearch() {
-  globalSearchOpen.value = true
+// 打开侧边栏搜索区域并聚焦输入框；供搜索图标与 Ctrl/Cmd+K 快捷键共用
+function openSidebarSearch() {
+  sidebarSearchOpen.value = true
+  nextTick(() => sidebarSearchInputRef.value?.focus())
 }
 
-// 浮层完成布局后把焦点放入搜索输入框
-function focusGlobalSearchInput() {
-  globalSearchInputRef.value?.focus()
+// 在搜索图标点击时切换侧边栏搜索区域的展开状态
+function toggleSidebarSearch() {
+  if (sidebarSearchOpen.value) closeSidebarSearch()
+  else openSidebarSearch()
 }
 
-// 关闭浮层后清理查询状态并把焦点还给触发按钮
-function resetGlobalSearch() {
+// 关闭侧边栏搜索区域、取消陈旧请求，并按需把焦点还给搜索图标
+function closeSidebarSearch(restoreFocus = true) {
   if (searchTimer) clearTimeout(searchTimer)
   searchRequestSeq++
-  globalSearchKeyword.value = ''
+  sidebarSearchOpen.value = false
+  sidebarSearchKeyword.value = ''
   searchResults.value = []
   searching.value = false
-  nextTick(() => globalSearchTriggerRef.value?.focus())
+  if (restoreFocus) nextTick(() => sidebarSearchTriggerRef.value?.focus())
 }
 
-// 选择搜索结果后关闭浮层，并把会话与消息下标交给聊天页执行精确跳转
-function selectGlobalSearchResult(result) {
-  const payload = { ...result, keyword: globalSearchKeyword.value.trim() }
-  globalSearchOpen.value = false
+// 清空当前关键字与结果，并保持输入焦点便于继续搜索
+function clearSidebarSearch() {
+  sidebarSearchKeyword.value = ''
+  nextTick(() => sidebarSearchInputRef.value?.focus())
+}
+
+// 选择搜索结果后收起搜索区域，并把会话与消息下标交给聊天页执行精确跳转
+function selectSidebarSearchResult(result) {
+  const payload = { ...result, keyword: sidebarSearchKeyword.value.trim() }
+  closeSidebarSearch(false)
   emit('search-result-select', payload)
 }
 
 // 在输入框按 Enter 时打开当前排序下的第一条搜索结果
-function selectFirstGlobalSearchResult() {
-  if (searchResults.value.length) selectGlobalSearchResult(searchResults.value[0])
+function selectFirstSidebarSearchResult() {
+  if (searchResults.value.length) selectSidebarSearchResult(searchResults.value[0])
 }
 
 const userAvatarSrc = computed(() => {
@@ -589,7 +608,7 @@ onUnmounted(() => {
 })
 
 const emit = defineEmits(['toggle', 'new-chat', 'switch-chat', 'search-result-select', 'delete-chat', 'open-settings', 'open-about', 'open-stats', 'logout', 'share-chat'])
-defineExpose({ openGlobalSearch })
+defineExpose({ openSidebarSearch })
 </script>
 
 <style scoped>
@@ -806,31 +825,44 @@ defineExpose({ openGlobalSearch })
   overflow-y: auto;
 }
 
-/* 全局搜索浮层内容；遮罩、居中和焦点圈定由 el-dialog 提供 */
-.global-search-label { display:block; margin-bottom:8px; color:var(--ink-2,#666); font-size:12px; }
-.global-search-input-wrap {
+/* 侧边栏内联搜索：输入区固定在会话列表上方，结果复用会话列表滚动区域 */
+.sidebar-search-panel { flex:0 0 auto; margin:-6px 0 10px; }
+.sidebar-search-label {
+  position:absolute;
+  width:1px;
+  height:1px;
+  padding:0;
+  margin:-1px;
+  overflow:hidden;
+  clip:rect(0,0,0,0);
+  white-space:nowrap;
+  border:0;
+}
+.sidebar-search-input-wrap {
   display:flex;
   align-items:center;
-  gap:10px;
-  padding:11px 13px;
+  gap:8px;
+  min-height:34px;
+  padding:6px 9px;
   border:1px solid var(--border,#ddd);
-  border-radius:var(--radius,10px);
+  border-radius:8px;
   background:var(--surface-2,#f7f7f7);
   color:var(--ink-3,#999);
 }
-.global-search-input-wrap:focus-within { border-color:var(--primary,#4a7dff); box-shadow:0 0 0 2px var(--primary-soft,#eef3ff); }
-.global-search-input { min-width:0; flex:1; border:0; outline:0; background:transparent; color:var(--ink-1,#222); font:inherit; font-size:14px; }
-.global-search-input::placeholder { color:var(--ink-4,#aaa); }
-.global-search-clear { display:inline-flex; width:26px; height:26px; align-items:center; justify-content:center; padding:0; border:0; border-radius:6px; background:transparent; color:var(--ink-3,#999); cursor:pointer; }
-.global-search-clear:hover { background:var(--primary-soft,#eef3ff); color:var(--primary,#4a7dff); }
-.global-search-status { min-height:20px; padding:10px 2px 6px; color:var(--ink-3,#999); font-size:12px; }
-.global-search-results { display:flex; max-height:min(440px,50dvh); flex-direction:column; gap:6px; overflow-y:auto; }
-.global-search-result {
+.sidebar-search-input-wrap:focus-within { border-color:var(--primary,#4a7dff); box-shadow:0 0 0 2px var(--primary-soft,#eef3ff); }
+.sidebar-search-input { min-width:0; flex:1; border:0; outline:0; background:transparent; color:var(--ink-1,#222); font:inherit; font-size:12.5px; }
+.sidebar-search-input::placeholder { color:var(--ink-4,#aaa); }
+.sidebar-search-clear { display:inline-flex; width:24px; height:24px; align-items:center; justify-content:center; padding:0; border:0; border-radius:6px; background:transparent; color:var(--ink-3,#999); cursor:pointer; }
+.sidebar-search-clear:hover { background:var(--primary-soft,#eef3ff); color:var(--primary,#4a7dff); }
+.sidebar-search-clear:focus-visible { outline:2px solid var(--primary,#4a7dff); outline-offset:1px; }
+.sidebar-search-status { min-height:19px; padding:6px 2px 0; color:var(--ink-3,#999); font-size:10.5px; }
+.sidebar-search-results { display:flex; flex-direction:column; gap:4px; padding-bottom:8px; }
+.sidebar-search-result {
   display:flex;
   width:100%;
   flex-direction:column;
-  gap:5px;
-  padding:11px 12px;
+  gap:4px;
+  padding:9px 10px;
   border:1px solid transparent;
   border-radius:8px;
   background:transparent;
@@ -838,15 +870,21 @@ defineExpose({ openGlobalSearch })
   text-align:left;
   cursor:pointer;
 }
-.global-search-result:hover,
-.global-search-result:focus-visible { border-color:var(--border,#ddd); background:var(--surface-2,#f7f7f7); outline:none; }
-.global-search-result-head { display:flex; min-width:0; align-items:center; justify-content:space-between; gap:12px; }
-.global-search-result-head strong { overflow:hidden; font-size:13px; text-overflow:ellipsis; white-space:nowrap; }
-.global-search-result-type { flex:0 0 auto; color:var(--primary,#4a7dff); font-size:10px; }
-.global-search-result-snippet { overflow:hidden; color:var(--ink-3,#999); font-size:12px; line-height:1.5; text-overflow:ellipsis; white-space:nowrap; }
-.global-search-empty { padding:36px 12px; color:var(--ink-3,#999); font-size:13px; text-align:center; }
-:global(.global-chat-search-dialog .el-dialog__body) { padding-top:12px; }
-@media (max-width: 640px) {
-  .global-search-results { max-height:55dvh; }
+.sidebar-search-result:hover,
+.sidebar-search-result:focus-visible { border-color:var(--border,#ddd); background:var(--surface-2,#f7f7f7); outline:none; }
+.sidebar-search-result:focus-visible { box-shadow:0 0 0 2px var(--primary-soft,#eef3ff); }
+.sidebar-search-result-head { display:flex; min-width:0; align-items:center; justify-content:space-between; gap:8px; }
+.sidebar-search-result-head strong { overflow:hidden; font-size:12.5px; text-overflow:ellipsis; white-space:nowrap; }
+.sidebar-search-result-type { flex:0 0 auto; color:var(--primary,#4a7dff); font-size:9.5px; }
+.sidebar-search-result-snippet {
+  display:-webkit-box;
+  overflow:hidden;
+  color:var(--ink-3,#999);
+  font-size:11px;
+  line-height:1.45;
+  -webkit-box-orient:vertical;
+  -webkit-line-clamp:2;
 }
+.sidebar-search-result-snippet.empty { font-style:italic; }
+.sidebar-search-empty { padding:32px 10px; color:var(--ink-3,#999); font-size:12px; text-align:center; }
 </style>

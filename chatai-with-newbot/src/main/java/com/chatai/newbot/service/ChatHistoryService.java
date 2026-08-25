@@ -394,7 +394,7 @@ public class ChatHistoryService {
      * @param userId 用户ID
      * @param keyword 搜索关键字
      * @param limit 最大返回条数
-     * @return 匹配列表；标题项含 resultType=title，消息项额外含 role/time/messageIndex/snippet
+     * @return 匹配列表；每项均含标题与消息内容片段，消息命中项额外含 role/time/messageIndex
      */
     public List<Map<String, Object>> searchChatHistory(String userId, String keyword, int limit) {
         List<Map<String, Object>> results = new ArrayList<>();
@@ -421,11 +421,14 @@ public class ChatHistoryService {
                 String chatTitle = row.get("title") instanceof String t && !t.isEmpty()
                         ? t : buildChatTitle(msgs);
                 if (chatTitle.toLowerCase(Locale.ROOT).contains(kw)) {
+                    String titlePreview = buildChatPreview(msgs).replaceAll("\\s+", " ").trim();
+                    if (titlePreview.length() > 120) titlePreview = titlePreview.substring(0, 120) + "…";
                     Map<String, Object> titleItem = new LinkedHashMap<>();
                     titleItem.put("resultType", "title");
                     titleItem.put("chatId", chatId);
                     titleItem.put("chatTitle", chatTitle);
-                    titleItem.put("snippet", chatTitle);
+                    titleItem.put("role", "user");
+                    titleItem.put("snippet", titlePreview);
                     results.add(titleItem);
                 }
                 for (int messageIndex = 0; messageIndex < msgs.size() && results.size() < limit; messageIndex++) {

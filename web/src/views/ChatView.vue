@@ -36,7 +36,7 @@
       @toggle="toggleSidebar"
       @new-chat="handleNewChat"
       @switch-chat="handleSwitchChat"
-      @search-result-select="handleGlobalSearchResult"
+      @search-result-select="handleSidebarSearchResult"
       @delete-chat="handleDeleteChat"
       @share-chat="doShare"
       @open-settings="showSettings = true"
@@ -439,13 +439,15 @@ onUnmounted(() => {
   speech.stop()
 })
 
-// 全局快捷键：Ctrl/Cmd+K 打开跨会话搜索浮层；Ctrl/Cmd+F 打开会话内搜索；
+// 全局快捷键：Ctrl/Cmd+K 展开侧边栏跨会话搜索；Ctrl/Cmd+F 打开会话内搜索；
 // Esc 依次关闭搜索栏、HTML 预览面板
 function handleGlobalKeydown(e) {
   const key = (e.key || '').toLowerCase()
   if ((e.ctrlKey || e.metaKey) && key === 'k') {
     e.preventDefault()
-    chatSidebarRef.value?.openGlobalSearch()
+    if (isMobile.value) sidebarOpen.value = true
+    else if (sidebarCollapsed.value) sidebarCollapsed.value = false
+    nextTick(() => chatSidebarRef.value?.openSidebarSearch())
     return
   }
   if ((e.ctrlKey || e.metaKey) && key === 'f') {
@@ -667,8 +669,8 @@ async function handleSwitchChat(id, options = {}) {
   }
 }
 
-// 打开全局搜索结果：标题命中只切换会话，消息命中在加载会话后按绝对下标定位并高亮
-async function handleGlobalSearchResult(result) {
+// 打开侧边栏搜索结果：标题命中只切换会话，消息命中在加载会话后按绝对下标定位并高亮
+async function handleSidebarSearchResult(result) {
   if (!result?.chatId) return
   const messageIndex = Number.isInteger(result.messageIndex) ? result.messageIndex : null
   const switched = await handleSwitchChat(result.chatId, { scrollToBottom: messageIndex === null })

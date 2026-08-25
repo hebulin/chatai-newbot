@@ -301,6 +301,7 @@ class SqliteStorageServiceTest {
         assertEquals(1, titleResults.size());
         assertEquals("title", titleResults.get(0).get("resultType"));
         assertEquals("chat-search", titleResults.get(0).get("chatId"));
+        assertEquals("项目背景", titleResults.get(0).get("snippet"));
 
         List<Map<String, Object>> messageResults = historyService.searchChatHistory(userId, "NEEDLE", 50);
         assertEquals(1, messageResults.size());
