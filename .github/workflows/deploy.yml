@@ -22,7 +22,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # 与 web/package.json 和当前 jsdom/vue-i18n 的最低运行要求保持一致
+          node-version: '22.22.2'
           cache: 'npm'
           cache-dependency-path: './web/package-lock.json'
 
