@@ -1069,7 +1069,7 @@ async function maybeGenerateTitle(chatId) {
   } catch { /* 失败则保留默认标题 */ }
 }
 
-// 重新生成：删除最后一条 AI 回复，基于其前的历史重新请求
+// 重新生成：删除最后一条 AI 回复，在当前会话基于其前的历史重新请求（执行前需用户二次确认）
 async function handleRegenerate(idx) {
   // 渲染窗口裁剪后，子组件回传的是展示列表下标，需换算回完整列表下标
   idx += hiddenCount.value
@@ -1081,10 +1081,18 @@ async function handleRegenerate(idx) {
     ElMessage.warning(t('chat.pickModel'))
     return
   }
-  const sourceChatId = chatStore.currentChatId
-  const chatId = chatStore.createBranch(sourceChatId, idx - 1)
-  if (!chatId) return
-  // 同样挂起全量同步，bot 输出结束后再统一上传（截断+新回复一次性同步）
+  // 二次确认：重新生成会删除最后一条回答且不可恢复
+  try {
+    await ElMessageBox.confirm(t('chat.regenerateConfirm'), t('chat.regenerateTitle'), {
+      confirmButtonText: t('common.confirm'),
+      cancelButtonText: t('common.cancel'),
+      type: 'warning'
+    })
+  } catch { return }
+  const chatId = chatStore.currentChatId
+  // 仅在当前会话内截断到最后一条 AI 回复之前，不创建分支
+  chatStore.truncateMessages(chatId, idx)
+  // 挂起全量同步，bot 输出结束后再统一上传（截断+新回复一次性同步）
   chatStore.suspendSync()
   try {
     nextTick(() => scrollFollow.scrollToBottomImmediate())
@@ -1141,8 +1149,16 @@ async function handleEditResend(idx) {
   }
 }
 
-// 从任意消息位置创建可独立继续对话的会话分支
-function handleCreateBranch(idx) {
+// 从任意消息位置创建可独立继续对话的会话分支（执行前需用户二次确认）
+async function handleCreateBranch(idx) {
+  // 二次确认：创建分支会复制当前会话到该消息为止的内容并切换到新会话
+  try {
+    await ElMessageBox.confirm(t('chat.branchConfirm'), t('chat.branchTitle'), {
+      confirmButtonText: t('common.confirm'),
+      cancelButtonText: t('common.cancel'),
+      type: 'warning'
+    })
+  } catch { return }
   const absoluteIndex = idx + hiddenCount.value
   const branchId = chatStore.createBranch(chatStore.currentChatId, absoluteIndex)
   if (branchId) {
