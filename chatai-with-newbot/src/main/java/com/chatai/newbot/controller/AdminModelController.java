@@ -4,6 +4,7 @@ import com.chatai.newbot.config.AdminSupport;
 import com.chatai.newbot.model.ModelConfig;
 import com.chatai.newbot.model.Provider;
 import com.chatai.newbot.model.ProviderModel;
+import com.chatai.newbot.service.ModelHealthCheckService;
 import com.chatai.newbot.service.StorageManager;
 import com.chatai.newbot.service.UnifiedChatService;
 import org.slf4j.Logger;
@@ -24,12 +25,14 @@ public class AdminModelController {
     private static final Logger log = LoggerFactory.getLogger(AdminModelController.class);
     private final StorageManager storageService;
     private final UnifiedChatService unifiedChatService;
+    private final ModelHealthCheckService healthCheckService;
     private final AdminSupport admin;
 
     public AdminModelController(StorageManager storageService, UnifiedChatService unifiedChatService,
-                                AdminSupport admin) {
+                                ModelHealthCheckService healthCheckService, AdminSupport admin) {
         this.storageService = storageService;
         this.unifiedChatService = unifiedChatService;
+        this.healthCheckService = healthCheckService;
         this.admin = admin;
     }
 
@@ -174,6 +177,62 @@ public class AdminModelController {
         return result;
     }
 
+    // ========== 系统设置（模型健康检查） ==========
+
+    /**
+     * 获取模型健康检查设置（总开关与检查间隔的运行值：后台设置优先于 yml 默认）。
+     * 返回: { "success": true, "data": { "enabled": true, "intervalMinutes": 360 } }
+     */
+    @GetMapping("/settings/health-check")
+    public Map<String, Object> getHealthCheckSettings(HttpServletRequest request) {
+        admin.requireAdmin(request);
+        Map<String, Object> result = new HashMap<>();
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("enabled", healthCheckService.isEnabledEffective());
+        data.put("intervalMinutes", healthCheckService.getIntervalMinutesEffective());
+        result.put("success", true);
+        result.put("data", data);
+        return result;
+    }
+
+    /**
+     * 保存模型健康检查设置，保存后下一个调度心跳（1 分钟内）即按新配置生效，无需重启。
+     * 请求体: { "enabled": true, "intervalMinutes": 360 }（两个字段均可选，缺省不修改）
+     */
+    @PutMapping("/settings/health-check")
+    public Map<String, Object> setHealthCheckSettings(@RequestBody(required = false) Map<String, Object> body,
+                                                      HttpServletRequest request) {
+        admin.requireAdmin(request);
+        Map<String, Object> result = new HashMap<>();
+        if (body == null || body.isEmpty()) {
+            result.put("success", false);
+            result.put("message", "请指定要保存的健康检查设置");
+            return result;
+        }
+        try {
+            if (body.get("enabled") instanceof Boolean b) {
+                storageService.setSetting("health_check_enabled", String.valueOf(b));
+            }
+            if (body.get("intervalMinutes") instanceof Number n) {
+                long interval = n.longValue();
+                if (interval < 1 || interval > 10080) {
+                    result.put("success", false);
+                    result.put("message", "检查间隔范围应为 1 ~ 10080 分钟");
+                    return result;
+                }
+                storageService.setSetting("health_check_interval_minutes", String.valueOf(interval));
+            }
+            admin.audit(request, "settings.healthCheck", "保存模型健康检查设置");
+            result.put("success", true);
+            result.put("message", "健康检查设置已保存");
+        } catch (Exception e) {
+            log.error("保存健康检查设置失败", e);
+            result.put("success", false);
+            result.put("message", "保存失败: " + e.getMessage());
+        }
+        return result;
+    }
+
     /**
      * 批量快速接入 - 为指定厂商的所有模型创建配置
      * 请求体: { "providerId": "deepseek", "apiKey": "sk-xxx", "selectedModelIds": ["deepseek-v4-pro", "deepseek-v4-flash"], "visibleToAll": true }
@@ -292,6 +351,7 @@ public class AdminModelController {
         copy.setSupportsMultimodal(m.isSupportsMultimodal());
         copy.setEnabled(m.isEnabled());
         copy.setVisibleToAll(m.getVisibleToAll());
+        copy.setHealthCheckEnabled(m.getHealthCheckEnabled());
         copy.setBuiltIn(m.isBuiltIn());
         copy.setCreatedAt(m.getCreatedAt());
         copy.setTestLatencyMs(m.getTestLatencyMs());

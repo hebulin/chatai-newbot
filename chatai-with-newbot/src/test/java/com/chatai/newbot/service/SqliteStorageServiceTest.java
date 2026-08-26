@@ -129,6 +129,12 @@ class SqliteStorageServiceTest {
         service.updateModelConfig(saved);
         assertEquals("测试模型-改", service.getModelConfigById(saved.getId()).getDisplayName());
 
+        // 健康检查开关：新增未显式设置时默认参与（NULL -> true），显式关闭后持久化生效
+        assertEquals(Boolean.TRUE, service.getModelConfigById(saved.getId()).getHealthCheckEnabled());
+        saved.setHealthCheckEnabled(false);
+        service.updateModelConfig(saved);
+        assertEquals(Boolean.FALSE, service.getModelConfigById(saved.getId()).getHealthCheckEnabled());
+
         // 删除后缓存同步失效
         assertTrue(service.deleteModelConfig(saved.getId()));
         assertNull(service.getModelConfigById(saved.getId()), "删除后按 ID 应查不到");

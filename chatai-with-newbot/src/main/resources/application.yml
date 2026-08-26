@@ -49,9 +49,11 @@ logging:
     org.springframework.web: INFO
     reactor.netty.http.client: WARN
 
-# 模型健康检查定时任务：按固定间隔对所有启用模型执行连通测试（复用 testConnection，
-# 指标持久化到模型配置供管理端展示）。可通过环境变量 CHATAI_HEALTHCHECK_ENABLED /
-# CHATAI_HEALTHCHECK_INTERVAL_MINUTES / CHATAI_HEALTHCHECK_INITIAL_DELAY_MINUTES 覆盖
+# 模型健康检查定时任务默认值（复用 testConnection，指标持久化到模型配置供管理端展示）。
+# 总开关与检查间隔的运行值以后台"系统设置-模型健康检查"为准（存 t_setting，保存后 1 分钟内生效，
+# 无需重启）；此处仅作为后台未配置时的默认值与首次执行延迟，可用环境变量
+# CHATAI_HEALTHCHECK_ENABLED / CHATAI_HEALTHCHECK_INTERVAL_MINUTES / CHATAI_HEALTHCHECK_INITIAL_DELAY_MINUTES 覆盖；
+# 单个模型是否参与检查由后台"健康检查"开关控制（t_model_config.health_check_enabled，默认参与）
 chatai:
   health-check:
     enabled: true

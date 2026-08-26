@@ -38,21 +38,24 @@
     </div>
 
     <!-- 主内容区：keep-alive 缓存已访问的 tab 页面（切回秒开、保留筛选/分页状态），
-         transition 以淡出淡入过渡缓解内容突变的生硬感 -->
-    <main class="admin-main">
-      <router-view v-slot="{ Component }">
-        <transition name="admin-page" mode="out-in">
-          <keep-alive>
-            <component :is="Component" :key="route.path" />
-          </keep-alive>
-        </transition>
-      </router-view>
-    </main>
+         transition 以淡出淡入过渡缓解内容突变的生硬感；
+         外层 .admin-scroll 独立滚动，品牌栏与 Tab 栏固定不随内容滚动 -->
+    <div class="admin-scroll">
+      <main class="admin-main">
+        <router-view v-slot="{ Component }">
+          <transition name="admin-page" mode="out-in">
+            <keep-alive>
+              <component :is="Component" :key="route.path" />
+            </keep-alive>
+          </transition>
+        </router-view>
+      </main>
 
-    <!-- 底部 -->
-    <footer class="admin-footer">
-      <span class="app-version">v{{ APP_VERSION }}</span>
-    </footer>
+      <!-- 底部 -->
+      <footer class="admin-footer">
+        <span class="app-version">v{{ APP_VERSION }}</span>
+      </footer>
+    </div>
   </div>
 </template>
 
@@ -128,21 +131,24 @@ onMounted(() => {
 <style scoped>
 /* chat.css 全局锁死了 html/body 的滚动（overflow:hidden，聊天页自行管理滚动），
    该 CSS 经 JS 引入后常驻文档，会波及后台管理页，导致 body 无法滚动。
-   故这里让 .admin-layout 自己作为滚动容器，数据量多时可正常下滑 */
+   故这里由 .admin-scroll 充当滚动容器；品牌栏与 Tab 栏位于滚动容器之外，
+   滚动时固定不动（不依赖 sticky，避免粘性定位在嵌套滚动容器下的兼容陷阱） */
 .admin-layout {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden;
 }
 @supports (height: 100dvh) {
   .admin-layout { height: 100dvh; }
 }
+.admin-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
 .admin-nav {
-  position: sticky;
-  top: 0;
-  z-index: 50;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -151,8 +157,6 @@ onMounted(() => {
   background: var(--bg-2);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-  /* 注：不使用 backdrop-filter 模糊——背景色 var(--bg-2) 本就不透明，模糊无视觉效果，
-     且粘性定位 + backdrop-filter 在滚动时需持续重绘下方内容，是滚动掉帧的常见元凶 */
 }
 .nav-brand {
   display: flex;
@@ -230,6 +234,7 @@ onMounted(() => {
 [data-theme="light"] .toggle-knob { left: calc(100% - 20px); background: var(--primary); }
 [data-theme="light"] .toggle-knob::before { content: '\2600'; color: #fff; }
 .admin-tabs-wrapper {
+  flex-shrink: 0;
   padding: 0 32px;
   background: var(--bg-2);
   border-bottom: 1px solid var(--border);

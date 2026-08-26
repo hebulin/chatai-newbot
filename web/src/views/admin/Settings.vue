@@ -48,6 +48,41 @@
       </div>
     </div>
 
+    <div class="admin-card" v-loading="healthLoading" style="margin-top:20px;">
+      <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;color:var(--ink);">模型健康检查</h3>
+
+      <div class="security-setting-row">
+        <span class="security-setting-label">定时健康检查</span>
+        <el-switch v-model="healthEnabled" active-text="开启" inactive-text="关闭" />
+      </div>
+
+      <div class="security-setting-row">
+        <span class="security-setting-label">检查间隔</span>
+        <el-input-number v-model="healthIntervalMinutes" :min="1" :max="10080" :step="30" style="width:160px;" />
+        <span style="font-size:13px;color:var(--ink-3);">分钟</span>
+        <el-button type="primary" @click="handleSaveHealth" :loading="healthSaving">保存</el-button>
+      </div>
+
+      <div style="font-size:13px;color:var(--ink-3);margin-bottom:10px;">检查项目（关闭的模型不参与定时连通测试）</div>
+      <div class="health-model-list">
+        <div v-for="m in healthModels" :key="m.id" class="health-model-row">
+          <span class="health-model-name" :title="m.modelId">{{ m.displayName || m.modelId }}</span>
+          <span class="health-model-provider">{{ m.providerName || m.providerId }}</span>
+          <span v-if="!m.enabled" class="health-model-disabled">已禁用</span>
+          <el-switch
+            :model-value="m.healthCheckEnabled !== false"
+            @change="(val) => toggleModelHealth(m, val)"
+          />
+        </div>
+        <div v-if="healthModels.length === 0" style="font-size:13px;color:var(--ink-4);padding:8px 0;">暂无模型</div>
+      </div>
+
+      <div class="settings-note">
+        定时任务按上述间隔对开启的模型执行连通测试（最小请求测连通 + 短生成测速），结果展示在"模型管理"的延迟/速度列。
+        总开关与间隔保存后 1 分钟内生效，无需重启；已禁用的模型无论开关与否都不会被检查；模型管理中的手动"测试连接"不受此开关影响。
+      </div>
+    </div>
+
     <div class="admin-card" v-loading="quotaLoading" style="margin-top:20px;">
       <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;color:var(--ink);">调用限制</h3>
 
@@ -165,7 +200,8 @@
 <script setup>
 import { ref, onMounted, onActivated } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getStorageSettings, getQuotaSettings, setQuotaSettings, getSecuritySettings, setSecuritySettings, getBillingSettings, setBillingSettings, getObservability } from '@/api/settings'
+import { getStorageSettings, getQuotaSettings, setQuotaSettings, getSecuritySettings, setSecuritySettings, getBillingSettings, setBillingSettings, getObservability, getHealthCheckSettings, setHealthCheckSettings } from '@/api/settings'
+import { getModels, updateModel } from '@/api/models'
 
 const loading = ref(false)
 const settings = ref({ useSqlite: true, dbFileSize: '' })
@@ -190,6 +226,56 @@ const botAvatarSvg = ref('')
 const billingLoading = ref(false)
 const billingSaving = ref(false)
 const billing = ref({ displayMode: 'token', defaultCurrency: 'CNY', currencies: [{ code: 'CNY', name: '人民币', symbol: '¥', rate: 1 }] })
+const healthLoading = ref(false)
+const healthSaving = ref(false)
+const healthEnabled = ref(true)
+const healthIntervalMinutes = ref(360)
+const healthModels = ref([])
+
+// 加载模型健康检查设置与检查项目列表；silent 为 true 时不显示 loading 遮罩（keep-alive 激活刷新用）
+async function loadHealth(silent = false) {
+  if (!silent) healthLoading.value = true
+  try {
+    const [sRes, mRes] = await Promise.all([getHealthCheckSettings(), getModels()])
+    if (sRes?.success) {
+      healthEnabled.value = sRes.data?.enabled ?? true
+      healthIntervalMinutes.value = sRes.data?.intervalMinutes ?? 360
+    }
+    if (mRes?.success) healthModels.value = mRes.data || []
+  } finally {
+    healthLoading.value = false
+  }
+}
+
+// 保存健康检查总开关与检查间隔
+async function handleSaveHealth() {
+  healthSaving.value = true
+  try {
+    const res = await setHealthCheckSettings({
+      enabled: healthEnabled.value,
+      intervalMinutes: healthIntervalMinutes.value ?? 360
+    })
+    if (res?.success) {
+      ElMessage.success(res.message || '保存成功')
+    } else {
+      ElMessage.error(res?.message || '保存失败')
+    }
+  } finally {
+    healthSaving.value = false
+  }
+}
+
+// 切换单个模型是否参与健康检查（复用模型更新接口，行内数据含脱敏 Key 时后端自动保留原 Key）
+async function toggleModelHealth(m, val) {
+  const res = await updateModel(m.id, { ...m, healthCheckEnabled: val })
+  if (res?.success) {
+    m.healthCheckEnabled = val
+    ElMessage.success(val ? `已开启「${m.displayName || m.modelId}」健康检查` : `已关闭「${m.displayName || m.modelId}」健康检查`)
+  } else {
+    ElMessage.error(res?.message || '保存失败')
+    await loadHealth(true)
+  }
+}
 
 // 加载存储设置；silent 为 true 时不显示 loading 遮罩（keep-alive 激活刷新用，避免闪烁）
 async function loadSettings(silent = false) {
@@ -210,6 +296,7 @@ onMounted(() => {
   loadQuota()
   loadSecurity()
   loadBilling()
+  loadHealth()
 })
 
 // keep-alive 缓存下再次进入本页时静默刷新各分区设置；
@@ -222,6 +309,7 @@ onActivated(() => {
   loadQuota(true)
   loadSecurity(true)
   loadBilling(true)
+  loadHealth(true)
 })
 
 // 加载当前进程的运行指标；静默刷新时不显示整卡遮罩
@@ -380,4 +468,5 @@ async function handleSaveBilling() {
 .billing-row,.currency-row{display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap}.billing-label{width:150px;font-size:13px;color:var(--ink-3)}.currency-table{padding:14px;border:1px solid var(--line);border-radius:8px;background:var(--paper-2)}.currency-rate-prefix,.currency-code-label{font-size:12px;color:var(--ink-3)}.settings-note{margin-top:16px;font-size:13px;color:var(--ink-3);line-height:1.8;background:var(--paper-2);padding:12px 16px;border-radius:8px;border:1px solid var(--line)}
 .security-setting-row{display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}.security-setting-row-top{align-items:flex-start}.security-setting-label{width:150px;font-size:13px;color:var(--ink-3);flex:0 0 auto}
 .observability-heading{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:16px}.observability-subtitle{font-size:12px;color:var(--ink-3)}.observability-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}.metric-item{display:flex;flex-direction:column;gap:6px;padding:14px;border:1px solid var(--line);border-radius:8px;background:var(--paper-2)}.metric-item span{font-size:12px;color:var(--ink-3)}.metric-item strong{font-size:16px;color:var(--ink);font-weight:600}
+.health-model-list{border:1px solid var(--line);border-radius:8px;background:var(--paper-2);padding:6px 14px;max-height:320px;overflow-y:auto}.health-model-row{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--line)}.health-model-row:last-child{border-bottom:none}.health-model-name{font-size:13px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px}.health-model-provider{font-size:12px;color:var(--ink-3)}.health-model-disabled{font-size:12px;color:#f59e0b}.health-model-row .el-switch{margin-left:auto}
 </style>

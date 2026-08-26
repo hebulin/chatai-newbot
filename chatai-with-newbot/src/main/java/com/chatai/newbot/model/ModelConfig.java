@@ -21,6 +21,7 @@ public class ModelConfig {
     private boolean supportsMultimodal; // 是否支持多模态（图片/视频理解）
     private boolean enabled;        // 是否启用
     private Boolean visibleToAll;    // 是否对所有用户可见，默认true
+    private Boolean healthCheckEnabled; // 是否参与定时健康检查，NULL 视为 true（默认参与）
     private boolean builtIn;        // 是否为系统内置
     private String createdAt;       // 创建时间
     private Integer testLatencyMs;  // 最近一次连通测试延迟（ms），null=未测试

@@ -55,6 +55,16 @@ export function testWebSearch(apiKey) {
   return request.post('/admin/settings/websearch/test', { apiKey }, { timeout: 30000 })
 }
 
+// 获取模型健康检查设置（总开关与检查间隔运行值）
+export function getHealthCheckSettings() {
+  return request.get('/admin/settings/health-check')
+}
+
+// 保存模型健康检查总开关与检查间隔（payload: { enabled, intervalMinutes }，1 分钟内生效）
+export function setHealthCheckSettings(payload) {
+  return request.put('/admin/settings/health-check', payload)
+}
+
 // 获取全部公告列表（含历史公告，admin）
 export function listAnnouncements() {
   return request.get('/admin/announcements')

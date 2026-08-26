@@ -170,6 +170,7 @@ public class SqliteStorageService implements StorageService {
                 "supports_multimodal INTEGER DEFAULT 0," +
                 "enabled INTEGER DEFAULT 1," +
                 "visible_to_all INTEGER DEFAULT 1," +
+                "health_check_enabled INTEGER DEFAULT 1," +
                 "built_in INTEGER DEFAULT 0," +
                 "created_at TEXT," +
                 "test_latency_ms INTEGER," +
@@ -185,6 +186,8 @@ public class SqliteStorageService implements StorageService {
         ensureModelTestColumns();
         // 老数据库补充人民币计费单价列（幂等迁移）
         ensureModelPricingColumns();
+        // 老数据库补充健康检查开关列（幂等迁移，默认参与检查）
+        ensureColumn("t_model_config", "health_check_enabled", "INTEGER DEFAULT 1");
 
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_usage_log (" +
                 "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -1071,6 +1074,9 @@ public class SqliteStorageService implements StorageService {
         // visible_to_all: NULL 视为 true
         int vta = rs.getInt("visible_to_all");
         m.setVisibleToAll(rs.wasNull() ? true : vta == 1);
+        // health_check_enabled: NULL 视为 true（默认参与定时健康检查）
+        int hce = rs.getInt("health_check_enabled");
+        m.setHealthCheckEnabled(rs.wasNull() ? true : hce == 1);
         m.setBuiltIn(rs.getInt("built_in") == 1);
         m.setCreatedAt(rs.getString("created_at"));
         // 连通测试指标（可空，null=未测试）
@@ -1148,13 +1154,14 @@ public class SqliteStorageService implements StorageService {
     /** 插入模型配置记录 */
     private void insertModelConfig(ModelConfig m) {
         jdbcTemplate.update(
-                "INSERT INTO t_model_config (id, provider_id, provider_name, provider_icon, model_id, display_name, api_key, api_url, protocol, thinking_param_type, supports_thinking, supports_multimodal, enabled, visible_to_all, built_in, created_at, test_latency_ms, test_speed, tested_at, input_price_cny, output_price_cny, cached_price_cny, reasoning_price_cny) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO t_model_config (id, provider_id, provider_name, provider_icon, model_id, display_name, api_key, api_url, protocol, thinking_param_type, supports_thinking, supports_multimodal, enabled, visible_to_all, health_check_enabled, built_in, created_at, test_latency_ms, test_speed, tested_at, input_price_cny, output_price_cny, cached_price_cny, reasoning_price_cny) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 m.getId(), m.getProviderId(), m.getProviderName(), m.getProviderIcon(),
                 m.getModelId(), m.getDisplayName(), ApiKeyCrypto.encrypt(m.getApiKey()), m.getApiUrl(),
                 m.getProtocol(), m.getThinkingParamType(),
                 m.isSupportsThinking() ? 1 : 0, m.isSupportsMultimodal() ? 1 : 0,
                 m.isEnabled() ? 1 : 0,
                 m.getVisibleToAll() == null ? 1 : (m.getVisibleToAll() ? 1 : 0),
+                m.getHealthCheckEnabled() == null ? 1 : (m.getHealthCheckEnabled() ? 1 : 0),
                 m.isBuiltIn() ? 1 : 0, m.getCreatedAt(),
                 m.getTestLatencyMs(), m.getTestSpeed(), m.getTestedAt(),
                 nonNegative(m.getInputPriceCny()), nonNegative(m.getOutputPriceCny()),
@@ -1165,13 +1172,14 @@ public class SqliteStorageService implements StorageService {
     public void updateModelConfig(ModelConfig config) {
         fillProviderInfo(config);
         jdbcTemplate.update(
-                "UPDATE t_model_config SET provider_id=?, provider_name=?, provider_icon=?, model_id=?, display_name=?, api_key=?, api_url=?, protocol=?, thinking_param_type=?, supports_thinking=?, supports_multimodal=?, enabled=?, visible_to_all=?, built_in=?, created_at=?, test_latency_ms=?, test_speed=?, tested_at=?, input_price_cny=?, output_price_cny=?, cached_price_cny=?, reasoning_price_cny=? WHERE id=?",
+                "UPDATE t_model_config SET provider_id=?, provider_name=?, provider_icon=?, model_id=?, display_name=?, api_key=?, api_url=?, protocol=?, thinking_param_type=?, supports_thinking=?, supports_multimodal=?, enabled=?, visible_to_all=?, health_check_enabled=?, built_in=?, created_at=?, test_latency_ms=?, test_speed=?, tested_at=?, input_price_cny=?, output_price_cny=?, cached_price_cny=?, reasoning_price_cny=? WHERE id=?",
                 config.getProviderId(), config.getProviderName(), config.getProviderIcon(),
                 config.getModelId(), config.getDisplayName(), ApiKeyCrypto.encrypt(config.getApiKey()), config.getApiUrl(),
                 config.getProtocol(), config.getThinkingParamType(),
                 config.isSupportsThinking() ? 1 : 0, config.isSupportsMultimodal() ? 1 : 0,
                 config.isEnabled() ? 1 : 0,
                 config.getVisibleToAll() == null ? 1 : (config.getVisibleToAll() ? 1 : 0),
+                config.getHealthCheckEnabled() == null ? 1 : (config.getHealthCheckEnabled() ? 1 : 0),
                 config.isBuiltIn() ? 1 : 0, config.getCreatedAt(),
                 config.getTestLatencyMs(), config.getTestSpeed(), config.getTestedAt(),
                 nonNegative(config.getInputPriceCny()), nonNegative(config.getOutputPriceCny()),
