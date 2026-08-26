@@ -2,6 +2,7 @@ package com.chatai.newbot.controller;
 
 import com.chatai.newbot.model.ChatShare;
 import com.chatai.newbot.model.User;
+import com.chatai.newbot.service.ApiKeyCrypto;
 import com.chatai.newbot.service.ChatHistoryService;
 import com.chatai.newbot.service.StorageManager;
 import com.chatai.newbot.service.PasswordHasher;
@@ -44,7 +45,7 @@ public class ShareController {
 
     /**
      * 获取当前用户创建的所有分享记录，附带失效状态判定（口径与后台分享管理一致）
-     * status: valid=有效 expired=已过期 orphaned=源会话已被删除
+     * status: valid=有效 expired=已过期 exhausted=访问次数已用完 orphaned=源会话已被删除
      */
     @GetMapping
     public Map<String, Object> list(HttpServletRequest request) {
@@ -68,6 +69,7 @@ public class ShareController {
             item.put("accessCount", s.getAccessCount());
             item.put("maxViews", s.getMaxViews());
             item.put("passwordProtected", s.getPasswordHash() != null && !s.getPasswordHash().isBlank());
+            item.put("password", sharePasswordPlain(s));
             item.put("sanitized", s.isSanitized());
             item.put("status", resolveShareStatus(s, existingChatIds));
             list.add(item);
@@ -132,6 +134,7 @@ public class ShareController {
             existing.setExpiresAt(expiresAt);
             existing.setSnapshotJson(snapshotJson);
             existing.setPasswordHash(password.isEmpty() ? null : PasswordHasher.hash(password));
+            existing.setPasswordEnc(password.isEmpty() ? null : ApiKeyCrypto.encrypt(password));
             existing.setMaxViews(maxViews);
             existing.setSanitized(sanitized);
             storageManager.updateChatShareDetails(existing);
@@ -148,6 +151,7 @@ public class ShareController {
         share.setExpiresAt(expiresAt);
         share.setSnapshotJson(snapshotJson);
         share.setPasswordHash(password.isEmpty() ? null : PasswordHasher.hash(password));
+        share.setPasswordEnc(password.isEmpty() ? null : ApiKeyCrypto.encrypt(password));
         share.setMaxViews(maxViews);
         share.setSanitized(sanitized);
         result.put("success", true);
@@ -226,6 +230,9 @@ public class ShareController {
 
     /**
      * 校验分享访问规则、原子计数并返回快照。
+     * 校验顺序：存在性 → 过期 → 次数上限 → 密码 → 快照内容。
+     * 链接失效类错误（过期/次数用完）优先于密码校验返回，
+     * 避免设置了密码的分享失效后访客只被困在密码页面而看不到真实原因。
      */
     private Map<String, Object> viewInternal(String id, String password) {
         Map<String, Object> result = new HashMap<>();
@@ -237,10 +244,17 @@ public class ShareController {
             return result;
         }
 
-        // 过期校验：expiresAt 非空且已过期则拒绝访问
+        // 过期校验：expiresAt 非空且已过期则拒绝访问（先于密码校验，确保失效提示可达）
         if (isExpired(share.getExpiresAt())) {
             result.put("success", false);
             result.put("message", "分享链接已过期");
+            return result;
+        }
+
+        // 次数上限预检：不消耗计数，仅用于提前告知上限已用完（先于密码校验）
+        if (share.getMaxViews() > 0 && share.getAccessCount() >= share.getMaxViews()) {
+            result.put("success", false);
+            result.put("message", "分享链接访问次数已用完");
             return result;
         }
 
@@ -259,6 +273,7 @@ public class ShareController {
             return result;
         }
         if (!storageManager.claimChatShareAccess(id)) {
+            // 并发兜底：预检通过但原子申领失败（另一请求刚好消耗完最后一次）
             result.put("success", false);
             result.put("message", "分享链接访问次数已用完");
             return result;
@@ -342,12 +357,83 @@ public class ShareController {
     }
 
     /**
-     * 判定分享状态：已过期 > 源会话已删 > 有效（与后台分享管理口径一致）
+     * 判定分享状态：已过期 > 次数已用完 > 源会话已删 > 有效（与后台分享管理口径一致）
+     * 注意：maxViews<=0 表示不限次数；快照存在的分享不依赖源会话，永不判 orphaned
      */
     private String resolveShareStatus(ChatShare s, Set<String> existingChatIds) {
         if (isExpired(s.getExpiresAt())) return "expired";
+        if (s.getMaxViews() > 0 && s.getAccessCount() >= s.getMaxViews()) return "exhausted";
         if (s.getSnapshotJson() != null && !s.getSnapshotJson().isBlank()) return "valid";
         return existingChatIds.contains(s.getChatId()) ? "valid" : "orphaned";
+    }
+
+    /**
+     * 修改分享的访问密码与次数上限（仅创建者本人）。
+     * 请求体：password=新密码（空串=关闭密码）、maxViews=新上限（0=不限，缺省=保持原值）、resetAccessCount=是否清零已访问次数
+     * 仅校验分享存在性与归属，失效（过期/次数用完）分享同样允许修改（便于恢复可用）。
+     */
+    @PutMapping("/{id}/settings")
+    public Map<String, Object> updateSettings(@PathVariable String id,
+                                              @RequestBody Map<String, Object> body,
+                                              HttpServletRequest request) {
+        User user = (User) request.getAttribute("currentUser");
+        Map<String, Object> result = new HashMap<>();
+
+        ChatShare share = storageManager.getChatShareById(id);
+        if (share == null) {
+            result.put("success", false);
+            result.put("message", "分享不存在");
+            return result;
+        }
+        if (!user.getId().equals(share.getUserId())) {
+            result.put("success", false);
+            result.put("message", "无权修改该分享");
+            return result;
+        }
+
+        String password = body != null && body.get("password") != null
+                ? String.valueOf(body.get("password")).trim() : "";
+        if (password.length() > 100) {
+            result.put("success", false);
+            result.put("message", "分享密码不能超过 100 个字符");
+            return result;
+        }
+        // maxViews 缺省时保持原值；显式传入则覆盖（0=不限）
+        int maxViews = share.getMaxViews();
+        if (body != null && body.get("maxViews") != null) {
+            maxViews = parseNonNegativeInt(body.get("maxViews"), 1_000_000);
+        }
+        boolean resetAccessCount = body != null && Boolean.TRUE.equals(body.get("resetAccessCount"));
+
+        boolean ok = storageManager.updateChatShareSecurity(id,
+                password.isEmpty() ? null : PasswordHasher.hash(password),
+                password.isEmpty() ? null : ApiKeyCrypto.encrypt(password),
+                maxViews, resetAccessCount);
+        if (!ok) {
+            result.put("success", false);
+            result.put("message", "修改失败，请稍后重试");
+            return result;
+        }
+
+        ChatShare updated = storageManager.getChatShareById(id);
+        result.put("success", true);
+        result.put("data", Map.of(
+                "passwordProtected", updated.getPasswordHash() != null && !updated.getPasswordHash().isBlank(),
+                "password", sharePasswordPlain(updated),
+                "accessCount", updated.getAccessCount(),
+                "maxViews", updated.getMaxViews()));
+        return result;
+    }
+
+    /**
+     * 解密分享密码供创建者/管理员查看；旧数据（升级前仅存摘要）无密文时返回空串
+     */
+    static String sharePasswordPlain(ChatShare share) {
+        String enc = share.getPasswordEnc();
+        if (enc == null || enc.isBlank()) return "";
+        String plain = ApiKeyCrypto.decrypt(enc);
+        // 解密失败（密钥丢失等）时 decrypt 原样返回密文，绝不把密文泄露给前端
+        return (plain == null || plain.startsWith("ENC:")) ? "" : plain;
     }
 
     /**

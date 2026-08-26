@@ -22,6 +22,7 @@
         <el-select v-model="filterStatus" placeholder="全部状态" clearable style="width:150px" @change="reloadShares">
           <el-option label="有效" value="valid" />
           <el-option label="已过期" value="expired" />
+          <el-option label="次数用完" value="exhausted" />
           <el-option label="会话已删" value="orphaned" />
         </el-select>
         <el-button @click="filterUser = ''; filterStatus = ''; reloadShares()">重置</el-button>
@@ -46,6 +47,15 @@
             <span :style="row.expiresAt ? '' : 'color:var(--ink-3);'">{{ row.expiresAt || '永久' }}</span>
           </template>
         </el-table-column>
+        <el-table-column label="访问次数" :width="colW.views" align="center" show-overflow-tooltip>
+          <template #default="{ row }">{{ viewsText(row) }}</template>
+        </el-table-column>
+        <el-table-column label="访问密码" :width="colW.password" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.passwordProtected">{{ row.password || '（旧数据不可查看）' }}</span>
+            <span v-else style="color:var(--ink-3);">未设置</span>
+          </template>
+        </el-table-column>
         <el-table-column label="分享链接" :min-width="colW.link" show-overflow-tooltip>
           <template #default="{ row }">
             <span style="font-size:12px;font-family:var(--mono, monospace);">{{ shareUrl(row) }}</span>
@@ -54,6 +64,9 @@
         <el-table-column label="操作" width="140" align="center" fixed="right">
           <template #default="{ row }">
             <el-button-group>
+              <el-button size="small" text title="编辑安全设置" @click="openShareEdit(row)">
+                <el-icon><Edit /></el-icon>
+              </el-button>
               <el-button size="small" text title="复制链接" @click="copyLink(row)">
                 <el-icon><CopyDocument /></el-icon>
               </el-button>
@@ -72,16 +85,25 @@
         :total="total" :total-pages="totalPages"
         @size-change="reloadShares" @page-change="loadShares" />
     </div>
+
+    <ShareSettingsModal
+      v-if="shareEditVisible"
+      :share="shareEditTarget"
+      :admin="true"
+      @close="shareEditVisible = false"
+      @saved="onShareEditSaved"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onActivated } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, CopyDocument, View } from '@element-plus/icons-vue'
+import { Delete, CopyDocument, View, Edit } from '@element-plus/icons-vue'
 import { getAdminShares, batchDeleteShares, deleteShare, deleteInvalidShares } from '@/api/share'
 import { autoColWidth } from '@/composables/useTableAutoWidth'
 import AdminPager from '@/components/admin/AdminPager.vue'
+import ShareSettingsModal from '@/components/chat/ShareSettingsModal.vue'
 
 const loading = ref(false)
 const shares = ref([])
@@ -96,7 +118,7 @@ const total = ref(0)
 const totalPages = ref(1)
 const invalidCount = ref(0)
 
-const STATUS_TEXT = { valid: '有效', expired: '已过期', orphaned: '会话已删' }
+const STATUS_TEXT = { valid: '有效', expired: '已过期', exhausted: '次数用完', orphaned: '会话已删' }
 function statusText(s) {
   return STATUS_TEXT[s] || s
 }
@@ -107,12 +129,19 @@ const colW = computed(() => {
   return {
     title: autoColWidth(list.map(s => s.title), { header: '标题', min: 160 }),
     userName: autoColWidth(list.map(s => s.userName), { header: '分享者', min: 90 }),
-    status: autoColWidth(['已过期', '会话已删', '有效'], { header: '状态', extra: 24 }),
+    status: autoColWidth(['已过期', '会话已删', '次数用完', '有效'], { header: '状态', extra: 24 }),
     createdAt: autoColWidth(list.map(s => s.createdAt), { header: '创建时间' }),
     expiresAt: autoColWidth(list.map(s => s.expiresAt || '永久'), { header: '有效期至' }),
+    views: autoColWidth(list.map(viewsText), { header: '访问次数', extra: 24 }),
+    password: autoColWidth(list.map(s => s.passwordProtected ? (s.password || '（旧数据不可查看）') : '未设置'), { header: '访问密码' }),
     link: autoColWidth(list.map(shareUrl), { header: '分享链接', min: 200 })
   }
 })
+
+// 访问次数展示：已访问 / 上限（0 表示不限）
+function viewsText(row) {
+  return `${row.accessCount ?? 0} / ${row.maxViews > 0 ? row.maxViews : '不限'}`
+}
 
 function shareUrl(row) {
   return location.origin + '/share/' + row.id
@@ -134,6 +163,19 @@ function openLink(row) {
 
 function onSelectionChange(rows) {
   selectedRows.value = rows
+}
+
+// 打开分享安全设置编辑弹窗（管理员可修改任何人的分享）
+const shareEditVisible = ref(false)
+const shareEditTarget = ref(null)
+function openShareEdit(row) {
+  shareEditTarget.value = row
+  shareEditVisible.value = true
+}
+
+// 编辑保存成功后刷新列表
+async function onShareEditSaved() {
+  await loadShares()
 }
 
 // 单条删除（撤销分享）
@@ -160,12 +202,12 @@ async function handleDeleteSelected() {
   } catch { /* cancelled */ }
 }
 
-// 一键清除失效（已过期 + 源会话已删），失效判定与删除均在服务端完成
+// 一键清除失效（已过期 + 次数已用完 + 源会话已删），失效判定与删除均在服务端完成
 async function handleClearInvalid() {
   if (invalidCount.value === 0) return
   try {
     await ElMessageBox.confirm(
-      `共 ${invalidCount.value} 条失效分享（已过期或源会话已删除），确定全部清除吗？`,
+      `共 ${invalidCount.value} 条失效分享（已过期、次数已用完或源会话已删除），确定全部清除吗？`,
       '确认清除失效', { type: 'warning' }
     )
     const res = await deleteInvalidShares()

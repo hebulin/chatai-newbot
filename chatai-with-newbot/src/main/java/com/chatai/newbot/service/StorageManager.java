@@ -1053,6 +1053,20 @@ public class StorageManager implements StorageService {
         sqliteStorage.updateChatShareDetails(share);
     }
 
+    /**
+     * 更新分享安全设置（访问密码/次数上限/计数清零），不影响快照与有效期
+     * @param id 分享码
+     * @param passwordHash 新密码摘要，null=关闭密码
+     * @param passwordEnc 新密码密文，null=关闭密码
+     * @param maxViews 新访问上限，0=不限
+     * @param resetAccessCount true=已访问次数清零
+     * @return true=更新成功
+     */
+    public boolean updateChatShareSecurity(String id, String passwordHash, String passwordEnc,
+                                           int maxViews, boolean resetAccessCount) {
+        return sqliteStorage.updateChatShareSecurity(id, passwordHash, passwordEnc, maxViews, resetAccessCount);
+    }
+
     /** 原子占用一次分享访问额度。 */
     public boolean claimChatShareAccess(String id) {
         return sqliteStorage.claimChatShareAccess(id);

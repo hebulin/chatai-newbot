@@ -222,7 +222,7 @@ public class AdminModelController {
                 }
                 storageService.setSetting("health_check_interval_minutes", String.valueOf(interval));
             }
-            admin.audit(request, "settings.healthCheck", "保存模型健康检查设置");
+            admin.audit(request, "健康检查设置", "保存模型健康检查设置");
             result.put("success", true);
             result.put("message", "健康检查设置已保存");
         } catch (Exception e) {

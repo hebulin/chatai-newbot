@@ -13,17 +13,17 @@
     <div v-if="loading" class="share-status">{{ t('common.loading') }}</div>
 
     <div v-else-if="passwordRequired" class="share-status share-password-panel">
-      <h2>该分享需要访问密码</h2>
-      <label for="share-password">访问密码</label>
+      <h2>{{ t('share.passwordRequired') }}</h2>
+      <label for="share-password">{{ t('share.passwordLabel') }}</label>
       <input id="share-password" v-model="passwordInput" type="password" autocomplete="current-password" class="share-password-input" @keydown.enter="loadShare" />
-      <button type="button" class="share-primary-btn" @click="loadShare">查看分享</button>
-      <p v-if="passwordError" class="share-password-error" aria-live="polite">{{ passwordError }}</p>
+      <button type="button" class="share-primary-btn" @click="loadShare">{{ t('share.viewShare') }}</button>
+      <p v-if="passwordError" class="share-password-error" role="alert" aria-live="polite">{{ passwordError }}</p>
     </div>
 
     <!-- 错误提示 -->
-    <div v-else-if="errorMsg" class="share-status share-error">
-      <p>{{ errorMsg }}</p>
-      <a href="/">{{ t('share.backHome') }}</a>
+    <div v-else-if="errorMsg" class="share-status share-error" role="alert">
+      <p class="share-error-text">{{ errorMsg }}</p>
+      <a class="share-error-link" href="/">{{ t('share.backHome') }}</a>
     </div>
 
     <!-- 分享内容 -->
@@ -86,6 +86,7 @@ import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getSharedChat, cloneSharedChat } from '@/api/share'
+import { ElMessage } from 'element-plus'
 import { renderMarkdown, escapeHtml, processSpecialContent, renderMermaidBlocks, handleMermaidToolbarClick } from '@/composables/useMarkdown'
 import { useTheme } from '@/composables/useTheme'
 import '@/styles/chat.css'
@@ -147,13 +148,25 @@ async function loadShare() {
         containerRef.value.addEventListener('click', handleMermaidToolbarClick)
       }
     } else if (res?.passwordRequired) {
+      // 密码面板内联错误：密码错误 / 链接失效 / 次数超限（后端校验顺序中密码可能先于过期与次数，故用通用兜底文案）
       passwordRequired.value = true
-      passwordError.value = passwordInput.value ? (res.message || '密码错误') : ''
+      if (passwordInput.value) {
+        passwordError.value = res.message === t('share.passwordWrong')
+          ? res.message
+          : t('share.passwordOrLinkInvalid')
+      }
     } else {
+      // 非密码类失败（链接不存在/已过期/次数超限/会话已删除）直接展示错误页
+      passwordRequired.value = false
       errorMsg.value = (res && res.message) || t('share.loadFailed')
     }
   } catch (e) {
-    errorMsg.value = t('share.loadFailedRetry')
+    // 网络层异常：若停留在密码面板则就地提示，否则走错误页，避免面板无任何反馈
+    if (passwordRequired.value) {
+      passwordError.value = t('share.loadFailedRetry')
+    } else {
+      errorMsg.value = t('share.loadFailedRetry')
+    }
   } finally {
     loading.value = false
   }
@@ -165,7 +178,7 @@ async function cloneToMine() {
   try {
     const res = await cloneSharedChat(route.params.id, passwordInput.value)
     if (res?.success) window.location.href = '/'
-    else errorMsg.value = res?.message || '复制失败'
+    else ElMessage.error(res?.message || t('share.loadFailed'))
   } finally {
     cloning.value = false
   }
@@ -243,15 +256,33 @@ onMounted(loadShare)
   padding: 60px 20px;
 }
 
-.share-error a {
-  color: #4f46e5;
+/* 错误提示统一样式：红色醒目 */
+.share-error-text {
+  margin: 0;
+  color: var(--danger, #ef4444);
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.6;
+  text-align: center;
+  max-width: 480px;
 }
+
+.share-error-link {
+  color: var(--danger, #ef4444);
+  font-size: 13px;
+}
+
 .share-password-panel { max-width:420px; margin:80px auto; }
 .share-password-panel label { display:block; margin:18px 0 6px; font-size:13px; }
 .share-password-input { width:100%; padding:10px 12px; border:1px solid var(--border,#333); border-radius:6px; background:var(--paper,#252536); color:var(--ink,#eee); }
 .share-primary-btn { margin-top:12px; padding:9px 16px; border:0; border-radius:6px; background:var(--primary,#6366f1); color:#fff; cursor:pointer; }
 .share-primary-btn:disabled { opacity:.5; cursor:not-allowed; }
-.share-password-error { color:#ef4444; font-size:12px; }
+.share-password-error {
+  margin: 10px 0 0;
+  color: var(--danger, #ef4444);
+  font-size: 13px;
+  font-weight: 600;
+}
 
 .share-meta {
   max-width: 860px;

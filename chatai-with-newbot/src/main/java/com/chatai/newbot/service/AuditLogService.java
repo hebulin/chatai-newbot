@@ -55,7 +55,7 @@ public class AuditLogService {
      * 记录一条审计日志（失败不抛异常，不影响业务）
      * @param userId 操作人用户ID（可为 null，如登录失败）
      * @param username 操作人用户名
-     * @param action 操作类型编码（如 login / user.delete / model.update）
+     * @param action 操作类型（中文名，如 登录成功 / 删除用户 / 更新模型；旧数据可能为英文编码）
      * @param detail 操作详情描述
      * @param ip 操作来源IP
      */

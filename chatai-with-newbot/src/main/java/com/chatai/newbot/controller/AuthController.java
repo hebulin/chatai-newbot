@@ -166,7 +166,7 @@ public class AuthController {
             }
             int remaining = twoFactorAuthService.finishLoginVerification(challengeToken, false);
             loginAttemptService.onFailure(user.getUsername(), ip);
-            auditLogService.record(user.getId(), user.getUsername(), "login.2fa.fail",
+            auditLogService.record(user.getId(), user.getUsername(), "双重验证登录失败",
                     "双重验证失败", ip);
             result.put("success", false);
             result.put("remainingAttempts", remaining);
@@ -478,7 +478,7 @@ public class AuthController {
             return result;
         }
         loginAttemptService.onSuccess(current.getUsername(), getClientIp(request));
-        auditLogService.record(current.getId(), current.getUsername(), "2fa.enable",
+        auditLogService.record(current.getId(), current.getUsername(), "开启双重验证",
                 "开启双重验证", getClientIp(request));
         storageService.removeOtherTokensByUserId(current.getId(), extractToken(request));
         result.put("success", true);
@@ -520,7 +520,7 @@ public class AuthController {
             result.put("message", "用户不存在");
             return result;
         }
-        auditLogService.record(current.getId(), current.getUsername(), "2fa.disable",
+        auditLogService.record(current.getId(), current.getUsername(), "关闭双重验证",
                 "关闭双重验证", getClientIp(request));
         storageService.removeOtherTokensByUserId(current.getId(), extractToken(request));
         result.put("success", true);
@@ -573,7 +573,7 @@ public class AuthController {
             result.put("message", "恢复码保存失败，请重试");
             return result;
         }
-        auditLogService.record(user.getId(), user.getUsername(), "2fa.recovery.regenerate",
+        auditLogService.record(user.getId(), user.getUsername(), "重新生成恢复码",
                 "重新生成恢复码", getClientIp(request));
         result.put("success", true);
         result.put("recoveryCodes", recoveryCodes);

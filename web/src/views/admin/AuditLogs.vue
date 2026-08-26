@@ -67,7 +67,7 @@ const pageSize = ref(20)
 const total = ref(0)
 const totalPages = ref(1)
 
-// 操作类型编码 → 中文名（未知编码原样展示）
+// 操作类型编码 → 中文名（兼容旧数据；新数据 action 已存中文，未知编码原样展示）
 const ACTION_TEXT = {
   'login': '登录成功',
   'login.fail': '登录失败',
@@ -97,7 +97,16 @@ const ACTION_TEXT = {
   'provider.rename': '修改厂商',
   'model.test': '模型连通测试',
   'settings.websearch.test': '联网连通测试',
-  'audit.reset': '重置审计日志'
+  'audit.reset': '重置审计日志',
+  '2fa.enable': '开启双重验证',
+  '2fa.disable': '关闭双重验证',
+  '2fa.recovery.regenerate': '重新生成恢复码',
+  'login.2fa.fail': '双重验证登录失败',
+  'settings.healthCheck': '健康检查设置',
+  'settings.billing': '计费设置',
+  'provider.fetchModels': '获取厂商模型目录',
+  'provider.saveModels': '保存厂商模型目录',
+  'share.settings': '修改分享安全设置'
 }
 function actionText(a) {
   return ACTION_TEXT[a] || a

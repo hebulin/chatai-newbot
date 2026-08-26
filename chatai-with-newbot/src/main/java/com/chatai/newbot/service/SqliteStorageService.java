@@ -281,6 +281,7 @@ public class SqliteStorageService implements StorageService {
                 "expires_at TEXT," +
                 "snapshot_json TEXT," +
                 "password_hash TEXT," +
+                "password_enc TEXT," +
                 "access_count INTEGER DEFAULT 0," +
                 "max_views INTEGER DEFAULT 0," +
                 "sanitized INTEGER DEFAULT 0" +
@@ -568,6 +569,7 @@ public class SqliteStorageService implements StorageService {
     private void ensureChatShareEnhancementColumns() {
         ensureColumn("t_chat_share", "snapshot_json", "TEXT");
         ensureColumn("t_chat_share", "password_hash", "TEXT");
+        ensureColumn("t_chat_share", "password_enc", "TEXT");
         ensureColumn("t_chat_share", "access_count", "INTEGER DEFAULT 0");
         ensureColumn("t_chat_share", "max_views", "INTEGER DEFAULT 0");
         ensureColumn("t_chat_share", "sanitized", "INTEGER DEFAULT 0");
@@ -2286,6 +2288,7 @@ public class SqliteStorageService implements StorageService {
         s.setExpiresAt(rs.getString("expires_at"));
         s.setSnapshotJson(rs.getString("snapshot_json"));
         s.setPasswordHash(rs.getString("password_hash"));
+        s.setPasswordEnc(rs.getString("password_enc"));
         s.setAccessCount(rs.getInt("access_count"));
         s.setMaxViews(rs.getInt("max_views"));
         s.setSanitized(rs.getInt("sanitized") == 1);
@@ -2305,10 +2308,10 @@ public class SqliteStorageService implements StorageService {
             s.setCreatedAt(nowString());
         }
         jdbcTemplate.update(
-                "INSERT INTO t_chat_share (id, chat_id, user_id, user_name, title, created_at, expires_at, snapshot_json, password_hash, access_count, max_views, sanitized) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO t_chat_share (id, chat_id, user_id, user_name, title, created_at, expires_at, snapshot_json, password_hash, password_enc, access_count, max_views, sanitized) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 s.getId(), s.getChatId(), s.getUserId(), s.getUserName(), s.getTitle(), s.getCreatedAt(),
-                s.getExpiresAt(), s.getSnapshotJson(), s.getPasswordHash(), s.getAccessCount(),
-                s.getMaxViews(), s.isSanitized() ? 1 : 0);
+                s.getExpiresAt(), s.getSnapshotJson(), s.getPasswordHash(), s.getPasswordEnc(),
+                s.getAccessCount(), s.getMaxViews(), s.isSanitized() ? 1 : 0);
         return s;
     }
 
@@ -2388,11 +2391,27 @@ public class SqliteStorageService implements StorageService {
      * 更新复用分享码的快照、有效期、密码与访问上限，并重置访问次数。
      */
     public void updateChatShareDetails(ChatShare share) {
-        jdbcTemplate.update("UPDATE t_chat_share SET title=?, expires_at=?, snapshot_json=?, password_hash=?, " +
+        jdbcTemplate.update("UPDATE t_chat_share SET title=?, expires_at=?, snapshot_json=?, password_hash=?, password_enc=?, " +
                         "access_count=0, max_views=?, sanitized=? WHERE id=?",
                 share.getTitle(), share.getExpiresAt(), share.getSnapshotJson(), share.getPasswordHash(),
-                share.getMaxViews(), share.isSanitized() ? 1 : 0, share.getId());
+                share.getPasswordEnc(), share.getMaxViews(), share.isSanitized() ? 1 : 0, share.getId());
         share.setAccessCount(0);
+    }
+
+    /**
+     * 更新分享的安全设置（访问密码/次数上限/已用计数重置），不影响快照与有效期。
+     * @param id 分享码
+     * @param passwordHash 新密码摘要，null=关闭密码
+     * @param passwordEnc 新密码密文（ENC: 前缀），null=关闭密码
+     * @param maxViews 新访问上限，0=不限
+     * @param resetAccessCount true=将已访问次数清零
+     * @return true=更新成功
+     */
+    public boolean updateChatShareSecurity(String id, String passwordHash, String passwordEnc,
+                                           int maxViews, boolean resetAccessCount) {
+        String sql = "UPDATE t_chat_share SET password_hash=?, password_enc=?, max_views=?"
+                + (resetAccessCount ? ", access_count=0" : "") + " WHERE id=?";
+        return jdbcTemplate.update(sql, passwordHash, passwordEnc, maxViews, id) > 0;
     }
 
     /**

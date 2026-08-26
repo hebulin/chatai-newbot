@@ -21,6 +21,9 @@ public class ChatShare {
     /** 可选访问密码的 BCrypt 摘要；绝不返回前端 */
     @JsonIgnore
     private String passwordHash;
+    /** 访问密码的 AES-256-GCM 密文（ENC: 前缀）；仅分享创建者与管理员可见明文 */
+    @JsonIgnore
+    private String passwordEnc;
     /** 已成功读取次数 */
     private int accessCount;
     /** 最大读取次数，0 表示不限 */

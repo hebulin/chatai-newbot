@@ -188,6 +188,9 @@
     <!-- 数据统计弹窗 -->
     <UsageStatsModal v-if="showStats" @close="showStats = false" />
 
+    <!-- 分享会话弹窗 -->
+    <ShareModal v-if="shareChatId" :chat-id="shareChatId" @close="shareChatId = null" />
+
     <!-- 图片灯箱 -->
     <ImageLightbox v-if="lightboxSrc" :src="lightboxSrc" @close="lightboxSrc = null" />
   </div>
@@ -207,8 +210,7 @@ import { useScrollFollow } from '@/composables/useScrollFollow'
 import { useSpeech } from '@/composables/useSpeech'
 import { useTheme } from '@/composables/useTheme'
 import { logout as apiLogout } from '@/api/auth'
-import { saveChatHistory, generateChatTitle, fetchAnnouncement } from '@/api/chat'
-import { createShare } from '@/api/share'
+import { generateChatTitle, fetchAnnouncement } from '@/api/chat'
 import ChatSidebar from '@/components/chat/ChatSidebar.vue'
 import ChatMessages from '@/components/chat/ChatMessages.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
@@ -217,6 +219,7 @@ import SettingsModal from '@/components/chat/SettingsModal.vue'
 import AboutModal from '@/components/chat/AboutModal.vue'
 import UsageStatsModal from '@/components/chat/UsageStatsModal.vue'
 import ImageLightbox from '@/components/chat/ImageLightbox.vue'
+import ShareModal from '@/components/chat/ShareModal.vue'
 
 const router = useRouter()
 const chatStore = useChatStore()
@@ -535,7 +538,8 @@ function handleShareChat() {
   doShare(chatStore.currentChatId)
 }
 
-// 分享指定会话：先选择有效期，再强制同步会话到服务端，最后生成只读分享链接并复制
+// 分享指定会话：校验会话内容后打开统一分享设置弹窗（所有选项在同一弹窗内展示）
+const shareChatId = ref(null)
 async function doShare(chatId) {
   // 懒加载模式：侧边栏分享未加载会话时先拉取正文
   try {
@@ -546,65 +550,7 @@ async function doShare(chatId) {
     ElMessage.info(t('chat.emptyNoShare'))
     return
   }
-  let expireDays = 0
-  let password = ''
-  let maxViews = 0
-  let sanitized = false
-  try {
-    const { value } = await ElMessageBox.prompt(t('chat.sharePrompt'), t('chat.shareTitle'), {
-      confirmButtonText: t('chat.genLink'),
-      cancelButtonText: t('common.cancel'),
-      inputValue: '0',
-      inputValidator: (v) => {
-        if (v === '' || v == null) return true
-        return /^\d+$/.test(String(v).trim()) || t('chat.nonNegInt')
-      }
-    })
-    const n = parseInt(String(value || '0').trim(), 10)
-    expireDays = isNaN(n) ? 0 : n
-  } catch { return }
-  try {
-    const { value } = await ElMessageBox.prompt('可选：设置访问密码，留空表示无需密码', '分享访问密码', {
-      confirmButtonText: '下一步', cancelButtonText: t('common.cancel'), inputType: 'password', inputValue: '',
-      inputValidator: value => String(value || '').length <= 100 || '密码不能超过 100 个字符'
-    })
-    password = String(value || '').trim()
-    const maxResult = await ElMessageBox.prompt('限制该分享最多成功读取多少次，0 表示不限制', '分享访问次数', {
-      confirmButtonText: '下一步', cancelButtonText: t('common.cancel'), inputValue: '0',
-      inputValidator: value => /^\d+$/.test(String(value || '0').trim()) || t('chat.nonNegInt')
-    })
-    maxViews = Math.max(0, parseInt(String(maxResult.value || '0'), 10) || 0)
-  } catch { return }
-  sanitized = await ElMessageBox.confirm('是否在分享快照中自动隐藏常见 API Key、邮箱和手机号？', '敏感信息脱敏', {
-    confirmButtonText: '启用脱敏', cancelButtonText: '保留原文', distinguishCancelAndClose: false
-  }).then(() => true).catch(() => false)
-  try {
-    // 绕过 500ms 防抖，确保服务端已持有最新会话
-    await saveChatHistory({
-      lastChatId: chatStore.currentChatId,
-      chats: chatStore.chats,
-      chatMeta: chatStore.chatMeta,
-      deletedChatIds: chatStore.deletedChatIds
-    })
-    const res = await createShare(chatId, { expireDays, password, maxViews, sanitized })
-    if (res && res.success) {
-      const url = location.origin + '/share/' + res.data.id
-      let copied = false
-      try {
-        await navigator.clipboard.writeText(url)
-        copied = true
-      } catch (e) { /* 非 https 环境剪贴板可能不可用 */ }
-      const expiryTip = res.data.expiresAt ? ('\n' + t('chat.expiryTip', { date: res.data.expiresAt })) : ('\n' + t('chat.permanent'))
-      ElMessageBox.alert(url + expiryTip, t('chat.shareCreatedTitle') + (copied ? t('chat.copiedSuffix') : ''), {
-        confirmButtonText: t('common.gotIt'),
-        dangerouslyUseHTMLString: false
-      })
-    } else {
-      ElMessage.error((res && res.message) || t('chat.shareFailed'))
-    }
-  } catch (e) {
-    // 异常提示已由 request 拦截器统一处理
-  }
+  shareChatId.value = chatId
 }
 
 async function handleNewChat() {

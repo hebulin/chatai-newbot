@@ -4,6 +4,7 @@ import com.chatai.newbot.config.AdminSupport;
 import com.chatai.newbot.model.*;
 import com.chatai.newbot.service.ChatHistoryService;
 import com.chatai.newbot.service.PasswordHasher;
+import com.chatai.newbot.service.ApiKeyCrypto;
 import com.chatai.newbot.service.StorageManager;
 import com.chatai.newbot.service.WebSearchService;
 import com.chatai.newbot.service.AuditLogService;
@@ -643,7 +644,7 @@ public class AdminController {
             result.put("data", billingSettingsService.saveConfig(body));
             result.put("success", true);
             result.put("message", "计费与币种设置已保存");
-            admin.audit(request, "settings.billing", "修改计费展示与币种汇率配置");
+            admin.audit(request, "计费设置", "修改计费展示与币种汇率配置");
         } catch (IllegalArgumentException e) {
             result.put("success", false);
             result.put("message", e.getMessage());
@@ -1044,7 +1045,7 @@ public class AdminController {
         }
         try {
             List<ProviderModel> models = upstreamModelCatalogService.fetch(apiUrl, apiKey);
-            admin.audit(request, "provider.fetchModels", "获取厂商 " + provider.getName()
+            admin.audit(request, "获取厂商模型目录", "获取厂商 " + provider.getName()
                     + " 上游模型目录（" + models.size() + " 个）");
             return Map.of("success", true, "data", models,
                     "endpoint", upstreamModelCatalogService.normalizeModelsEndpoint(apiUrl));
@@ -1078,7 +1079,7 @@ public class AdminController {
             }
         }
         storageService.saveProviderModels(providerId, models);
-        admin.audit(request, "provider.saveModels", "保存厂商 " + provider.getName()
+        admin.audit(request, "保存厂商模型目录", "保存厂商 " + provider.getName()
                 + " 模型目录（" + models.size() + " 个）");
         return Map.of("success", true, "message", "已保存 " + models.size() + " 个模型", "data", models);
     }
@@ -1173,7 +1174,7 @@ public class AdminController {
 
     /**
      * 构建全量分享列表（轻量列 + 失效状态判定，不加载消息正文）
-     * status: valid=有效 expired=已过期 orphaned=源会话已被删除
+     * status: valid=有效 expired=已过期 exhausted=访问次数已用完 orphaned=源会话已被删除
      */
     private List<Map<String, Object>> buildShareList() {
         List<ChatShare> shares = storageService.getAllChatShares();
@@ -1197,6 +1198,10 @@ public class AdminController {
             item.put("title", s.getTitle());
             item.put("createdAt", s.getCreatedAt());
             item.put("expiresAt", s.getExpiresAt());
+            item.put("accessCount", s.getAccessCount());
+            item.put("maxViews", s.getMaxViews());
+            item.put("passwordProtected", s.getPasswordHash() != null && !s.getPasswordHash().isBlank());
+            item.put("password", ShareController.sharePasswordPlain(s));
             item.put("status", resolveShareStatus(s,
                     existingByUser.getOrDefault(s.getUserId(), Collections.emptySet())));
             list.add(item);
@@ -1206,7 +1211,7 @@ public class AdminController {
 
     /**
      * 分页查询全部用户的分享记录（服务端筛选+分页）
-     * 参数：username 分享者模糊匹配；status 状态筛选（valid/expired/orphaned）
+     * 参数：username 分享者模糊匹配；status 状态筛选（valid/expired/exhausted/orphaned）
      * 额外返回 invalidCount（全量失效条数，与筛选条件无关，供「清除失效」按钮用）
      */
     @GetMapping("/shares")
@@ -1299,7 +1304,69 @@ public class AdminController {
     }
 
     /**
-     * 判定分享状态：已过期 > 源会话已删 > 有效（过期口径与 ShareController.view 一致）
+     * 管理员修改任意分享的访问密码与次数上限。
+     * 请求体：password=新密码（空串=关闭密码）、maxViews=新上限（0=不限，缺省=保持原值）、resetAccessCount=是否清零已访问次数
+     */
+    @PutMapping("/shares/{id}/settings")
+    public Map<String, Object> updateShareSettings(@PathVariable String id,
+                                                   @RequestBody Map<String, Object> body,
+                                                   HttpServletRequest request) {
+        admin.requireAdmin(request);
+        Map<String, Object> result = new HashMap<>();
+
+        ChatShare share = storageService.getChatShareById(id);
+        if (share == null) {
+            result.put("success", false);
+            result.put("message", "分享不存在");
+            return result;
+        }
+
+        String password = body != null && body.get("password") != null
+                ? String.valueOf(body.get("password")).trim() : "";
+        if (password.length() > 100) {
+            result.put("success", false);
+            result.put("message", "分享密码不能超过 100 个字符");
+            return result;
+        }
+        int maxViews = share.getMaxViews();
+        if (body != null && body.get("maxViews") != null) {
+            try {
+                maxViews = Math.max(0, Math.min(1_000_000, Integer.parseInt(String.valueOf(body.get("maxViews")))));
+            } catch (NumberFormatException e) {
+                result.put("success", false);
+                result.put("message", "访问次数上限必须是非负整数");
+                return result;
+            }
+        }
+        boolean resetAccessCount = body != null && Boolean.TRUE.equals(body.get("resetAccessCount"));
+
+        boolean ok = storageService.updateChatShareSecurity(id,
+                password.isEmpty() ? null : PasswordHasher.hash(password),
+                password.isEmpty() ? null : ApiKeyCrypto.encrypt(password),
+                maxViews, resetAccessCount);
+        if (!ok) {
+            result.put("success", false);
+            result.put("message", "修改失败，请稍后重试");
+            return result;
+        }
+        admin.audit(request, "修改分享安全设置", "修改分享 " + id + "（" + share.getUserName() + "）安全设置："
+                + (password.isEmpty() ? "关闭密码" : "设置密码") + "，上限 " + (maxViews > 0 ? maxViews : "不限")
+                + (resetAccessCount ? "，计数已清零" : ""));
+
+        ChatShare updated = storageService.getChatShareById(id);
+        result.put("success", true);
+        result.put("data", Map.of(
+                "passwordProtected", updated.getPasswordHash() != null && !updated.getPasswordHash().isBlank(),
+                "password", ShareController.sharePasswordPlain(updated),
+                "accessCount", updated.getAccessCount(),
+                "maxViews", updated.getMaxViews()));
+        return result;
+    }
+
+    /**
+     * 判定分享状态：已过期 > 次数已用完 > 源会话已删 > 有效（过期口径与 ShareController.view 一致）
+     * 注意：maxViews<=0 表示不限次数；管理端列表未做快照判断，快照分享源会话删除后仍标 orphaned
+     * 仅影响展示，实际访问以快照为准
      * @param existingChatIds 该用户名下仍存在的会话ID集合
      */
     private String resolveShareStatus(ChatShare s, Set<String> existingChatIds) {
@@ -1312,6 +1379,7 @@ public class AdminController {
                 // 时间解析失败视为未设置过期
             }
         }
+        if (s.getMaxViews() > 0 && s.getAccessCount() >= s.getMaxViews()) return "exhausted";
         return existingChatIds.contains(s.getChatId()) ? "valid" : "orphaned";
     }
 

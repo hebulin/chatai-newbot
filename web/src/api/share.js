@@ -29,6 +29,11 @@ export function getSharedChat(id, password = '') {
     : request.get(`/share/view/${id}`)
 }
 
+// 修改我的分享安全设置：password=新密码（空串=关闭密码）、maxViews=上限（0=不限）、resetAccessCount=清零已访问次数
+export function updateShareSettings(id, payload) {
+  return request.put(`/share/${id}/settings`, payload)
+}
+
 // 把分享快照复制到当前登录用户的会话列表
 export function cloneSharedChat(id, password = '') {
   return request.post(`/share/${id}/clone`, { password })
@@ -50,4 +55,9 @@ export function batchDeleteShares(ids) {
 // 一键清除全部失效分享（失效判定在服务端完成）
 export function deleteInvalidShares() {
   return request.post('/admin/shares/delete-invalid')
+}
+
+// 管理员修改任意分享的访问密码与次数上限（payload 同 updateShareSettings）
+export function updateAdminShareSettings(id, payload) {
+  return request.put(`/admin/shares/${id}/settings`, payload)
 }

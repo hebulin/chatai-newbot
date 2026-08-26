@@ -104,8 +104,6 @@
                 <div class="settings-form-group"><label for="profile-display-name">显示名称</label><input id="profile-display-name" v-model="profileForm.displayName" class="settings-input" maxlength="80" /></div>
                 <div class="settings-form-group"><label for="profile-email">邮箱</label><input id="profile-email" v-model="profileForm.email" type="email" class="settings-input" maxlength="160" /></div>
                 <div class="settings-form-group"><label for="profile-phone">联系电话</label><input id="profile-phone" v-model="profileForm.phone" type="tel" class="settings-input" maxlength="40" /></div>
-                <div class="settings-form-group"><label for="profile-department">部门</label><input id="profile-department" v-model="profileForm.department" class="settings-input" maxlength="100" /></div>
-                <div class="settings-form-group"><label for="profile-job-title">职位</label><input id="profile-job-title" v-model="profileForm.jobTitle" class="settings-input" maxlength="100" /></div>
               </div>
               <div class="settings-form-group"><label for="profile-bio">个人简介</label><textarea id="profile-bio" v-model="profileForm.bio" class="settings-input settings-textarea" rows="4" maxlength="500"></textarea></div>
               <div class="settings-form-actions">
@@ -302,6 +300,7 @@
                   <el-option value="" :label="t('settings.allStatus')" />
                   <el-option value="valid" :label="t('settings.statusValid')" />
                   <el-option value="expired" :label="t('settings.statusExpired')" />
+                  <el-option value="exhausted" :label="t('settings.statusExhausted')" />
                   <el-option value="orphaned" :label="t('settings.statusOrphaned')" />
                 </el-select>
                 <button class="settings-btn settings-btn-ghost" :disabled="invalidShares.length === 0" @click="handleClearInvalidShares">{{ t('settings.clearInvalid', { n: invalidShares.length }) }}</button>
@@ -319,10 +318,13 @@
                     <div class="share-meta">
                       <span>{{ t('settings.createdAt', { date: s.createdAt || t('common.unknown') }) }}</span>
                       <span>{{ t('settings.expiresAt', { date: s.expiresAt || t('settings.permanent') }) }}</span>
+                      <span>{{ t('settings.shareViews', { used: s.accessCount ?? 0, total: s.maxViews > 0 ? s.maxViews : t('settings.unlimited') }) }}</span>
+                      <span v-if="s.passwordProtected">{{ t('settings.sharePassword') }}: {{ s.password || t('settings.sharePasswordNotViewable') }}</span>
                     </div>
                     <div class="share-link">{{ shareUrl(s) }}</div>
                   </div>
                   <div class="share-actions">
+                    <button class="share-action-btn" :title="t('settings.editShare')" @click="openShareEdit(s)">{{ t('common.edit') }}</button>
                     <button class="share-action-btn" :title="t('settings.copyLink')" @click="copyShareLink(s)">{{ t('common.copy') }}</button>
                     <button class="share-action-btn" :title="t('settings.openLink')" @click="openShareLink(s)">{{ t('common.open') }}</button>
                     <button class="share-action-btn danger" :title="t('settings.deleteShare')" @click="handleDeleteShare(s)">{{ t('common.delete') }}</button>
@@ -371,6 +373,12 @@
         </div>
       </div>
     </div>
+    <ShareSettingsModal
+      v-if="shareEditVisible"
+      :share="shareEditTarget"
+      @close="shareEditVisible = false"
+      @saved="onShareEditSaved"
+    />
   </Teleport>
 </template>
 
@@ -386,6 +394,7 @@ import {
 } from '@/api/auth'
 import { getPromptPresets, savePromptPresets, getUserProfile, saveUserProfile } from '@/api/user'
 import { getMyShares, deleteShare, batchDeleteMyShares } from '@/api/share'
+import ShareSettingsModal from './ShareSettingsModal.vue'
 import { useChatStore } from '@/stores/chat'
 
 const emit = defineEmits(['close', 'logout'])
@@ -397,7 +406,7 @@ const settingsContent = ref(null)
 // 默认展示"通用"页（个人设置弹窗打开后默认进入通用设置，而非修改密码）
 const tab = ref('profile')
 const profileSaving = ref(false)
-const profileForm = ref({ username: '', displayName: '', email: '', phone: '', department: '', jobTitle: '', bio: '', avatarType: 'default', avatarValue: '' })
+const profileForm = ref({ username: '', displayName: '', email: '', phone: '', bio: '', avatarType: 'default', avatarValue: '' })
 const profileAvatarSrc = computed(() => profileForm.value.avatarType === 'svg' && profileForm.value.avatarValue.trim()
   ? 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(profileForm.value.avatarValue.trim()) : '')
 
@@ -933,11 +942,11 @@ function confirmKick(s) {
 
 // 分享状态展示名随语言切换，改为函数式取字典
 function shareStatusText(s) {
-  const map = { valid: t('settings.statusValid'), expired: t('settings.statusExpired'), orphaned: t('settings.statusOrphaned') }
+  const map = { valid: t('settings.statusValid'), expired: t('settings.statusExpired'), exhausted: t('settings.statusExhausted'), orphaned: t('settings.statusOrphaned') }
   return map[s] || s
 }
 
-// 失效分享 = 已过期 + 源会话已删
+// 失效分享 = 已过期 + 次数已用完 + 源会话已删
 const invalidShares = computed(() => shares.value.filter(s => s.status !== 'valid'))
 
 const filteredShares = computed(() =>
@@ -973,6 +982,19 @@ function openShareLink(s) {
   window.open(shareUrl(s), '_blank')
 }
 
+// 打开分享安全设置编辑弹窗
+const shareEditVisible = ref(false)
+const shareEditTarget = ref(null)
+function openShareEdit(s) {
+  shareEditTarget.value = s
+  shareEditVisible.value = true
+}
+
+// 编辑保存成功后刷新分享列表
+async function onShareEditSaved() {
+  await loadShares()
+}
+
 // 单条删除（撤销分享）
 async function handleDeleteShare(s) {
   try {
@@ -997,7 +1019,7 @@ async function handleDeleteSelectedShares() {
   } catch { /* cancelled */ }
 }
 
-// 一键清除失效（已过期 + 源会话已删）
+// 一键清除失效（已过期 + 次数已用完 + 源会话已删）
 async function handleClearInvalidShares() {
   const rows = invalidShares.value
   if (rows.length === 0) return
