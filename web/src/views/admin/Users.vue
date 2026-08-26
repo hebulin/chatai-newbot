@@ -27,14 +27,11 @@
                 @selection-change="onSelectionChange" row-key="id">
         <el-table-column type="selection" width="44" align="center" reserve-selection :selectable="isRowSelectable" />
         <el-table-column prop="username" label="用户名" :width="colW.username" show-overflow-tooltip />
-        <el-table-column prop="displayName" label="显示名称" min-width="120" show-overflow-tooltip>
+        <el-table-column prop="displayName" label="姓名" min-width="120" show-overflow-tooltip>
           <template #default="{ row }">{{ row.displayName || '-' }}</template>
         </el-table-column>
         <el-table-column prop="email" label="邮箱" min-width="180" show-overflow-tooltip>
           <template #default="{ row }">{{ row.email || '-' }}</template>
-        </el-table-column>
-        <el-table-column prop="department" label="部门" min-width="120" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.department || '-' }}</template>
         </el-table-column>
         <el-table-column label="角色" :width="colW.role" align="center">
           <template #default="{ row }">
@@ -118,8 +115,6 @@
         <el-descriptions-item label="状态">{{ detailUser.disabled ? '已禁用' : '正常' }}</el-descriptions-item>
         <el-descriptions-item label="邮箱">{{ detailUser.email || '-' }}</el-descriptions-item>
         <el-descriptions-item label="联系电话">{{ detailUser.phone || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="部门">{{ detailUser.department || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="职位">{{ detailUser.jobTitle || '-' }}</el-descriptions-item>
         <el-descriptions-item label="每日限额">{{ limitText(detailUser) }}</el-descriptions-item>
         <el-descriptions-item label="注册时间">{{ detailUser.createdAt || '-' }}</el-descriptions-item>
         <el-descriptions-item label="最近登录">{{ detailUser.lastLoginAt || '-' }}</el-descriptions-item>
@@ -208,11 +203,9 @@
           <span>头像预览会随头像类型和 SVG 代码实时更新</span>
         </div>
         <div class="user-profile-grid">
-          <el-form-item label="显示名称"><el-input v-model="editForm.displayName" maxlength="80" /></el-form-item>
+          <el-form-item label="姓名"><el-input v-model="editForm.displayName" maxlength="80" /></el-form-item>
           <el-form-item label="邮箱"><el-input v-model="editForm.email" maxlength="160" /></el-form-item>
           <el-form-item label="联系电话"><el-input v-model="editForm.phone" maxlength="40" /></el-form-item>
-          <el-form-item label="部门"><el-input v-model="editForm.department" maxlength="100" /></el-form-item>
-          <el-form-item label="职位"><el-input v-model="editForm.jobTitle" maxlength="100" /></el-form-item>
           <el-form-item label="头像类型">
             <el-select v-model="editForm.avatarType" style="width:100%"><el-option label="默认头像" value="default" /><el-option label="SVG 代码" value="svg" /></el-select>
           </el-form-item>
@@ -377,8 +370,6 @@ function editUser(row) {
     displayName: row.displayName || '',
     email: row.email || '',
     phone: row.phone || '',
-    department: row.department || '',
-    jobTitle: row.jobTitle || '',
     bio: row.bio || '',
     avatarType: row.avatarType || 'default',
     avatarValue: row.avatarValue || ''
@@ -403,8 +394,6 @@ async function saveUser() {
       displayName: editForm.value.displayName,
       email: editForm.value.email,
       phone: editForm.value.phone,
-      department: editForm.value.department,
-      jobTitle: editForm.value.jobTitle,
       bio: editForm.value.bio,
       avatarType: editForm.value.avatarType,
       avatarValue: editForm.value.avatarValue
