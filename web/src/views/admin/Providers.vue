@@ -171,6 +171,16 @@
         <el-table-column type="selection" width="46" />
         <el-table-column prop="id" label="模型 ID" min-width="220" show-overflow-tooltip />
         <el-table-column prop="name" label="模型名称" min-width="180" show-overflow-tooltip />
+        <el-table-column label="思考" width="90" align="center">
+          <template #default="{ row }">
+            <el-switch v-model="row.supportsThinking" inline-prompt active-text="支持" inactive-text="不支持" @click.stop />
+          </template>
+        </el-table-column>
+        <el-table-column label="多模态" width="90" align="center">
+          <template #default="{ row }">
+            <el-switch v-model="row.supportsMultimodal" inline-prompt active-text="支持" inactive-text="不支持" @click.stop />
+          </template>
+        </el-table-column>
       </el-table>
       <template #footer>
         <el-button @click="catalogVisible = false">取消</el-button>
