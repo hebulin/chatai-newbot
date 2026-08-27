@@ -117,6 +117,12 @@
         <el-button type="primary" @click="handleSaveQuota" :loading="quotaSaving">保存</el-button>
       </div>
 
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
+        <span style="font-size:13px;color:var(--ink-3);width:150px;">历史摘要</span>
+        <el-switch v-model="contextSummaryEnabled" />
+        <span style="font-size:13px;color:var(--ink-3);">长对话超出上下文预算时自动生成历史摘要注入（失败时降级为截断，摘要调用按计费规则记录）</span>
+      </div>
+
       <div style="font-size:13px;color:var(--ink-3);line-height:1.8;background:var(--paper-2);padding:12px 16px;border-radius:8px;border:1px solid var(--line);">
         以上限制均仅对非管理员用户生效。每日调用达上限后次日自动恢复；每分钟限流用于防止短时频繁请求；上下文条数限制只保留最近若干条消息发送给模型，可降低 Token 消耗。单个用户可在“用户管理”中单独设置每日限额（优先于全局配额）。
       </div>
@@ -214,6 +220,8 @@ const dailyTokenLimit = ref(0)
 const dailyCostLimitCny = ref(0)
 const rateLimitPerMinute = ref(0)
 const contextMaxMessages = ref(0)
+// 历史摘要开关（长对话超预算时自动生成摘要注入）
+const contextSummaryEnabled = ref(true)
 const securityLoading = ref(false)
 const securitySaving = ref(false)
 const ipBindingEnabled = ref(true)
@@ -352,6 +360,7 @@ async function loadQuota(silent = false) {
       dailyCostLimitCny.value = res.data?.dailyCostLimitCny ?? 0
       rateLimitPerMinute.value = res.data?.rateLimitPerMinute ?? 0
       contextMaxMessages.value = res.data?.contextMaxMessages ?? 0
+      contextSummaryEnabled.value = res.data?.contextSummaryEnabled !== false
     }
   } finally {
     quotaLoading.value = false
@@ -367,7 +376,8 @@ async function handleSaveQuota() {
       dailyTokenLimit: dailyTokenLimit.value ?? 0,
       dailyCostLimitCny: dailyCostLimitCny.value ?? 0,
       rateLimitPerMinute: rateLimitPerMinute.value ?? 0,
-      contextMaxMessages: contextMaxMessages.value ?? 0
+      contextMaxMessages: contextMaxMessages.value ?? 0,
+      contextSummaryEnabled: contextSummaryEnabled.value
     })
     if (res?.success) {
       ElMessage.success({ message: (res.messages || [res.message || '保存成功']).join('；'), duration: 5000, showClose: true })

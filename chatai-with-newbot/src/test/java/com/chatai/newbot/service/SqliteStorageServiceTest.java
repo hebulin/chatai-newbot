@@ -303,15 +303,150 @@ class SqliteStorageServiceTest {
                 "2026-08-25 08:00:00", System.currentTimeMillis());
         ChatHistoryService historyService = new ChatHistoryService(service);
 
-        List<Map<String, Object>> titleResults = historyService.searchChatHistory(userId, "release", 50);
-        assertEquals(1, titleResults.size());
-        assertEquals("title", titleResults.get(0).get("resultType"));
-        assertEquals("chat-search", titleResults.get(0).get("chatId"));
-        assertEquals("项目背景", titleResults.get(0).get("snippet"));
+        Map<String, Object> titleResults = historyService.searchChatHistory(userId, "release", 50, 0, null, null, null, null);
+        List<Map<String, Object>> titleList = results(titleResults);
+        assertEquals(1, titleList.size());
+        assertEquals("title", titleList.get(0).get("resultType"));
+        assertEquals("chat-search", titleList.get(0).get("chatId"));
+        assertEquals("项目背景", titleList.get(0).get("snippet"));
 
-        List<Map<String, Object>> messageResults = historyService.searchChatHistory(userId, "NEEDLE", 50);
-        assertEquals(1, messageResults.size());
-        assertEquals("message", messageResults.get(0).get("resultType"));
-        assertEquals(1, ((Number) messageResults.get(0).get("messageIndex")).intValue());
+        Map<String, Object> messageResults = historyService.searchChatHistory(userId, "NEEDLE", 50, 0, null, null, null, null);
+        List<Map<String, Object>> messageList = results(messageResults);
+        assertEquals(1, messageList.size());
+        assertEquals("message", messageList.get(0).get("resultType"));
+        assertEquals(1, ((Number) messageList.get(0).get("messageIndex")).intValue());
+    }
+
+    /** 搜索结果列表提取辅助 */
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> results(Map<String, Object> searchResult) {
+        return (List<Map<String, Object>>) searchResult.get("results");
+    }
+
+    /** 搜索特殊字符 % 与 _ 按字面量匹配，不产生通配符误命中 */
+    @Test
+    void chatSearch_百分号与下划线按字面量匹配() {
+        String userId = uniqueName("chat_search_special");
+        String messages = "[{\"role\":\"user\",\"content\":\"完成度 100% 达成\"}]";
+        service.upsertChatSession(userId, "chat-pct", messages, "{}",
+                "普通标题", "完成度", "08:00", 1, "2026-08-25 08:00:00", System.currentTimeMillis());
+        // 另一条不含 % 的会话：若 % 被当通配符会误命中
+        service.upsertChatSession(userId, "chat-no-pct",
+                "[{\"role\":\"user\",\"content\":\"完成度百分百达成\"}]", "{}",
+                "普通标题", "完成度", "08:01", 1, "2026-08-25 08:01:00", System.currentTimeMillis());
+        ChatHistoryService historyService = new ChatHistoryService(service);
+
+        List<Map<String, Object>> list = results(historyService.searchChatHistory(userId, "100%", 50, 0, null, null, null, null));
+        assertEquals(1, list.size(), "百分号应按字面量匹配，不误命中其他会话");
+        assertEquals("chat-pct", list.get(0).get("chatId"));
+
+        // 下划线同理
+        service.upsertChatSession(userId, "chat-underscore",
+                "[{\"role\":\"user\",\"content\":\"变量 user_name 的含义\"}]", "{}",
+                "普通标题", "变量", "08:02", 1, "2026-08-25 08:02:00", System.currentTimeMillis());
+        List<Map<String, Object>> underscore = results(historyService.searchChatHistory(userId, "user_name", 50, 0, null, null, null, null));
+        assertEquals(1, underscore.size());
+        assertEquals("chat-underscore", underscore.get(0).get("chatId"));
+    }
+
+    /** 搜索分页：结果超过一页时无重复无遗漏，hasMore 标记正确 */
+    @Test
+    void chatSearch_分页无重复遗漏() {
+        String userId = uniqueName("chat_search_page");
+        ChatHistoryService historyService = new ChatHistoryService(service);
+        // 造 25 个含共同关键字的会话（每会话 1 条命中消息）
+        for (int i = 0; i < 25; i++) {
+            service.upsertChatSession(userId, "page-" + i,
+                    "[{\"role\":\"user\",\"content\":\"分页关键字 needle" + i + "\"}]", "{}",
+                    "分页会话" + i, "分页", "08:00", 1, "2026-08-25 08:00:00",
+                    System.currentTimeMillis() + i);
+        }
+        // 第一页 10 条
+        Map<String, Object> page1 = historyService.searchChatHistory(userId, "needle", 10, 0, null, null, null, null);
+        assertEquals(10, results(page1).size());
+        assertTrue((Boolean) page1.get("hasMore"), "还有更多结果时 hasMore 应为 true");
+        // 第二页 10 条
+        Map<String, Object> page2 = historyService.searchChatHistory(userId, "needle", 10, 10, null, null, null, null);
+        assertEquals(10, results(page2).size());
+        assertTrue((Boolean) page2.get("hasMore"));
+        // 第三页 5 条且无更多
+        Map<String, Object> page3 = historyService.searchChatHistory(userId, "needle", 10, 20, null, null, null, null);
+        assertEquals(5, results(page3).size());
+        assertFalse((Boolean) page3.get("hasMore"), "最后一页 hasMore 应为 false");
+        // 三页合并无重复
+        java.util.Set<String> allIds = new java.util.HashSet<>();
+        results(page1).forEach(r -> allIds.add((String) r.get("chatId")));
+        results(page2).forEach(r -> allIds.add((String) r.get("chatId")));
+        results(page3).forEach(r -> allIds.add((String) r.get("chatId")));
+        assertEquals(25, allIds.size(), "分页结果应无重复无遗漏");
+    }
+
+    /** 跨用户搜索隔离：用户 A 的会话不会被用户 B 搜到 */
+    @Test
+    void chatSearch_跨用户不可见() {
+        String userA = uniqueName("chat_search_a");
+        String userB = uniqueName("chat_search_b");
+        ChatHistoryService historyService = new ChatHistoryService(service);
+        service.upsertChatSession(userA, "a-chat",
+                "[{\"role\":\"user\",\"content\":\"隔离关键字隔离\"}]", "{}",
+                "A的会话", "隔离", "08:00", 1, "2026-08-25 08:00:00", System.currentTimeMillis());
+        List<Map<String, Object>> resultB = results(historyService.searchChatHistory(userB, "隔离关键字", 50, 0, null, null, null, null));
+        assertTrue(resultB.isEmpty(), "用户 B 不应搜到用户 A 的会话");
+        List<Map<String, Object>> resultA = results(historyService.searchChatHistory(userA, "隔离关键字", 50, 0, null, null, null, null));
+        assertEquals(1, resultA.size());
+    }
+
+    /** 搜索筛选：时间范围与文件夹归属过滤 */
+    @Test
+    void chatSearch_时间与文件夹筛选() {
+        String userId = uniqueName("chat_search_filter");
+        ChatHistoryService historyService = new ChatHistoryService(service);
+        long base = 1700000000000L;
+        service.upsertChatSession(userId, "old-chat",
+                "[{\"role\":\"user\",\"content\":\"筛选关键字\"}]", "{}",
+                "旧会话", "筛选", "08:00", 1, "2026-08-25 08:00:00", base);
+        service.upsertChatSession(userId, "new-chat",
+                "[{\"role\":\"user\",\"content\":\"筛选关键字\"}]", "{\"folderId\":\"f-work\"}",
+                "新会话", "筛选", "08:00", 1, "2026-08-25 08:00:00", base + 100000);
+
+        // 时间范围：仅命中新会话
+        List<Map<String, Object>> timeFiltered = results(historyService.searchChatHistory(
+                userId, "筛选关键字", 50, 0, base + 50000, null, null, null));
+        assertEquals(1, timeFiltered.size());
+        assertEquals("new-chat", timeFiltered.get(0).get("chatId"));
+
+        // 文件夹筛选：仅命中 f-work 下的会话
+        List<Map<String, Object>> folderFiltered = results(historyService.searchChatHistory(
+                userId, "筛选关键字", 50, 0, null, null, "f-work", null));
+        assertEquals(1, folderFiltered.size());
+        assertEquals("new-chat", folderFiltered.get(0).get("chatId"));
+
+        // 不存在的文件夹：无结果
+        List<Map<String, Object>> noFolder = results(historyService.searchChatHistory(
+                userId, "筛选关键字", 50, 0, null, null, "f-nonexist", null));
+        assertTrue(noFolder.isEmpty());
+    }
+
+    /** 超过原 200 候选上限时较早会话仍可找到（分页扫描不受固定候选上限截断） */
+    @Test
+    void chatSearch_超过原候选上限仍能命中最早会话() {
+        String userId = uniqueName("chat_search_deep");
+        ChatHistoryService historyService = new ChatHistoryService(service);
+        long base = 1700000000000L;
+        // 最早的会话包含唯一关键字，随后 250 个较新会话包含共同关键字
+        service.upsertChatSession(userId, "oldest-chat",
+                "[{\"role\":\"user\",\"content\":\"远古关键字 needle-oldest\"}]", "{}",
+                "最早会话", "远古", "08:00", 1, "2026-08-25 08:00:00", base);
+        for (int i = 0; i < 250; i++) {
+            service.upsertChatSession(userId, "newer-" + i,
+                    "[{\"role\":\"user\",\"content\":\"普通内容 needle-oldest " + i + "\"}]", "{}",
+                    "较新会话" + i, "较新", "08:00", 1, "2026-08-25 08:00:00", base + 1000 + i);
+        }
+        // 关键字同时命中 251 个会话：最早会话按更新时间排最后，旧实现候选上限 200 会漏掉
+        List<Map<String, Object>> result = results(historyService.searchChatHistory(
+                userId, "needle-oldest", 300, 0, null, null, null, null));
+        assertEquals(251, result.size(), "全部 251 个命中会话都应返回，不受固定候选上限截断");
+        assertTrue(result.stream().anyMatch(r -> "oldest-chat".equals(r.get("chatId"))),
+                "最早（最旧）的会话必须可被搜到");
     }
 }

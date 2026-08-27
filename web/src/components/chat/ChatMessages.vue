@@ -30,6 +30,24 @@
               <span v-html="formatUserContent(msg.content, idx)"></span>
             </template>
             <template v-else>
+              <!-- 重新生成中的目标消息：原位渲染新版本的流式内容（原回答保留为旧版本，不新增气泡） -->
+              <template v-if="isRegenTarget(idx)">
+                <div v-if="streamingMsg.reasoning_content" class="thinking-block" :class="{ collapsed: streamingMsg.thinkingTime }">
+                  <div class="thinking-header" @click="toggleThinking($event)">
+                    <span class="arrow">▼</span>
+                    {{ streamingMsg.thinkingTime ? t('messages.thoughtFor', { s: streamingMsg.thinkingTime }) : t('messages.thinking') }}
+                  </div>
+                  <div
+                    :ref="setStreamThinkingRef"
+                    class="thinking-body"
+                    data-streaming-thinking
+                    v-html="renderMd(streamingMsg.reasoning_content)"
+                  ></div>
+                </div>
+                <div v-if="streamingMsg.content" class="answer-content" v-html="renderMd(streamingMsg.content)"></div>
+                <div v-if="!streamingMsg.content && !streamingMsg.reasoning_content" class="loading-dots"><span></span><span></span><span></span></div>
+              </template>
+              <template v-else>
               <!-- 错误气泡：请求失败/流内错误统一样式，与正常回答区分 -->
               <div v-if="msg.isError" class="error-bubble">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
@@ -47,14 +65,38 @@
                 </div>
                 <div v-if="msg.content" class="answer-content" v-html="renderMd(msg.content, idx)"></div>
               </template>
+              </template>
             </template>
           </div>
         </div>
         <!-- footer -->
-        <div class="msg-footer">
+        <div class="msg-footer" v-if="!isRegenTarget(idx)">
           <template v-if="msg.role === 'assistant'">
             <span v-if="msg.modelName" class="msg-model-name">{{ msg.modelName }}</span>
             <span v-if="msg.completionTokens" class="msg-token-info">Token≈{{ fmtToken(msg.completionTokens) }}</span>
+            <!-- 回答版本切换器：仅在存在多个版本时显示；点击数字展开版本列表（比较入口） -->
+            <span v-if="!msg.isError && versionInfoOf(idx)" class="msg-version-switcher">
+              <button class="version-nav-btn" :disabled="versionInfoOf(idx).currentIndex <= 0"
+                      @click="switchVersion(idx, -1)" :title="t('messages.prevVersion')" :aria-label="t('messages.prevVersion')">‹</button>
+              <button class="version-indicator" @click="toggleVersionList(idx)"
+                      :title="t('messages.versionList')" :aria-expanded="versionListIdx === idx">
+                {{ versionInfoOf(idx).currentIndex + 1 }}/{{ versionInfoOf(idx).total }}
+              </button>
+              <button class="version-nav-btn" :disabled="versionInfoOf(idx).currentIndex >= versionInfoOf(idx).total - 1"
+                      @click="switchVersion(idx, 1)" :title="t('messages.nextVersion')" :aria-label="t('messages.nextVersion')">›</button>
+              <!-- 版本列表浮层：展示各版本生成时间/模型/状态，点击切换 -->
+              <div v-if="versionListIdx === idx" class="version-list-pop" role="menu">
+                <div v-for="(v, vi) in versionInfoOf(idx).list" :key="v.versionId"
+                     class="version-list-item" :class="{ current: vi === versionInfoOf(idx).currentIndex }"
+                     role="menuitem" tabindex="0"
+                     @click="pickVersion(idx, v.versionId)" @keydown.enter="pickVersion(idx, v.versionId)">
+                  <span class="version-list-no">{{ vi + 1 }}</span>
+                  <span class="version-list-time">{{ v.time || '-' }}</span>
+                  <span class="version-list-model">{{ v.modelName || '' }}</span>
+                  <span v-if="v.status && v.status !== 'done'" class="version-list-status">{{ t('messages.versionInterrupted') }}</span>
+                </div>
+              </div>
+            </span>
           </template>
           <template v-else>
             <span v-if="msg.promptTokens" class="msg-token-info">Token≈{{ fmtToken(msg.promptTokens) }}</span>
@@ -62,7 +104,9 @@
           <button class="footer-copy-btn" @click="$emit('copy', msg.content)" :title="t('messages.copy')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
           </button>
-          <button v-if="!isStreaming" class="footer-copy-btn" @click="$emit('branch', idx)" title="从此处创建会话分支" aria-label="从此处创建会话分支">
+          <!-- 创建分支：仅 AI 消息显示。分支点须落在回答消息上，保证新分支以完整"问+答"成对记录结尾；
+               若允许在用户消息处分支，新分支会以未回答的提问结尾，破坏成对结构 -->
+          <button v-if="msg.role === 'assistant' && !isStreaming" class="footer-copy-btn" @click="$emit('branch', idx)" title="从此处创建会话分支" aria-label="从此处创建会话分支">
             <svg width="14" height="14" viewBox="0 0 1024 1024" fill="currentColor"><path d="M647.836735 181.812245a114.938776 114.938776 0 1 1 229.877551 0 114.938776 114.938776 0 0 1-229.877551 0zM762.77551 129.567347a52.244898 52.244898 0 1 0 0 104.489796 52.244898 52.244898 0 0 0 0-104.489796zM188.081633 181.812245a114.938776 114.938776 0 1 1 229.877551 0 114.938776 114.938776 0 0 1-229.877551 0zM303.020408 129.567347a52.244898 52.244898 0 1 0 0 104.489796 52.244898 52.244898 0 0 0 0-104.489796zM188.081633 850.546939a114.938776 114.938776 0 1 1 229.877551 0 114.938776 114.938776 0 0 1-229.877551 0z m114.938775-52.244898a52.244898 52.244898 0 1 0 0 104.489796 52.244898 52.244898 0 0 0 0-104.489796z"/><path d="M334.367347 234.057143v358.149224c7.523265-5.955918 15.36-11.514776 23.384816-16.718367 45.599347-29.737796 105.325714-54.16751 161.394939-77.113469l1.880816-0.752327c58.305306-23.865469 112.702694-46.247184 152.805878-72.348735 40.646531-26.498612 57.594776-50.949224 57.594775-76.277551v-114.938775h62.693878v114.938775c0 58.284408-40.521143 99.11902-86.078694 128.794123-45.599347 29.716898-105.325714 54.146612-161.394939 77.092571l-1.880816 0.773225c-58.305306 23.844571-112.702694 46.226286-152.805878 72.348734-40.646531 26.477714-57.594776 50.949224-57.594775 76.277551v62.693878h-62.693878V234.057143h62.693878z"/></svg>
           </button>
           <!-- AI 消息：TTS 朗读（播放中显示停止、暂停中显示继续，状态由全局 useSpeech 驱动） -->
@@ -83,8 +127,8 @@
       </div>
     </template>
 
-    <!-- 流式消息 -->
-    <div v-if="isStreaming && streamingMsg" class="msg-wrapper assistant">
+    <!-- 流式消息（重新生成模式下不追加到末尾，而是在目标消息原位渲染） -->
+    <div v-if="isStreaming && streamingMsg && regenIdx < 0" class="msg-wrapper assistant">
       <div class="msg-row">
         <div class="msg-avatar ai-av">
           <img :src="aiAvatarSrc" style="width:100%;height:100%;border-radius:10px;object-fit:cover" />
@@ -95,7 +139,12 @@
               <span class="arrow">▼</span>
               {{ streamingMsg.thinkingTime ? t('messages.thoughtFor', { s: streamingMsg.thinkingTime }) : t('messages.thinking') }}
             </div>
-            <div class="thinking-body" ref="streamThinkingRef" @scroll="onThinkingScroll" v-html="renderMd(streamingMsg.reasoning_content)"></div>
+            <div
+              :ref="setStreamThinkingRef"
+              class="thinking-body"
+              data-streaming-thinking
+              v-html="renderMd(streamingMsg.reasoning_content)"
+            ></div>
           </div>
           <div v-if="streamingMsg.content" class="answer-content" v-html="renderMd(streamingMsg.content)"></div>
           <div v-if="!streamingMsg.content && !streamingMsg.reasoning_content" class="loading-dots"><span></span><span></span><span></span></div>
@@ -110,18 +159,23 @@
 </template>
 
 <script setup>
-import { computed, onUpdated, onMounted, onUnmounted, ref, watch, nextTick } from 'vue'
+import { computed, onUpdated, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { renderMarkdown, escapeHtml, renderMermaidBlocks, processSpecialContent, handleMermaidToolbarClick } from '@/composables/useMarkdown'
+import { renderMermaidBlocks, processSpecialContent, handleMermaidToolbarClick } from '@/composables/useMarkdown'
+import { useScrollFollow } from '@/composables/useScrollFollow'
+import { useSearchHighlight } from '@/composables/useSearchHighlight'
 import { useSpeech } from '@/composables/useSpeech'
 import { useTheme } from '@/composables/useTheme'
 import { useModelsStore } from '@/stores/models'
+import { useChatStore } from '@/stores/chat'
 import { getUserProfile } from '@/api/user'
 
 const props = defineProps({
   messages: { type: Array, default: () => [] },
   isStreaming: { type: Boolean, default: false },
   streamingMsg: { type: Object, default: null },
+  // 重新生成中的目标消息绝对下标（>=0 时流式内容在该消息原位渲染）；-1 表示非重新生成模式
+  regenIdx: { type: Number, default: -1 },
   // 列表起始下标：因长会话渲染窗口裁剪，此处 idx 为展示列表下标，
   // 需加上 startIndex 换算回完整会话消息列表的绝对下标，用于生成全局唯一 DOM ID
   startIndex: { type: Number, default: 0 },
@@ -132,9 +186,49 @@ const props = defineProps({
   searchActiveIndex: { type: Number, default: -1 }
 })
 
-const emit = defineEmits(['copy', 'lightbox', 'regenerate', 'edit-resend', 'preview-html', 'branch'])
+const emit = defineEmits(['copy', 'lightbox', 'regenerate', 'edit-resend', 'preview-html', 'branch', 'select-version'])
 
 const { t } = useI18n()
+
+// ===== 回答版本切换 =====
+// 版本信息由 chat store 统一维护（versions 数组 + currentVersionId），
+// 这里仅做展示与切换事件转发；版本列表浮层同一时刻只展开一个
+const chatStore = useChatStore()
+const versionListIdx = ref(-1)
+
+// 读取指定展示下标消息的版本视图信息（仅多版本时返回，单版本/非 AI 消息不显示切换器）
+function versionInfoOf(displayIdx) {
+  const chatId = chatStore.currentChatId
+  if (!chatId) return null
+  const info = chatStore.getMessageVersions(chatId, absIdxOf(displayIdx))
+  if (!info || info.total < 2) return null
+  return info
+}
+
+// 上一版本/下一版本快捷切换
+function switchVersion(displayIdx, delta) {
+  const info = versionInfoOf(displayIdx)
+  if (!info) return
+  const next = info.currentIndex + delta
+  if (next < 0 || next >= info.total) return
+  emitVersionSelect(displayIdx, info.list[next].versionId)
+}
+
+// 展开/收起版本列表浮层
+function toggleVersionList(displayIdx) {
+  versionListIdx.value = versionListIdx.value === displayIdx ? -1 : displayIdx
+}
+
+// 从版本列表选择版本
+function pickVersion(displayIdx, versionId) {
+  versionListIdx.value = -1
+  emitVersionSelect(displayIdx, versionId)
+}
+
+// 转发版本选择事件（携带完整列表绝对下标），由 ChatView 决定直接切换或确认后创建分支
+function emitVersionSelect(displayIdx, versionId) {
+  emit('select-version', { absIdx: absIdxOf(displayIdx), versionId })
+}
 
 const { getTheme } = useTheme()
 const modelsStore = useModelsStore()
@@ -148,62 +242,17 @@ const aiAvatarSrc = computed(() => modelsStore.botAvatarSvg
   ? 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(modelsStore.botAvatarSvg)
   : (getTheme() === 'dark' ? '/icons/AIBot_ss.svg' : '/icons/AIBot.svg'))
 
-// 渲染 Markdown；仅历史消息正文传入展示下标并叠加搜索高亮，思考过程与流式消息保持原样
-function renderMd(text, displayIdx = -1) {
-  return highlightRenderedHtml(renderMarkdown(text), displayIdx)
-}
+// 渲染 Markdown 与搜索高亮（离屏 HTML 标记，不触碰已挂载 DOM；详见 useSearchHighlight 注释）
+const { renderMd, formatUserContent } = useSearchHighlight(() => ({
+  keyword: props.searchKeyword,
+  activeIndex: props.searchActiveIndex,
+  startIndex: props.startIndex
+}))
 
 // 生成消息的 DOM 锚点 ID：用于锚点跳转与会话内搜索定位时 getElementById
 // 形如 msg-anchor-3（3 为完整消息列表中的绝对下标，跨渲染窗口保持稳定）
 function msgDomId(displayIdx) {
   return 'msg-anchor-' + (displayIdx + props.startIndex)
-}
-
-// 在离屏 HTML 中包裹关键词，返回给 v-html 一次性渲染，避免直接修改 Vue 已挂载 DOM
-function highlightRenderedHtml(html, displayIdx) {
-  if (displayIdx < 0) return html
-  const keyword = props.searchKeyword.trim()
-  if (!keyword) return html
-  const keywordLower = keyword.toLowerCase()
-  const root = document.createElement('div')
-  root.innerHTML = html
-  const isActive = displayIdx + props.startIndex === props.searchActiveIndex
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-  const textNodes = []
-  let node = walker.nextNode()
-  while (node) {
-    const parent = node.parentElement
-    // 代码、公式、图表与操作按钮有独立的后处理流程，搜索标记不介入其内部 DOM
-    const skip = parent?.closest('script, style, svg, button, input, textarea, pre, code, .code-header, .mermaid-container, .katex')
-    if (!skip && node.textContent?.toLowerCase().includes(keywordLower)) textNodes.push(node)
-    node = walker.nextNode()
-  }
-
-  textNodes.forEach(textNode => {
-    const text = textNode.textContent || ''
-    const lower = text.toLowerCase()
-    const fragment = document.createDocumentFragment()
-    let cursor = 0
-    let matchAt = lower.indexOf(keywordLower)
-    while (matchAt !== -1) {
-      if (matchAt > cursor) fragment.append(document.createTextNode(text.slice(cursor, matchAt)))
-      const mark = document.createElement('mark')
-      mark.className = `msg-search-match${isActive ? ' msg-search-match-active' : ''}`
-      mark.textContent = text.slice(matchAt, matchAt + keyword.length)
-      fragment.append(mark)
-      cursor = matchAt + keyword.length
-      matchAt = lower.indexOf(keywordLower, cursor)
-    }
-    if (cursor < text.length) fragment.append(document.createTextNode(text.slice(cursor)))
-    textNode.replaceWith(fragment)
-  })
-  return root.innerHTML
-}
-
-// 转义用户/错误消息并按需叠加离屏搜索高亮，确保 v-html 输入安全
-function formatUserContent(content, displayIdx = -1) {
-  const html = escapeHtml(content).replace(/\n/g, '<br>')
-  return highlightRenderedHtml(html, displayIdx)
 }
 
 function fmtToken(n) {
@@ -226,6 +275,11 @@ const speechSupported = speech.speechSupported
 function absIdxOf(displayIdx) {
   return displayIdx + props.startIndex
 }
+// 当前展示下标是否为"重新生成"的目标消息（该位置原位渲染流式新版本内容）
+function isRegenTarget(displayIdx) {
+  return props.isStreaming && props.streamingMsg && props.regenIdx >= 0
+    && absIdxOf(displayIdx) === props.regenIdx
+}
 function speechIsCurrent(displayIdx) {
   return speech.isCurrent(absIdxOf(displayIdx))
 }
@@ -245,31 +299,28 @@ function speechBtnTitle(displayIdx) {
 }
 
 // ===== 思考内容区域自动滚动跟随（逻辑与聊天窗口一致：可随时手动打断，滚回底部时恢复跟随） =====
-const streamThinkingRef = ref(null)
-const THINKING_NEAR_BOTTOM = 30
-let thinkingAutoFollow = true
-let thinkingProgrammatic = false
+const streamThinkingRef = shallowRef(null)
+const thinkingScrollFollow = useScrollFollow(streamThinkingRef, { nearBottomThreshold: 30 })
 
-function onThinkingScroll(e) {
-  if (thinkingProgrammatic) return
-  const el = e.target
-  // 手动滚动：离底即暂停跟随，回到底部附近则恢复
-  thinkingAutoFollow = el.scrollHeight - el.scrollTop - el.clientHeight < THINKING_NEAR_BOTTOM
+// 绑定当前唯一的流式思考滚动容器；使用函数 ref 避免重新生成分支位于 v-for 内时模板 ref 变成数组
+function setStreamThinkingRef(el) {
+  streamThinkingRef.value = el || null
 }
 
-// 思考内容增长时跟随到底部
-watch(() => props.streamingMsg && props.streamingMsg.reasoning_content, () => {
-  nextTick(() => {
-    const el = streamThinkingRef.value
-    if (!el || !thinkingAutoFollow) return
-    thinkingProgrammatic = true
-    el.scrollTop = el.scrollHeight
-    requestAnimationFrame(() => { thinkingProgrammatic = false })
-  })
-})
+// 条件渲染创建或替换思考容器时重新绑定与正文相同的滚动控制器；消失时解绑旧节点
+watch(streamThinkingRef, (el) => {
+  if (!el) {
+    thinkingScrollFollow.unbindEvents()
+    return
+  }
+  thinkingScrollFollow.init()
+  thinkingScrollFollow.scrollToBottomImmediate()
+}, { flush: 'post' })
 
-// 新一轮流式开始时重置为自动跟随
-watch(() => props.isStreaming, (v) => { if (v) thinkingAutoFollow = true })
+// 思考内容增长时在 DOM 更新后请求贴底；MutationObserver 继续覆盖 Markdown 后处理产生的高度变化
+watch(() => props.streamingMsg && props.streamingMsg.reasoning_content, () => {
+  thinkingScrollFollow.requestScrollToBottom()
+}, { flush: 'post' })
 
 // DOM 更新后：代码高亮 + mermaid 渲染（流式高频更新时 mermaid 渲染防抖 300ms，避免频繁 parse/排队）
 let renderTimer = null
@@ -365,5 +416,97 @@ onUnmounted(() => {
   border-radius: 10px;
   background: var(--surface-2, rgba(0,0,0,.04));
   white-space: nowrap;
+}
+
+/* 回答版本切换器（‹ n/m › + 版本列表浮层） */
+.msg-version-switcher {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+}
+.version-nav-btn,
+.version-indicator {
+  border: none;
+  background: transparent;
+  color: var(--fg-3, #999);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  line-height: 1.5;
+}
+.version-nav-btn:hover:not(:disabled),
+.version-indicator:hover {
+  color: var(--fg, #333);
+  background: var(--bg-2, rgba(0,0,0,.05));
+}
+.version-nav-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.version-indicator {
+  font-variant-numeric: tabular-nums;
+}
+.version-list-pop {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 240px;
+  max-width: 320px;
+  background: var(--bg-2, #fff);
+  border: 1px solid var(--border, rgba(0,0,0,.1));
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0,0,0,.14);
+  padding: 5px;
+  z-index: 60;
+}
+.version-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--fg-2, #666);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.version-list-item:hover,
+.version-list-item:focus-visible {
+  background: var(--bg, rgba(0,0,0,.04));
+  outline: none;
+}
+.version-list-item.current {
+  color: var(--primary, #4285f4);
+  font-weight: 600;
+}
+.version-list-no {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--bg, rgba(0,0,0,.06));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+}
+.version-list-time {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.version-list-model {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.version-list-status {
+  flex-shrink: 0;
+  color: #e6a23c;
+  font-size: 11px;
 }
 </style>

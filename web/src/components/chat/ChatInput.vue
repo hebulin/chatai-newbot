@@ -162,7 +162,7 @@ const props = defineProps({
   supportsMultimodal: { type: Boolean, default: false }
 })
 
-const emit = defineEmits(['send', 'stop', 'clear-context'])
+const emit = defineEmits(['send', 'stop', 'clear-context', 'thinking-change'])
 
 const { t } = useI18n()
 
@@ -173,6 +173,10 @@ const { getTheme } = useTheme()
 const inputText = ref('')
 const deepThinking = ref(false)
 const webSearch = ref(false)
+
+// 深度思考开关变更时实时同步给父组件：重新生成/编辑重发/继续生成等不经过 send 的流程
+// 直接读取父组件的 isDeepThinking，若仅在发送时同步会导致这些流程沿用上次发送的旧开关状态
+watch(deepThinking, (v) => emit('thinking-change', v))
 const pendingImages = ref([])
 const pendingFiles = ref([]) // 待发送附件文档：{ name, url, chars, uploading }
 const pasteWarning = ref('')

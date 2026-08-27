@@ -94,6 +94,7 @@
             :messages="displayMessages"
             :is-streaming="streamChat.isStreaming.value"
             :streaming-msg="streamingMsg"
+            :regen-idx="regenStreamingIdx"
             :start-index="hiddenCount"
             :highlight-id="highlightMsgId"
             :search-keyword="msgSearchKeyword"
@@ -103,6 +104,7 @@
             @regenerate="handleRegenerate"
             @edit-resend="handleEditResend"
             @branch="handleCreateBranch"
+            @select-version="handleSelectVersion"
             @preview-html="handlePreviewHtml"
           />
         </div>
@@ -150,6 +152,31 @@
           <!-- 当前会话同步提示（同步超过 3 秒才显示） -->
           <div v-if="syncTipVisible" class="chat-sync-tip">{{ t('chat.syncTip') }}</div>
 
+          <!-- 上下文占用估算：与后端 ContextBudgetService 同一保守估算规则（CJK 1 token/字，ASCII 1/4 字符） -->
+          <div v-if="contextUsageInfo" class="context-usage-tip" :class="{ warn: contextUsageInfo.ratio > 0.85 }">
+            {{ contextUsageInfo.text }}
+          </div>
+
+          <!-- 中断回答操作条：明确提供“重新生成”与“基于已生成内容继续”（新请求） -->
+          <div v-if="lastInterruptedMsg" class="interrupted-action-bar" role="alert">
+            <span class="interrupted-action-text">{{ t('chat.interruptedBanner') }}</span>
+            <button class="interrupted-action-btn" @click="handleRegenerateInterrupted">{{ t('chat.regenerate') }}</button>
+            <button class="interrupted-action-btn primary" @click="handleContinueGeneration">{{ t('chat.continueGeneration') }}</button>
+          </div>
+
+          <!-- 多端同步冲突横幅：冲突会话的本地与服务端版本均已保留，由用户明确选择 -->
+          <div v-if="chatStore.syncConflicts.length" class="sync-conflict-bar" role="alert">
+            <div class="sync-conflict-head">{{ t('chat.syncConflictTip', { n: chatStore.syncConflicts.length }) }}</div>
+            <div v-for="c in chatStore.syncConflicts" :key="c.chatId" class="sync-conflict-item">
+              <span class="sync-conflict-name">
+                {{ c.title || chatStore.chatTitle(c.chatId) }}
+                <em v-if="c.reason === 'deleted'">{{ t('chat.syncConflictDeleted') }}</em>
+              </span>
+              <button class="sync-conflict-btn" @click="resolveConflict(c.chatId, false)">{{ t('chat.syncUseServer') }}</button>
+              <button class="sync-conflict-btn primary" @click="resolveConflict(c.chatId, true)">{{ t('chat.syncUseLocal') }}</button>
+            </div>
+          </div>
+
           <!-- 输入区 -->
           <ChatInput
             ref="chatInputRef"
@@ -159,6 +186,7 @@
             @send="handleSend"
             @stop="handleStop"
             @clear-context="handleClearContext"
+            @thinking-change="handleThinkingChange"
           />
         </div>
 
@@ -327,6 +355,15 @@ const isWebSearch = ref(false)
 
 const streamingMsg = ref(null)
 const syncTipVisible = ref(false)
+// 重新生成中的目标消息绝对下标（>=0 时流式内容在该消息原位渲染，而非列表末尾追加新气泡）
+const regenStreamingIdx = ref(-1)
+
+// 解决多端同步冲突：useLocal=true 保留本地版本（已删会话走显式恢复），false 采用服务端版本
+async function resolveConflict(chatId, useLocal) {
+  chatStore.resolveSyncConflict(chatId, useLocal)
+  await nextTick()
+  scrollFollow.requestScrollToBottom()
+}
 // 当前需高亮的用户消息锚点 ID（点击侧边栏锚点跳转后置位，动画结束后清除）
 const highlightMsgId = ref('')
 // 高亮清除定时器：重复跳转同一消息时取消上一次清除，避免新高亮被提前清掉
@@ -348,11 +385,13 @@ const displayMessages = computed(() => {
   return hiddenCount.value > 0 ? msgs.slice(hiddenCount.value) : msgs
 })
 
-// 切换/新建会话时重置渲染窗口与高亮标记
+// 切换/新建会话时重置渲染窗口与高亮标记，并检查目标会话是否有可恢复的流式草稿
 watch(() => chatStore.currentChatId, () => {
   visibleCount.value = RENDER_WINDOW
   highlightMsgId.value = ''
+  regenStreamingIdx.value = -1
   if (highlightClearTimer) { clearTimeout(highlightClearTimer); highlightClearTimer = null }
+  restoreStreamDraftIfAny()
 })
 
 // ===== 空会话引导：无任何消息且未在流式输出时展示欢迎内容与建议提问 =====
@@ -409,6 +448,8 @@ onMounted(async () => {
   }
   await chatStore.loadFromServer()
   await modelsStore.loadModels()
+  // 恢复当前会话可能存在的流式草稿（断网/刷新中断的部分回答）
+  restoreStreamDraftIfAny()
   await nextTick()
   scrollFollow.init()
   // 刷新/首次进入时定位到当前会话最新消息：init 只绑定事件不主动滚动，
@@ -845,7 +886,10 @@ async function syncCurrentChatBeforeSend(chatId, pendingCount) {
 }
 
 // 基于当前会话已有消息历史发起流式请求（发送/重新生成/编辑重发共用）
-async function startStream(chatId, deepThinking) {
+// options.regenTarget={chatId, msgIdx}：重新生成模式——请求上下文排除该条旧回答，
+// 结果作为该消息的新版本写入（成功成为当前版本，中断/失败保留部分结果但不覆盖当前版本）
+async function startStream(chatId, deepThinking, options = {}) {
+  const regenTarget = options.regenTarget || null
   // 只携带最后一个“清除上下文”分隔线之后的消息
   const source = chatStore.chats[chatId] || []
   let startIdx = 0
@@ -853,7 +897,11 @@ async function startStream(chatId, deepThinking) {
     if (source[i].role === 'divider') { startIdx = i + 1; break }
   }
   const messages = source.slice(startIdx)
-    .filter(m => m.role === 'user' || (m.role === 'assistant' && !m.isError && m.content && m.content.trim()))
+    .filter((m, i) => {
+      // 重新生成模式：排除待重新生成的那条旧回答，不把它带入上下文
+      if (regenTarget && startIdx + i === regenTarget.msgIdx) return false
+      return m.role === 'user' || (m.role === 'assistant' && !m.isError && m.content && m.content.trim())
+    })
     .map(m => {
       const base = { role: m.role, content: m.content }
       if (m.role === 'user') {
@@ -866,6 +914,7 @@ async function startStream(chatId, deepThinking) {
 
   const requestBody = {
     modelConfigId: modelsStore.currentModelId,
+    chatId, // 会话ID：服务端上下文摘要缓存键（旧服务端忽略该字段）
     messages,
     stream: true,
     deepThinking,
@@ -876,8 +925,11 @@ async function startStream(chatId, deepThinking) {
   }
 
   streamingMsg.value = { role: 'assistant', content: '', reasoning_content: '', time: null, modelName: modelsStore.currentModelName }
+  // 重新生成模式：流式内容在原消息位置渲染（原回答作为旧版本保留，新版本流式覆盖原位显示）
+  regenStreamingIdx.value = regenTarget ? regenTarget.msgIdx : -1
 
   await streamChat.send(requestBody, {
+    chatId,
     onUpdate: (data) => {
       streamingMsg.value = {
         role: 'assistant',
@@ -890,24 +942,62 @@ async function startStream(chatId, deepThinking) {
       scrollFollow.syncScrollToBottom()
     },
     onDone: (data) => {
-      // 无任何正文且存在错误：只落一条错误气泡，不保存空回答
+      // 统一结算：保证每次请求只落一次消息；保留已收到的正文/思考/用量
       const hasContent = !!(data.content && data.content.trim())
-      if (!hasContent && !data.reasoning_content && data.error) {
-        chatStore.addMessage(chatId, makeErrorMsg(data.error))
+      const hasReasoning = !!(data.reasoning_content && data.reasoning_content.trim())
+      const interrupted = data.status && data.status !== 'done'
+      // 重新生成模式：结果写入版本历史，不新增消息、不覆盖旧版本
+      if (regenTarget) {
+        if (hasContent || hasReasoning) {
+          // 成功完成才设为当前版本；中断/失败保留部分结果为新版本但不切换
+          chatStore.addMessageVersion(regenTarget.chatId, regenTarget.msgIdx, {
+            content: hasContent ? data.content : '',
+            reasoning_content: data.reasoning_content || undefined,
+            thinkingTime: data.thinkingTime,
+            modelName: modelsStore.currentModelName,
+            time: nowStr(),
+            status: data.status || 'done',
+            usage: data.usage ? {
+              promptTokens: data.usage.prompt_tokens || 0,
+              completionTokens: data.usage.completion_tokens || 0,
+              reasoningTokens: data.usage.completion_tokens_details?.reasoning_tokens || 0,
+              cachedTokens: data.usage.prompt_tokens_details?.cached_tokens || 0
+            } : undefined
+          }, !interrupted)
+        }
+        if (interrupted) {
+          ElMessage.warning(data.error || t('chat.answerInterrupted'))
+        }
         streamingMsg.value = null
+        regenStreamingIdx.value = -1
         nextTick(() => {
           scrollFollow.syncScrollToBottom()
           scrollFollow.updateNavButtons()
         })
         return
       }
-      const content = data.content || (data.interrupted ? t('chat.answerInterrupted') : t('chat.noAnswer'))
+      // 完全无内容且存在错误：只落一条错误气泡，不保存空回答
+      if (!hasContent && !hasReasoning && data.error) {
+        chatStore.addMessage(chatId, makeErrorMsg(data.error))
+        streamingMsg.value = null
+        regenStreamingIdx.value = -1
+        nextTick(() => {
+          scrollFollow.syncScrollToBottom()
+          scrollFollow.updateNavButtons()
+        })
+        return
+      }
+      const content = hasContent
+        ? data.content
+        : (interrupted ? t('chat.answerInterrupted') : t('chat.noAnswer'))
       const msg = {
         role: 'assistant',
         content,
         reasoning_content: data.reasoning_content || undefined,
         time: nowStr(),
-        interrupted: data.interrupted || undefined,
+        interrupted: interrupted || undefined,
+        // 记录中断终态（stopped/offline/timeout/failed），供"继续生成"入口与同步识别
+        status: interrupted ? data.status : undefined,
         modelName: modelsStore.currentModelName,
         thinkingTime: data.thinkingTime
       }
@@ -937,11 +1027,12 @@ async function startStream(chatId, deepThinking) {
         }
       }
       chatStore.addMessage(chatId, msg)
-      // 流中途出错（已有部分正文/思考）：正文后追加一条错误气泡
-      if (data.error) {
+      // 流中途出错（已有部分正文/思考）：正文后追加一条错误气泡说明中断原因
+      if (data.error && interrupted) {
         chatStore.addMessage(chatId, makeErrorMsg(data.error))
       }
       streamingMsg.value = null
+      regenStreamingIdx.value = -1
       // 首次问答完成后尝试 AI 自动命名（未手动命名时）
       maybeGenerateTitle(chatId)
       nextTick(() => {
@@ -950,8 +1041,17 @@ async function startStream(chatId, deepThinking) {
       })
     },
     onError: (err) => {
+      // 重新生成模式请求级失败：原回答保留不受影响，仅提示，不往会话末尾追加错误气泡
+      if (regenTarget) {
+        ElMessage.error(err.message || t('chat.unknownError'))
+        streamingMsg.value = null
+        regenStreamingIdx.value = -1
+        return
+      }
+      // 请求级失败且无有效内容时：统一结算已把可用部分保留在草稿，此处落错误气泡
       chatStore.addMessage(chatId, makeErrorMsg(err.message))
       streamingMsg.value = null
+      regenStreamingIdx.value = -1
     }
   })
 }
@@ -969,6 +1069,138 @@ function makeErrorMsg(text) {
 
 function handleStop() {
   streamChat.stop()
+}
+
+// 输入框深度思考开关变更时同步本地状态：重新生成/编辑重发/继续生成均读取 isDeepThinking，
+// 仅在发送时同步会导致这些不经过输入框发送的流程沿用旧开关状态（切换思考按钮不生效）
+function handleThinkingChange(v) {
+  isDeepThinking.value = !!v
+}
+
+// ===== 上下文占用估算（前端实时提示，与后端保守估算规则一致） =====
+// 估算规则：CJK 1 token/字、ASCII 1 token/4 字符、其他 1 token/2 字符，
+// 每条消息 +4 结构开销、图片 1100/张、附件按截断上限 500/个，整体 ×1.15 安全系数
+function estimateTokensJs(text) {
+  if (!text) return 0
+  let cjk = 0, ascii = 0, other = 0
+  for (const ch of String(text)) {
+    const code = ch.codePointAt(0)
+    if (code < 128) ascii++
+    else if ((code >= 0x3000 && code <= 0x9FFF) || (code >= 0xFF00 && code <= 0xFFEF)) cjk++
+    else other++
+  }
+  return Math.ceil((cjk + ascii / 4 + other / 2) * 1.15)
+}
+
+// 当前会话上下文占用估算信息（超出 85% 容量时警示色）
+const contextUsageInfo = computed(() => {
+  const msgs = chatStore.currentMessages
+  if (!msgs.length || !chatStore.isChatHistoryLoaded) return null
+  const window_ = modelsStore.currentModelContextWindow
+  let used = 0
+  // 与后端一致：仅计最后一个“清除上下文”分隔线之后的消息（倒序累计，遇分隔线停止）
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i]
+    if (m.role === 'divider') break
+    if (m.role !== 'user' && m.role !== 'assistant') continue
+    used += 4 + estimateTokensJs(m.content)
+    if (m.images) used += m.images.length * 1100
+    if (m.attachments) used += m.attachments.length * 500
+  }
+  const ratio = used / window_
+  const fmtK = (n) => n >= 1000 ? (n / 1000).toFixed(1) + 'K' : String(n)
+  return {
+    ratio,
+    text: t('chat.contextUsage', { used: fmtK(used), total: fmtK(window_) })
+  }
+})
+
+// ===== 流式草稿恢复与“继续生成”入口 =====
+// 刷新/重新打开页面后，若当前会话存在未结算的流式草稿，恢复为一条已标记中断的回答消息；
+// 中断的回答提供“重新生成”与“基于已生成内容继续”两个明确操作（继续生成是新的请求，不伪称断点续传）
+const draftRestoreTip = ref(null)
+
+// 检查并恢复当前会话的流式草稿（切换会话/刷新后调用）
+function restoreStreamDraftIfAny() {
+  draftRestoreTip.value = null
+  const chatId = chatStore.currentChatId
+  if (!chatId) return
+  const draft = streamChat.loadDraft(chatId)
+  if (!draft) return
+  const hasContent = !!(draft.content && String(draft.content).trim())
+  const hasReasoning = !!(draft.reasoning_content && String(draft.reasoning_content).trim())
+  if (!hasContent && !hasReasoning) {
+    streamChat.clearDraft(chatId)
+    return
+  }
+  const msgs = chatStore.chats[chatId] || []
+  const last = msgs[msgs.length - 1]
+  // 幂等：若最后一条已是该草稿对应的中断消息（内容一致），不重复恢复
+  if (last && last.role === 'assistant' && last.interrupted && last.content === draft.content) {
+    streamChat.clearDraft(chatId)
+    return
+  }
+  const restored = {
+    role: 'assistant',
+    content: draft.content || t('chat.answerInterrupted'),
+    reasoning_content: draft.reasoning_content || undefined,
+    thinkingTime: draft.thinkingTime || undefined,
+    time: nowStr(),
+    interrupted: true,
+    status: draft.status && draft.status !== 'streaming' ? draft.status : 'offline',
+    modelName: modelsStore.currentModelName
+  }
+  if (draft.usage) {
+    restored.promptTokens = draft.usage.prompt_tokens || 0
+    restored.completionTokens = draft.usage.completion_tokens || 0
+    restored.reasoningTokens = draft.usage.completion_tokens_details?.reasoning_tokens || 0
+    restored.cachedTokens = draft.usage.prompt_tokens_details?.cached_tokens || 0
+  }
+  chatStore.addMessage(chatId, restored)
+  streamChat.clearDraft(chatId)
+  draftRestoreTip.value = { chatId }
+  nextTick(() => scrollFollow.scrollToBottomImmediate())
+}
+
+// 当前会话最后一条 assistant 消息是否为中断状态（决定“继续生成”操作条是否展示）
+const lastInterruptedMsg = computed(() => {
+  const msgs = chatStore.currentMessages
+  if (!msgs.length || streamChat.isStreaming.value) return null
+  const last = msgs[msgs.length - 1]
+  return (last && last.role === 'assistant' && last.interrupted) ? last : null
+})
+
+// 重新生成中断的回答：不删除中断消息，走版本历史流程为其生成新版本（含二次确认）
+async function handleRegenerateInterrupted() {
+  const chatId = chatStore.currentChatId
+  if (!chatId) return
+  const msgs = chatStore.chats[chatId] || []
+  // 从末尾定位最后一条中断的 assistant 消息（允许跳过其后的错误气泡）
+  let idx = msgs.length - 1
+  while (idx >= 0) {
+    const m = msgs[idx]
+    if (m.role === 'assistant' && m.interrupted) break
+    if (m.role === 'assistant' && m.isError) { idx--; continue }
+    return
+  }
+  if (idx < 0) return
+  await handleRegenerate(idx - hiddenCount.value)
+}
+
+// 基于已生成内容继续：把中断的部分回答保留，追加一条“请继续”用户消息发起新请求。
+// 明确这是新请求（上游流无法断点续传），不是恢复原来的流。
+async function handleContinueGeneration() {
+  const chatId = chatStore.currentChatId
+  if (!chatId || streamChat.isStreaming.value) return
+  const continueText = t('chat.continuePrompt')
+  chatStore.addMessage(chatId, { role: 'user', content: continueText, time: nowStr() })
+  chatStore.suspendSync()
+  try {
+    nextTick(() => scrollFollow.scrollToBottomImmediate())
+    await startStream(chatId, isDeepThinking.value)
+  } finally {
+    chatStore.resumeSync()
+  }
 }
 
 // 清除上下文：二次确认后向当前会话插入一条分隔线，后续对话不再携带此前历史
@@ -1015,7 +1247,7 @@ async function maybeGenerateTitle(chatId) {
   } catch { /* 失败则保留默认标题 */ }
 }
 
-// 重新生成：删除最后一条 AI 回复，在当前会话基于其前的历史重新请求（执行前需用户二次确认）
+// 重新生成：在当前会话内为该回答生成一个新版本（原回答保留在版本历史中，执行前需用户二次确认）
 async function handleRegenerate(idx) {
   // 渲染窗口裁剪后，子组件回传的是展示列表下标，需换算回完整列表下标
   idx += hiddenCount.value
@@ -1027,7 +1259,11 @@ async function handleRegenerate(idx) {
     ElMessage.warning(t('chat.pickModel'))
     return
   }
-  // 二次确认：重新生成会删除最后一条回答且不可恢复
+  const chatId = chatStore.currentChatId
+  const msgs = chatStore.chats[chatId] || []
+  const target = msgs[idx]
+  if (!target || target.role !== 'assistant') return
+  // 二次确认：生成新版本，原回答保留在版本历史中可切换查看
   try {
     await ElMessageBox.confirm(t('chat.regenerateConfirm'), t('chat.regenerateTitle'), {
       confirmButtonText: t('common.confirm'),
@@ -1035,16 +1271,52 @@ async function handleRegenerate(idx) {
       type: 'warning'
     })
   } catch { return }
-  const chatId = chatStore.currentChatId
-  // 仅在当前会话内截断到最后一条 AI 回复之前，不创建分支
-  chatStore.truncateMessages(chatId, idx)
-  // 挂起全量同步，bot 输出结束后再统一上传（截断+新回复一次性同步）
+  // 挂起全量同步，新版本写入后再统一上传
   chatStore.suspendSync()
   try {
     nextTick(() => scrollFollow.scrollToBottomImmediate())
-    await startStream(chatId, isDeepThinking.value)
+    await startStream(chatId, isDeepThinking.value, { regenTarget: { chatId, msgIdx: idx } })
   } finally {
     chatStore.resumeSync()
+  }
+}
+
+// 版本切换：仅查看历史版本直接切换；若该回答之后已有后续消息，
+// 静默切换会让后续对话脱节——提供“仅切换查看”与“从该版本创建分支继续”两种明确选择
+async function handleSelectVersion({ absIdx, versionId }) {
+  const chatId = chatStore.currentChatId
+  if (!chatId) return
+  const msgs = chatStore.chats[chatId] || []
+  if (!msgs[absIdx]) return
+  const hasFollowUps = absIdx < msgs.length - 1
+  if (!hasFollowUps) {
+    chatStore.selectMessageVersion(chatId, absIdx, versionId)
+    return
+  }
+  // 该回答之后已有对话：切换版本会影响后续上下文，需用户明确选择
+  let action = 'cancel'
+  try {
+    await ElMessageBox.confirm(t('chat.versionSwitchConfirm'), t('chat.versionSwitchTitle'), {
+      confirmButtonText: t('chat.versionSwitchBranch'),
+      cancelButtonText: t('chat.versionSwitchViewOnly'),
+      distinguishCancelAndClose: true,
+      type: 'warning'
+    })
+    action = 'branch'
+  } catch (e) {
+    if (e === 'cancel') action = 'view'
+  }
+  if (action === 'branch') {
+    // 从选定版本创建分支：复制到该消息为止的内容并切换目标版本，后续对话在分支中进行
+    const branchId = chatStore.createBranch(chatId, absIdx)
+    if (branchId) {
+      chatStore.selectMessageVersion(branchId, absIdx, versionId)
+      nextTick(() => scrollFollow.scrollToBottomImmediate())
+    }
+    return
+  }
+  if (action === 'view') {
+    chatStore.selectMessageVersion(chatId, absIdx, versionId)
   }
 }
 

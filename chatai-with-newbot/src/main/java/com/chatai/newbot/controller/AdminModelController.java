@@ -361,6 +361,7 @@ public class AdminModelController {
         copy.setOutputPriceCny(m.getOutputPriceCny());
         copy.setCachedPriceCny(m.getCachedPriceCny());
         copy.setReasoningPriceCny(m.getReasoningPriceCny());
+        copy.setContextWindow(m.getContextWindow());
         return copy;
     }
 }

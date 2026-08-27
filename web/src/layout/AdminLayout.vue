@@ -34,6 +34,7 @@
         <el-tab-pane label="联网配置" name="websearch" />
         <el-tab-pane label="公告管理" name="announcements" />
         <el-tab-pane label="审计日志" name="audit-logs" />
+        <el-tab-pane label="备份恢复" name="backups" />
       </el-tabs>
     </div>
 
@@ -104,7 +105,8 @@ function prefetchAdminViews() {
     () => import('@/views/admin/Settings.vue'),
     () => import('@/views/admin/WebSearch.vue'),
     () => import('@/views/admin/Announcements.vue'),
-    () => import('@/views/admin/AuditLogs.vue')
+    () => import('@/views/admin/AuditLogs.vue'),
+    () => import('@/views/admin/Backups.vue')
   ]
   // 优先用浏览器空闲回调逐个加载（不抢占首屏渲染）；不支持时退化为错峰 setTimeout
   const schedule = window.requestIdleCallback

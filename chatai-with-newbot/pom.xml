@@ -4,7 +4,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.chatai</groupId>
     <artifactId>chatai-with-newbot</artifactId>
-    <version>2.1.0.26.0821</version>
+    <version>2.2.0.26.0826</version>
     <name>chatai-with-newbot</name>
     <description>chatai-with-newbot</description>
     <properties>

@@ -35,4 +35,6 @@ public class ModelConfig {
     private double cachedPriceCny;
     /** 推理 Token 单价，单位：人民币元/百万 Token；为 0 时回退到输出单价 */
     private double reasoningPriceCny;
+    /** 模型上下文容量（Token 数）；0/null 表示未设置，按默认 32000 处理 */
+    private Integer contextWindow;
 }

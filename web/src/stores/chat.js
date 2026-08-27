@@ -14,6 +14,22 @@ export const useChatStore = defineStore('chat', () => {
   const searchKeyword = ref('')
   // 会话文件夹定义列表：[{ id, name, collapsed }]；会话归属存于各会话 meta.folderId
   const folders = ref([])
+  // 每会话的服务端版本号（乐观锁基准）：来自摘要/单会话加载/保存响应
+  const chatVersions = ref({})
+  // 文件夹定义的服务端版本号（文件夹并发修改的乐观锁基准）
+  const foldersVersion = ref(0)
+  // 待处理的同步冲突列表：[{ chatId, reason, serverVersion, title, localMessages, localMeta, serverMessages, serverMeta }]
+  // reason: version=双端并发修改, deleted=其他端已删除, folders=文件夹定义冲突
+  const syncConflicts = ref([])
+
+  // 脏数据跟踪：仅同步实际变化的会话/元信息/文件夹，避免上传所有已加载会话的陈旧副本。
+  // 值为"标脏后将要成为的 localRevision"（localRevision+1）：上传成功仅清除标脏 revision
+  // 不超过本次快照 revision 的会话，防止上传期间的并发新修改被误清导致漏同步
+  const dirtyChatIds = new Map()
+  const dirtyMetaIds = new Map()
+  let foldersDirty = false
+  // 显式恢复的会话ID（备份导入/冲突解决选择保留本地）：下次同步时声明 restore，绕过删除保护
+  const pendingRestoreIds = new Set()
 
   let syncTimer = null
   // 全量同步挂起标记：发送消息→bot 输出期间不执行全量上传，结束后统一补一次，
@@ -39,14 +55,50 @@ export const useChatStore = defineStore('chat', () => {
     return `chatai-chat-recovery:${username}`
   }
 
-  // 生成当前增量保存载荷
+  // 生成稳定的消息标识（幂等去重键）：重试上传时服务端/本地合并据此识别同一条消息
+  function genMsgId() {
+    return 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10)
+  }
+
+  // 标记会话内容已变更（消息增删改），下次同步上传该会话正文与元信息
+  function markChatDirty(id) {
+    if (!id) return
+    dirtyChatIds.set(id, localRevision + 1)
+    dirtyMetaIds.delete(id)
+  }
+
+  // 标记会话仅元信息变更（置顶/重命名/文件夹归属等），下次同步仅上传元信息
+  function markMetaDirty(id) {
+    if (!id || dirtyChatIds.has(id)) return
+    dirtyMetaIds.set(id, localRevision + 1)
+  }
+
+  // 生成当前增量保存载荷：仅包含脏会话/脏元信息，携带每会话基准版本供服务端乐观锁校验
   function buildSyncPayload() {
+    const chatsPayload = {}
+    const metaPayload = {}
+    dirtyChatIds.forEach((rev, id) => {
+      if (chats.value[id] !== undefined) chatsPayload[id] = chats.value[id]
+      if (chatMeta.value[id]) metaPayload[id] = chatMeta.value[id]
+    })
+    dirtyMetaIds.forEach((rev, id) => {
+      if (!dirtyChatIds.has(id) && chatMeta.value[id]) metaPayload[id] = chatMeta.value[id]
+    })
+    const baseVersions = {}
+    Object.keys(chatsPayload).forEach(id => { baseVersions[id] = chatVersions.value[id] || 0 })
+    Object.keys(metaPayload).forEach(id => {
+      if (baseVersions[id] === undefined) baseVersions[id] = chatVersions.value[id] || 0
+    })
     return {
       lastChatId: currentChatId.value,
-      chats: chats.value,
-      chatMeta: chatMeta.value,
-      deletedChatIds: deletedChatIds.value,
-      folders: folders.value
+      chats: chatsPayload,
+      chatMeta: metaPayload,
+      deletedChatIds: [...deletedChatIds.value],
+      folders: foldersDirty ? folders.value : undefined,
+      baseVersions,
+      baseFoldersVersion: foldersVersion.value,
+      restoreChatIds: [...pendingRestoreIds],
+      baseVersion: remoteVersion
     }
   }
 
@@ -72,11 +124,19 @@ export const useChatStore = defineStore('chat', () => {
         const serverCount = Number(chatSummaries.value[id]?.count || 0)
         if (Array.isArray(messages) && (messages.length >= serverCount || !chatSummaries.value[id])) {
           chats.value[id] = messages
+          // 恢复的草稿属于未上传变更，标记为脏数据等待重新同步
+          dirtyChatIds.set(id, localRevision + 1)
         }
       })
       chatMeta.value = { ...chatMeta.value, ...(payload.chatMeta || {}) }
+      Object.keys(payload.chatMeta || {}).forEach(id => {
+        if (!dirtyChatIds.has(id)) dirtyMetaIds.set(id, localRevision + 1)
+      })
       deletedChatIds.value = [...new Set([...deletedChatIds.value, ...(payload.deletedChatIds || [])])]
-      if (Array.isArray(payload.folders)) folders.value = normalizeFolders(payload.folders)
+      if (Array.isArray(payload.folders)) {
+        folders.value = normalizeFolders(payload.folders)
+        foldersDirty = true
+      }
       if (payload.lastChatId) currentChatId.value = payload.lastChatId
       localRevision = Number(draft.revision || 1)
       flushPending = true
@@ -239,10 +299,18 @@ export const useChatStore = defineStore('chat', () => {
         chatMeta.value = data.chatMeta || {}
         deletedChatIds.value = data.deletedChatIds || []
         folders.value = normalizeFolders(data.folders)
+        foldersVersion.value = data.foldersVersion || 0
         remoteVersion = data.version || 0
         const map = {}
-        ;(data.summaries || []).forEach(s => { if (s && s.id) map[s.id] = s })
+        const versions = {}
+        ;(data.summaries || []).forEach(s => {
+          if (s && s.id) {
+            map[s.id] = s
+            versions[s.id] = s.version || 0
+          }
+        })
         chatSummaries.value = map
+        chatVersions.value = versions
         restoreRecoveryDraft()
         const lastId = data.lastChatId
         const recoveredId = currentChatId.value
@@ -283,6 +351,7 @@ export const useChatStore = defineStore('chat', () => {
       throw new Error((res && res.message) || '加载会话内容失败')
     }
     chats.value[id] = Array.isArray(res.messages) ? res.messages : []
+    if (res.version) chatVersions.value[id] = res.version
     if (res.meta && typeof res.meta === 'object') {
       chatMeta.value[id] = { ...res.meta }
     }
@@ -331,8 +400,39 @@ export const useChatStore = defineStore('chat', () => {
         syncRetryDelay = 0
         savedRevision = revision
         if (res.version) remoteVersion = res.version
+        // 应用成功：更新每会话服务端版本号并清除对应脏标记（仅清本次上传涉及的会话，
+        // 上传期间新产生的变更已在 localRevision 中体现，由末尾的再保存逻辑兜底）
+        if (res.versions && typeof res.versions === 'object') {
+          Object.entries(res.versions).forEach(([id, v]) => { chatVersions.value[id] = v })
+          Object.keys(payload.chats || {}).forEach(id => {
+            // 仅清除本次快照之后未再变更的会话脏标记（防上传期间新修改被误清）
+            if (res.versions[id] !== undefined && (dirtyChatIds.get(id) || 0) <= revision) dirtyChatIds.delete(id)
+          })
+          Object.keys(payload.chatMeta || {}).forEach(id => {
+            if (res.versions[id] !== undefined && (dirtyMetaIds.get(id) || 0) <= revision) dirtyMetaIds.delete(id)
+          })
+        } else {
+          // 旧服务端无逐会话版本返回：整体清除脏标记（兼容路径）
+          Object.keys(payload.chats || {}).forEach(id => {
+            if ((dirtyChatIds.get(id) || 0) <= revision) dirtyChatIds.delete(id)
+          })
+          Object.keys(payload.chatMeta || {}).forEach(id => {
+            if ((dirtyMetaIds.get(id) || 0) <= revision) dirtyMetaIds.delete(id)
+          })
+        }
+        if (typeof res.foldersVersion === 'number') {
+          foldersVersion.value = res.foldersVersion
+          if (payload.folders !== undefined) foldersDirty = false
+        } else if (payload.folders !== undefined) {
+          foldersDirty = false
+        }
+        ;(payload.restoreChatIds || []).forEach(id => pendingRestoreIds.delete(id))
         if (savedRevision === localRevision) {
           try { localStorage.removeItem(recoveryKey()) } catch (e) { /* ignore */ }
+        }
+        // 版本冲突处理：服务端未覆盖的数据在此合并，产生用户可见的冲突入口
+        if (Array.isArray(res.conflicts) && res.conflicts.length > 0) {
+          await handleSyncConflicts(res.conflicts, payload)
         }
       } else {
         flushPending = true
@@ -349,6 +449,90 @@ export const useChatStore = defineStore('chat', () => {
         syncTimer = setTimeout(flushSyncQueue, syncRetryDelay)
       }
     }
+  }
+
+  // 处理服务端返回的同步冲突：拉取服务端副本展示给用户选择，本地未上传内容保留在冲突记录中不丢弃
+  async function handleSyncConflicts(conflicts, payload) {
+    for (const c of conflicts) {
+      if (!c || !c.chatId) continue
+      if (c.chatId === '__folders__') {
+        // 文件夹定义冲突：拉取服务端最新文件夹合并本地新增后重试（按 id 并集，同名同 id 以服务端为准）
+        await mergeFoldersOnConflict()
+        continue
+      }
+      const chatId = c.chatId
+      let serverMessages = []
+      let serverMeta = null
+      let serverVersion = c.serverVersion || 0
+      try {
+        const res = await loadSingleChatHistory(chatId)
+        if (res && res.success) {
+          serverMessages = Array.isArray(res.messages) ? res.messages : []
+          serverMeta = res.meta || null
+          if (res.version) serverVersion = res.version
+        }
+      } catch (e) { /* 拉取失败仍记录冲突，展示时以已有信息为准 */ }
+      const entry = {
+        chatId,
+        reason: c.reason === 'deleted' ? 'deleted' : 'version',
+        serverVersion,
+        title: (payload.chatMeta?.[chatId]?.title) || (serverMeta && serverMeta.title) || '',
+        // 保留双方数据：本地未上传副本完整保存在冲突记录中，绝不直接丢弃
+        localMessages: JSON.parse(JSON.stringify(payload.chats?.[chatId] || chats.value[chatId] || [])),
+        localMeta: payload.chatMeta?.[chatId] ? { ...payload.chatMeta[chatId] } : null,
+        serverMessages,
+        serverMeta
+      }
+      // 本地视图切换到服务端版本（行仍存在时），本地副本留在冲突记录中待用户决策
+      if (c.reason !== 'deleted' && serverMessages.length >= 0) {
+        chats.value[chatId] = serverMessages
+        if (serverMeta) chatMeta.value[chatId] = { ...serverMeta }
+        chatVersions.value[chatId] = serverVersion
+      }
+      dirtyChatIds.delete(chatId)
+      dirtyMetaIds.delete(chatId)
+      syncConflicts.value = [...syncConflicts.value.filter(x => x.chatId !== chatId), entry]
+    }
+  }
+
+  // 文件夹定义冲突合并：以服务端为基准，把服务端不存在的本地文件夹按 id 并入，然后标记重传
+  async function mergeFoldersOnConflict() {
+    try {
+      const data = await loadChatSummaries()
+      if (!data || !data.success) return
+      const serverFolders = normalizeFolders(data.folders)
+      foldersVersion.value = data.foldersVersion || foldersVersion.value
+      const serverIds = new Set(serverFolders.map(f => f.id))
+      const merged = [...serverFolders]
+      folders.value.forEach(f => {
+        if (f && f.id && !serverIds.has(f.id)) merged.push({ ...f })
+      })
+      folders.value = merged
+      foldersDirty = true
+      syncToServer()
+    } catch (e) { /* 合并失败保留下次同步再试 */ }
+  }
+
+  // 解决单条同步冲突：useLocal=true 保留本地（显式恢复已删会话），false 采用服务端版本
+  function resolveSyncConflict(chatId, useLocal) {
+    const entry = syncConflicts.value.find(x => x.chatId === chatId)
+    if (!entry) return
+    syncConflicts.value = syncConflicts.value.filter(x => x.chatId !== chatId)
+    if (!useLocal) return
+    // 保留本地：以服务端当前版本为新基准重新上传（已删会话走显式恢复通道）
+    if (entry.reason === 'deleted') {
+      pendingRestoreIds.add(chatId)
+      chatVersions.value[chatId] = 0
+      if (chatSummaries.value[chatId]) delete chatSummaries.value[chatId]
+      const idx = deletedChatIds.value.indexOf(chatId)
+      if (idx >= 0) deletedChatIds.value.splice(idx, 1)
+    } else {
+      chatVersions.value[chatId] = entry.serverVersion || chatVersions.value[chatId] || 0
+    }
+    chats.value[chatId] = entry.localMessages
+    if (entry.localMeta) chatMeta.value[chatId] = { ...entry.localMeta }
+    dirtyChatIds.set(chatId, localRevision + 1)
+    syncToServer()
   }
 
   // 挂起全量同步（发送消息前调用）
@@ -370,18 +554,23 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  // 发送前同步当前会话：拉取服务端该会话最新记录（其他端可能已新增消息），
-  // 若服务端比本地基线（不含末尾 pendingCount 条未上传的新消息）更全，
-  // 则用服务端记录替换基线并保留末尾新消息，返回是否发生了合并
+  // 发送前同步当前会话：拉取服务端该会话最新记录（其他端可能已新增/修改消息），
+  // 以会话版本号判断服务端是否比本地基线新（不再依赖消息条数比对，重新生成/编辑同条数也能识别）；
+  // 末尾 pendingCount 条未上传的新消息按稳定消息 id 去重后保留，防止重试产生重复消息
   async function syncCurrentChatFromServer(chatId, pendingCount = 0) {
     const res = await loadSingleChatHistory(chatId)
     if (!res || !res.success || !Array.isArray(res.messages)) return false
     const serverMsgs = res.messages
+    const localVer = chatVersions.value[chatId] || 0
+    // 版本号可用时以版本为准：服务端版本不高于本地基准则无需合并
+    if (res.version && localVer && res.version <= localVer) return false
     const local = chats.value[chatId] || []
     const baseLen = Math.max(0, local.length - pendingCount)
-    if (serverMsgs.length <= baseLen) return false
-    const pendingTail = local.slice(baseLen)
+    if (!res.version && serverMsgs.length <= baseLen) return false
+    const serverIds = new Set(serverMsgs.map(m => m && m.id).filter(Boolean))
+    const pendingTail = local.slice(baseLen).filter(m => !m || !m.id || !serverIds.has(m.id))
     chats.value[chatId] = [...serverMsgs, ...pendingTail]
+    if (res.version) chatVersions.value[chatId] = res.version
     // 同步会话元信息（其他端可能已重命名/置顶）
     if (res.meta && typeof res.meta === 'object') {
       chatMeta.value[chatId] = { ...res.meta }
@@ -405,11 +594,17 @@ export const useChatStore = defineStore('chat', () => {
       if (syncSuspended || syncTimer || syncInFlight) return false
       applyServerState(data)
       remoteVersion = data.version || v.version
-      // 当前会话在其他端有新增消息：复用发送前同步逻辑合并正文
+      // 当前会话在其他端有变更（版本号比对，兼容旧服务端回退到条数比对）：合并正文
       const curId = currentChatId.value
       const curSummary = chatSummaries.value[curId]
-      if (curSummary && (curSummary.count || 0) > (chats.value[curId] || []).length) {
-        return await syncCurrentChatFromServer(curId, 0)
+      if (curSummary) {
+        const serverVer = curSummary.version || 0
+        const localVer = chatVersions.value[curId] || 0
+        const staleByVersion = serverVer > 0 && localVer > 0 && serverVer !== localVer
+        const staleByCount = !staleByVersion && (curSummary.count || 0) !== (chats.value[curId] || []).length
+        if (staleByVersion || staleByCount) {
+          return await syncCurrentChatFromServer(curId, 0)
+        }
       }
       return false
     } catch (e) {
@@ -433,18 +628,33 @@ export const useChatStore = defineStore('chat', () => {
         // 其他端已删除：本地同步移除（当前会话除外，避免正在查看时被抽走）
         delete chats.value[id]
         delete chatMeta.value[id]
+        delete chatVersions.value[id]
+        dirtyChatIds.delete(id)
+        dirtyMetaIds.delete(id)
         return
       }
       // 其他端更新过的已加载会话踢回未加载态，切换时按需重拉最新正文，
-      // 防止本地陈旧副本在下次全量同步时覆盖服务端新内容
-      const local = chats.value[id] || []
-      let localLast = null
-      for (let i = 0; i < local.length; i++) {
-        if (local[i].time) localLast = local[i].time
+      // 防止本地陈旧副本在下次全量同步时覆盖服务端新内容。
+      // 判定依据为服务端会话版本号（识别重新生成/编辑等条数不变的变更）；
+      // 旧服务端无版本号时回退到 条数+最后消息时间 比对
+      const serverVer = map[id].version || 0
+      const localVer = chatVersions.value[id] || 0
+      let stale
+      if (serverVer > 0 && localVer > 0) {
+        stale = serverVer !== localVer
+      } else {
+        const local = chats.value[id] || []
+        let localLast = null
+        for (let i = 0; i < local.length; i++) {
+          if (local[i].time) localLast = local[i].time
+        }
+        stale = (map[id].count || 0) !== local.length || (map[id].lastTime || null) !== localLast
       }
-      if ((map[id].count || 0) !== local.length || (map[id].lastTime || null) !== localLast) {
+      if (stale) {
         delete chats.value[id]
       }
+      // 版本号以服务端摘要为准
+      if (serverVer > 0) chatVersions.value[id] = serverVer
     })
 
     // 摘要与元信息以服务端为准；服务端未知的本地会话（如刚新建的当前会话）保留本地元信息
@@ -462,6 +672,7 @@ export const useChatStore = defineStore('chat', () => {
     chatMeta.value = mergedMeta
     // 文件夹定义以服务端为准（本地待上传变更已被守卫排除）
     folders.value = normalizeFolders(data.folders)
+    if (data.foldersVersion) foldersVersion.value = data.foldersVersion
     // 已删除列表以服务端累积合并后的为准（本地待上传变更已被守卫排除）
     deletedChatIds.value = data.deletedChatIds || []
   }
@@ -477,6 +688,7 @@ export const useChatStore = defineStore('chat', () => {
     }
     currentChatId.value = Date.now().toString()
     chats.value[currentChatId.value] = []
+    markChatDirty(currentChatId.value)
     syncToServer()
   }
 
@@ -495,6 +707,10 @@ export const useChatStore = defineStore('chat', () => {
     delete chats.value[id]
     delete chatSummaries.value[id]
     delete chatMeta.value[id]
+    delete chatVersions.value[id]
+    dirtyChatIds.delete(id)
+    dirtyMetaIds.delete(id)
+    pendingRestoreIds.delete(id)
     deletedChatIds.value.push(id)
     syncToServer()
     if (id === currentChatId.value) {
@@ -514,6 +730,10 @@ export const useChatStore = defineStore('chat', () => {
       delete chats.value[id]
       delete chatSummaries.value[id]
       delete chatMeta.value[id]
+      delete chatVersions.value[id]
+      dirtyChatIds.delete(id)
+      dirtyMetaIds.delete(id)
+      pendingRestoreIds.delete(id)
       if (!deletedChatIds.value.includes(id)) deletedChatIds.value.push(id)
     })
     if (uniqueIds.includes(currentChatId.value)) {
@@ -540,6 +760,7 @@ export const useChatStore = defineStore('chat', () => {
       branchFromIndex: throughIndex
     }
     currentChatId.value = newId
+    markChatDirty(newId)
     syncToServer()
     return newId
   }
@@ -550,6 +771,10 @@ export const useChatStore = defineStore('chat', () => {
     chats.value = {}
     chatSummaries.value = {}
     chatMeta.value = {}
+    chatVersions.value = {}
+    dirtyChatIds.clear()
+    dirtyMetaIds.clear()
+    pendingRestoreIds.clear()
     currentChatId.value = null
     newChat()
   }
@@ -573,7 +798,10 @@ export const useChatStore = defineStore('chat', () => {
 
   function addMessage(chatId, msg) {
     if (!chats.value[chatId]) chats.value[chatId] = []
+    // 为消息分配稳定标识：重试/多端合并时按 id 去重，防止重复消息
+    if (!msg.id) msg.id = genMsgId()
     chats.value[chatId].push(msg)
+    markChatDirty(chatId)
     syncToServer()
   }
 
@@ -582,6 +810,7 @@ export const useChatStore = defineStore('chat', () => {
     const msgs = chats.value[chatId]
     if (!msgs) return
     msgs.splice(fromIdx)
+    markChatDirty(chatId)
     syncToServer()
   }
 
@@ -589,11 +818,13 @@ export const useChatStore = defineStore('chat', () => {
     const msgs = chats.value[chatId]
     if (!msgs) return
     const lastIdx = msgs.length - 1
+    if (!msg.id) msg.id = genMsgId()
     if (lastIdx >= 0 && msgs[lastIdx].role === 'assistant') {
       msgs[lastIdx] = msg
     } else {
       msgs.push(msg)
     }
+    markChatDirty(chatId)
     syncToServer()
   }
 
@@ -693,9 +924,11 @@ export const useChatStore = defineStore('chat', () => {
       if (srcMeta[id] && typeof srcMeta[id] === 'object') {
         chatMeta.value[id] = { ...srcMeta[id] }
       }
-      // 从删除列表移除，防止服务端将导入的会话当作已删除而丢弃
+      // 从删除列表移除，并声明显式恢复：防止服务端将导入的会话当作已删除而拒绝写入
       const delIdx = deletedChatIds.value.indexOf(id)
       if (delIdx >= 0) deletedChatIds.value.splice(delIdx, 1)
+      pendingRestoreIds.add(id)
+      markChatDirty(id)
       imported++
     })
     // 合并备份中的文件夹定义：同名/同 id 冲突时以本地现有文件夹为准，仅补充缺失项
@@ -709,6 +942,7 @@ export const useChatStore = defineStore('chat', () => {
         folders.value.push({ ...f, collapsed: false })
         foldersChanged = true
       })
+      if (foldersChanged) foldersDirty = true
     }
     if (imported > 0 || foldersChanged) syncToServer()
     return { imported, skipped }
@@ -733,6 +967,7 @@ export const useChatStore = defineStore('chat', () => {
     const meta = chatMeta.value[id] || {}
     meta.pinned = !meta.pinned
     chatMeta.value[id] = { ...meta }
+    markMetaDirty(id)
     syncToServer()
   }
 
@@ -746,6 +981,7 @@ export const useChatStore = defineStore('chat', () => {
       delete meta.title
     }
     chatMeta.value[id] = { ...meta }
+    markMetaDirty(id)
     syncToServer()
   }
 
@@ -758,6 +994,7 @@ export const useChatStore = defineStore('chat', () => {
       delete meta.promptPresetId
     }
     chatMeta.value[id] = { ...meta }
+    markMetaDirty(id)
     syncToServer()
   }
 
@@ -771,6 +1008,7 @@ export const useChatStore = defineStore('chat', () => {
     if (existing) return existing.id
     const id = 'folder_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7)
     folders.value.push({ id, name: n, collapsed: false })
+    foldersDirty = true
     syncToServer()
     return id
   }
@@ -784,6 +1022,7 @@ export const useChatStore = defineStore('chat', () => {
     // 避免与现有文件夹重名
     if (folders.value.some(x => x.id !== id && x.name === n)) return
     f.name = n
+    foldersDirty = true
     syncToServer()
   }
 
@@ -797,8 +1036,10 @@ export const useChatStore = defineStore('chat', () => {
       if (meta && meta.folderId === id) {
         delete meta.folderId
         chatMeta.value[chatId] = { ...meta }
+        markMetaDirty(chatId)
       }
     })
+    foldersDirty = true
     syncToServer()
   }
 
@@ -807,6 +1048,7 @@ export const useChatStore = defineStore('chat', () => {
     const f = folders.value.find(x => x.id === id)
     if (!f) return
     f.collapsed = !f.collapsed
+    foldersDirty = true
     syncToServer()
   }
 
@@ -819,7 +1061,130 @@ export const useChatStore = defineStore('chat', () => {
       delete meta.folderId
     }
     chatMeta.value[chatId] = { ...meta }
+    markMetaDirty(chatId)
     syncToServer()
+  }
+
+  // ========== 回答版本历史 ==========
+  // assistant 消息版本结构：msg.versions = [{ versionId, content, reasoning_content,
+  // thinkingTime, modelName, time, status, usage }]；msg.currentVersionId 指向当前选中版本。
+  // 平铺字段（content/reasoning_content/...）始终保持为当前选中版本的内容，兼容现有渲染/搜索/导出；
+  // 旧数据无 versions 字段时读取视为单版本，无需迁移。
+
+  // 生成稳定的版本标识
+  function genVersionId() {
+    return 'v' + Date.now().toString(36) + Math.random().toString(36).slice(2, 9)
+  }
+
+  // 规范化 assistant 消息的版本结构：无 versions 时以平铺字段为初始版本（旧数据无损升级）
+  function ensureMsgVersions(msg) {
+    if (msg.role !== 'assistant') return null
+    if (!Array.isArray(msg.versions) || msg.versions.length === 0) {
+      msg.versions = [{
+        versionId: msg.currentVersionId || genVersionId(),
+        content: msg.content || '',
+        reasoning_content: msg.reasoning_content,
+        thinkingTime: msg.thinkingTime,
+        modelName: msg.modelName,
+        time: msg.time,
+        status: msg.status || (msg.interrupted ? 'stopped' : 'done'),
+        usage: (msg.promptTokens || msg.completionTokens) ? {
+          promptTokens: msg.promptTokens || 0,
+          completionTokens: msg.completionTokens || 0,
+          reasoningTokens: msg.reasoningTokens || 0,
+          cachedTokens: msg.cachedTokens || 0
+        } : undefined
+      }]
+      msg.currentVersionId = msg.versions[0].versionId
+    }
+    return msg.versions
+  }
+
+  // 把消息的平铺字段同步为指定版本内容（渲染/复制/朗读/导出/搜索统一读平铺字段）
+  function applyVersionToFlatFields(msg, version) {
+    msg.content = version.content
+    msg.reasoning_content = version.reasoning_content
+    msg.thinkingTime = version.thinkingTime
+    msg.modelName = version.modelName
+    msg.time = version.time
+    msg.status = version.status
+    msg.interrupted = (version.status && version.status !== 'done') || undefined
+    if (version.usage) {
+      msg.promptTokens = version.usage.promptTokens
+      msg.completionTokens = version.usage.completionTokens
+      msg.reasoningTokens = version.usage.reasoningTokens
+      msg.cachedTokens = version.usage.cachedTokens
+    }
+  }
+
+  /**
+   * 为 assistant 消息追加一个新回答版本（重新生成用）：
+   * 旧版本完整保留；成功完成时新版本成为当前版本，失败/中断时保留部分结果但不改变当前选中版本。
+   * @param chatId 会话ID
+   * @param msgIdx 消息在会话中的绝对下标
+   * @param versionData 新版本数据 { content, reasoning_content, thinkingTime, modelName, time, status, usage }
+   * @param makeCurrent 是否设为当前版本（仅成功完成时 true）
+   * @returns 新版本 versionId
+   */
+  function addMessageVersion(chatId, msgIdx, versionData, makeCurrent) {
+    const msgs = chats.value[chatId]
+    if (!msgs || !msgs[msgIdx] || msgs[msgIdx].role !== 'assistant') return null
+    const msg = msgs[msgIdx]
+    ensureMsgVersions(msg)
+    const versionId = genVersionId()
+    msg.versions.push({
+      versionId,
+      content: versionData.content || '',
+      reasoning_content: versionData.reasoning_content,
+      thinkingTime: versionData.thinkingTime,
+      modelName: versionData.modelName,
+      time: versionData.time,
+      status: versionData.status || 'done',
+      usage: versionData.usage
+    })
+    if (makeCurrent) {
+      msg.currentVersionId = versionId
+      applyVersionToFlatFields(msg, msg.versions[msg.versions.length - 1])
+    }
+    markChatDirty(chatId)
+    syncToServer()
+    return versionId
+  }
+
+  /**
+   * 切换 assistant 消息当前展示版本（仅查看，不产生新请求、不重复计费）。
+   * @returns true=切换成功
+   */
+  function selectMessageVersion(chatId, msgIdx, versionId) {
+    const msgs = chats.value[chatId]
+    if (!msgs || !msgs[msgIdx]) return false
+    const msg = msgs[msgIdx]
+    const versions = ensureMsgVersions(msg)
+    const target = versions.find(v => v.versionId === versionId)
+    if (!target || msg.currentVersionId === versionId) return false
+    msg.currentVersionId = versionId
+    applyVersionToFlatFields(msg, target)
+    markChatDirty(chatId)
+    syncToServer()
+    return true
+  }
+
+  /**
+   * 获取消息的版本视图信息（UI 切换器用）：
+   * { list: [{versionId, time, modelName, status}], currentIndex, total }
+   */
+  function getMessageVersions(chatId, msgIdx) {
+    const msgs = chats.value[chatId]
+    if (!msgs || !msgs[msgIdx]) return null
+    const msg = msgs[msgIdx]
+    if (msg.role !== 'assistant') return null
+    const versions = ensureMsgVersions(msg)
+    const currentIndex = versions.findIndex(v => v.versionId === msg.currentVersionId)
+    return {
+      list: versions.map(v => ({ versionId: v.versionId, time: v.time, modelName: v.modelName, status: v.status })),
+      currentIndex: currentIndex < 0 ? 0 : currentIndex,
+      total: versions.length
+    }
   }
 
   // 将多个会话批量移入同一文件夹并只同步一次
@@ -830,6 +1195,7 @@ export const useChatStore = defineStore('chat', () => {
       const meta = chatMeta.value[chatId] || (chatMeta.value[chatId] = {})
       if (folderId) meta.folderId = folderId
       else delete meta.folderId
+      markMetaDirty(chatId)
     })
     syncToServer()
   }
@@ -842,6 +1208,7 @@ export const useChatStore = defineStore('chat', () => {
     if (meta.title && meta.title.trim()) return
     meta.title = t
     chatMeta.value[id] = { ...meta }
+    markMetaDirty(id)
     syncToServer()
   }
 
@@ -867,13 +1234,14 @@ export const useChatStore = defineStore('chat', () => {
 
   return {
     chats, chatSummaries, chatMeta, currentChatId, deletedChatIds, isChatHistoryLoaded, searchKeyword,
-    folders,
+    folders, chatVersions, foldersVersion, syncConflicts,
     sortedChatList, currentMessages,
     loadFromServer, syncToServer, suspendSync, resumeSync, syncCurrentChatFromServer, refreshFromServer,
-    ensureChatLoaded, ensureAllChatsLoaded,
+    ensureChatLoaded, ensureAllChatsLoaded, resolveSyncConflict, genMsgId,
+    addMessageVersion, selectMessageVersion, getMessageVersions,
     newChat, switchChat, switchChatLazy, deleteChat, deleteChats, deleteAllChats, createBranch,
     addMessage, truncateMessages, updateLastAssistantMessage, exportChats, exportChatsJson, importChatsJson, countValidChats, findEmptyChatId,
-    togglePin, renameChat, setAutoTitleIfEmpty, exportChatMarkdown, setChatPromptPreset,
+    togglePin, renameChat, setAutoTitleIfEmpty, exportChatMarkdown, setChatPromptPreset, chatTitle,
     createFolder, renameFolder, deleteFolder, toggleFolderCollapsed, moveChatToFolder, moveChatsToFolder
   }
 })

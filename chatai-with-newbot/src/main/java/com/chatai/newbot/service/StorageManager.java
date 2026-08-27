@@ -52,6 +52,18 @@ public class StorageManager implements StorageService {
     }
 
     /**
+     * 重新加载全部缓存（系统备份恢复后调用）：
+     * 清空内存 Token（旧登录态全部失效）、配置/模型/公告/用户缓存，
+     * 并从恢复后的数据库重建，确保运行状态与恢复数据一致。
+     */
+    public void reloadAllCaches() {
+        activeTokens.clear();
+        sqliteStorage.reloadCaches();
+        restoreTokens();
+        log.info("系统恢复后缓存已全部刷新，旧登录态已失效");
+    }
+
+    /**
      * 初始化：恢复持久化的登录 Token（清理过期 + 加载未过期到内存），
      * 并把 providers.json 的厂商显示名/图标变更同步到已存储模型
      * （原先在 GET 模型列表接口里顺带写回，存在读接口写副作用，已改为启动时一次性同步）
@@ -111,6 +123,18 @@ public class StorageManager implements StorageService {
     /** 写入 SQLite t_setting 配置值。 */
     public void setSetting(String key, String value) {
         sqliteStorage.setSetting(key, value);
+    }
+
+    // ========== 会话上下文摘要缓存（委托 SqliteStorageService） ==========
+
+    /** 读取会话上下文摘要（coveredCount 匹配才有效，过期返回 null） */
+    public String getChatContextSummary(String userId, String chatId, int coveredCount) {
+        return sqliteStorage.getChatContextSummary(userId, chatId, coveredCount);
+    }
+
+    /** 写入会话上下文摘要（覆盖旧值） */
+    public void saveChatContextSummary(String userId, String chatId, int coveredCount, String content) {
+        sqliteStorage.saveChatContextSummary(userId, chatId, coveredCount, content);
     }
 
     // ========== Token 管理（内存缓存 + SQLite 持久化） ==========

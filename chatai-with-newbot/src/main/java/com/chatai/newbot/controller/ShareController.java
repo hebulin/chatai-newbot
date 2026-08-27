@@ -322,8 +322,8 @@ public class ShareController {
         payload.put("lastChatId", chatId);
         payload.put("chats", Map.of(chatId, messages));
         payload.put("chatMeta", Map.of(chatId, meta));
-        long version = chatHistoryService.saveChatHistory(user.getId(), payload);
-        return Map.of("success", true, "chatId", chatId, "version", version);
+        Map<String, Object> saved = chatHistoryService.saveChatHistory(user.getId(), payload);
+        return Map.of("success", true, "chatId", chatId, "version", saved.getOrDefault("version", 0L));
     }
 
     /** 将快照中的图片和文档资源授权给复制者，保持原始资源所有权不变。 */
@@ -513,14 +513,10 @@ public class ShareController {
     }
 
     /**
-     * 生成会话标题：取第一条用户消息前 20 字（与侧边栏标题规则一致）
+     * 生成会话标题：取第一条用户消息前 20 字（与侧边栏标题规则一致，复用 ChatPayloadUtils）
      */
     private String buildTitle(List<Map<String, Object>> messages) {
-        for (Map<String, Object> m : messages) {
-            if ("user".equals(m.get("role")) && m.get("content") instanceof String s && !s.isEmpty()) {
-                return s.length() > 20 ? s.substring(0, 20) : s;
-            }
-        }
-        return "分享的会话";
+        String title = com.chatai.newbot.service.ChatPayloadUtils.buildChatTitle(messages);
+        return "新会话".equals(title) ? "分享的会话" : title;
     }
 }

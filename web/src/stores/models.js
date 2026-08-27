@@ -50,6 +50,12 @@ export const useModelsStore = defineStore('models', () => {
     return models.value.find(m => m.id === currentModelId.value) || null
   })
 
+  // 当前模型的上下文容量（Token）：未配置时按默认 32000 估算（与后端 ContextBudgetService 一致）
+  const currentModelContextWindow = computed(() => {
+    const m = currentModel.value
+    return (m && m.contextWindow > 0) ? m.contextWindow : 32000
+  })
+
   function inferProviderId(model) {
     if (model.providerId) return model.providerId
     const name = (model.displayName || '').toLowerCase()
@@ -104,7 +110,7 @@ export const useModelsStore = defineStore('models', () => {
   return {
     models, defaultModelId, currentModelId, currentModelName,
     currentModelSupportsMultimodal, currentModelSupportsThinking, webSearchEnabled, botAvatarSvg,
-    groupedModels, currentModel,
+    groupedModels, currentModel, currentModelContextWindow,
     loadModels, selectModel, applyDefaultModel, findModelById, inferProviderId
   }
 })

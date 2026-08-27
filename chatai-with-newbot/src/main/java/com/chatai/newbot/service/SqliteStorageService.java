@@ -1,5 +1,6 @@
 package com.chatai.newbot.service;
 
+import com.chatai.newbot.exception.ChatSyncConflictException;
 import com.chatai.newbot.model.*;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -188,6 +189,19 @@ public class SqliteStorageService implements StorageService {
         ensureModelPricingColumns();
         // 老数据库补充健康检查开关列（幂等迁移，默认参与检查）
         ensureColumn("t_model_config", "health_check_enabled", "INTEGER DEFAULT 1");
+        // 老数据库补充上下文容量列（幂等迁移，0/NULL=未设置按默认 32000）
+        ensureColumn("t_model_config", "context_window", "INTEGER DEFAULT 0");
+
+        // 会话上下文摘要缓存（纯服务端缓存，不参与多端同步）：
+        // 摘要与原始会话分离保存，covered_count 记录覆盖范围，历史前缀变化即失效重建
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_chat_context_summary (" +
+                "user_id TEXT NOT NULL," +
+                "chat_id TEXT NOT NULL," +
+                "covered_count INTEGER DEFAULT 0," +
+                "content TEXT," +
+                "updated_at TEXT," +
+                "PRIMARY KEY (user_id, chat_id)" +
+                ")");
 
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_usage_log (" +
                 "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -234,11 +248,17 @@ public class SqliteStorageService implements StorageService {
                 "preview TEXT," +
                 "last_time TEXT," +
                 "msg_count INTEGER DEFAULT 0," +
+                "version INTEGER NOT NULL DEFAULT 1," +
+                "deleted_at TEXT," +
                 "updated_at TEXT," +
                 "updated_at_ts INTEGER DEFAULT 0," +
                 "PRIMARY KEY (user_id, chat_id)" +
                 ")");
         jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_chat_session_user ON t_chat_session(user_id)");
+        // 老数据库补充会话行版本号列（幂等迁移，多端同步乐观锁）
+        ensureColumn("t_chat_session", "version", "INTEGER NOT NULL DEFAULT 1");
+        // 老数据库补充软删除标记列（幂等迁移，回收站功能：NULL=正常，非空=已删除时间）
+        ensureColumn("t_chat_session", "deleted_at", "TEXT");
 
         // 用户会话全局状态（最后所在会话 + 已删除会话ID累积 + 会话文件夹定义；行存在即表示该用户已完成按会话行迁移）
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_chat_user_state (" +
@@ -246,11 +266,18 @@ public class SqliteStorageService implements StorageService {
                 "last_chat_id TEXT," +
                 "deleted_chat_ids TEXT," +
                 "folders_json TEXT," +
+                "sync_seq INTEGER DEFAULT 0," +
+                "folders_version INTEGER DEFAULT 0," +
                 "updated_at TEXT," +
                 "updated_at_ts INTEGER DEFAULT 0" +
                 ")");
         // 老数据库补充会话文件夹列（幂等迁移）
         ensureChatUserStateFoldersColumn();
+        // 老数据库补充同步序列号与文件夹版本号列（幂等迁移，多端同步版本校验）
+        ensureColumn("t_chat_user_state", "sync_seq", "INTEGER DEFAULT 0");
+        ensureColumn("t_chat_user_state", "folders_version", "INTEGER DEFAULT 0");
+        // sync_seq 从既有 updated_at_ts 初始化，避免版本号相对旧客户端回退后引发误判
+        jdbcTemplate.execute("UPDATE t_chat_user_state SET sync_seq = MAX(updated_at_ts, 1) WHERE sync_seq = 0");
 
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_setting (" +
                 "key TEXT PRIMARY KEY," +
@@ -1091,6 +1118,9 @@ public class SqliteStorageService implements StorageService {
         m.setOutputPriceCny(rs.getDouble("output_price_cny"));
         m.setCachedPriceCny(rs.getDouble("cached_price_cny"));
         m.setReasoningPriceCny(rs.getDouble("reasoning_price_cny"));
+        // context_window: 0/NULL 视为未设置
+        int ctxWindow = rs.getInt("context_window");
+        m.setContextWindow(rs.wasNull() || ctxWindow <= 0 ? null : ctxWindow);
         return m;
     };
 
@@ -1156,7 +1186,7 @@ public class SqliteStorageService implements StorageService {
     /** 插入模型配置记录 */
     private void insertModelConfig(ModelConfig m) {
         jdbcTemplate.update(
-                "INSERT INTO t_model_config (id, provider_id, provider_name, provider_icon, model_id, display_name, api_key, api_url, protocol, thinking_param_type, supports_thinking, supports_multimodal, enabled, visible_to_all, health_check_enabled, built_in, created_at, test_latency_ms, test_speed, tested_at, input_price_cny, output_price_cny, cached_price_cny, reasoning_price_cny) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO t_model_config (id, provider_id, provider_name, provider_icon, model_id, display_name, api_key, api_url, protocol, thinking_param_type, supports_thinking, supports_multimodal, enabled, visible_to_all, health_check_enabled, built_in, created_at, test_latency_ms, test_speed, tested_at, input_price_cny, output_price_cny, cached_price_cny, reasoning_price_cny, context_window) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 m.getId(), m.getProviderId(), m.getProviderName(), m.getProviderIcon(),
                 m.getModelId(), m.getDisplayName(), ApiKeyCrypto.encrypt(m.getApiKey()), m.getApiUrl(),
                 m.getProtocol(), m.getThinkingParamType(),
@@ -1167,14 +1197,15 @@ public class SqliteStorageService implements StorageService {
                 m.isBuiltIn() ? 1 : 0, m.getCreatedAt(),
                 m.getTestLatencyMs(), m.getTestSpeed(), m.getTestedAt(),
                 nonNegative(m.getInputPriceCny()), nonNegative(m.getOutputPriceCny()),
-                nonNegative(m.getCachedPriceCny()), nonNegative(m.getReasoningPriceCny()));
+                nonNegative(m.getCachedPriceCny()), nonNegative(m.getReasoningPriceCny()),
+                m.getContextWindow() == null ? 0 : Math.max(0, m.getContextWindow()));
     }
 
     @Override
     public void updateModelConfig(ModelConfig config) {
         fillProviderInfo(config);
         jdbcTemplate.update(
-                "UPDATE t_model_config SET provider_id=?, provider_name=?, provider_icon=?, model_id=?, display_name=?, api_key=?, api_url=?, protocol=?, thinking_param_type=?, supports_thinking=?, supports_multimodal=?, enabled=?, visible_to_all=?, health_check_enabled=?, built_in=?, created_at=?, test_latency_ms=?, test_speed=?, tested_at=?, input_price_cny=?, output_price_cny=?, cached_price_cny=?, reasoning_price_cny=? WHERE id=?",
+                "UPDATE t_model_config SET provider_id=?, provider_name=?, provider_icon=?, model_id=?, display_name=?, api_key=?, api_url=?, protocol=?, thinking_param_type=?, supports_thinking=?, supports_multimodal=?, enabled=?, visible_to_all=?, health_check_enabled=?, built_in=?, created_at=?, test_latency_ms=?, test_speed=?, tested_at=?, input_price_cny=?, output_price_cny=?, cached_price_cny=?, reasoning_price_cny=?, context_window=? WHERE id=?",
                 config.getProviderId(), config.getProviderName(), config.getProviderIcon(),
                 config.getModelId(), config.getDisplayName(), ApiKeyCrypto.encrypt(config.getApiKey()), config.getApiUrl(),
                 config.getProtocol(), config.getThinkingParamType(),
@@ -1186,6 +1217,7 @@ public class SqliteStorageService implements StorageService {
                 config.getTestLatencyMs(), config.getTestSpeed(), config.getTestedAt(),
                 nonNegative(config.getInputPriceCny()), nonNegative(config.getOutputPriceCny()),
                 nonNegative(config.getCachedPriceCny()), nonNegative(config.getReasoningPriceCny()),
+                config.getContextWindow() == null ? 0 : Math.max(0, config.getContextWindow()),
                 config.getId());
         modelConfigsCache = null;
     }
@@ -2018,6 +2050,7 @@ public class SqliteStorageService implements StorageService {
         jdbcTemplate.update("DELETE FROM t_chat_history WHERE user_id = ?", userId);
         jdbcTemplate.update("DELETE FROM t_chat_session WHERE user_id = ?", userId);
         jdbcTemplate.update("DELETE FROM t_chat_user_state WHERE user_id = ?", userId);
+        jdbcTemplate.update("DELETE FROM t_chat_context_summary WHERE user_id = ?", userId);
     }
 
     /**
@@ -2032,13 +2065,13 @@ public class SqliteStorageService implements StorageService {
     }
 
     /**
-     * 加载用户会话全局状态
+     * 加载用户会话全局状态（含同步序列号 sync_seq 与文件夹版本号 folders_version）
      * @param userId 用户ID
-     * @return 含 last_chat_id、deleted_chat_ids 的记录，不存在返回 null
+     * @return 含 last_chat_id、deleted_chat_ids、folders_json、sync_seq、folders_version 的记录，不存在返回 null
      */
     public Map<String, Object> loadChatUserState(String userId) {
         List<Map<String, Object>> list = jdbcTemplate.queryForList(
-                "SELECT last_chat_id, deleted_chat_ids, folders_json FROM t_chat_user_state WHERE user_id = ?", userId);
+                "SELECT last_chat_id, deleted_chat_ids, folders_json, sync_seq, folders_version FROM t_chat_user_state WHERE user_id = ?", userId);
         return list.isEmpty() ? null : list.get(0);
     }
 
@@ -2064,86 +2097,208 @@ public class SqliteStorageService implements StorageService {
     }
 
     /**
-     * 查询用户会话数据的版本号（会话行与全局状态行 updated_at_ts 的最大值），
-     * 供多端轻量变更检测：版本未变化时前端无需重拉摘要列表
+     * 查询用户会话数据的版本号（多端轻量变更检测）。
+     * 使用服务端原子自增的同步序列号 sync_seq（每次成功保存 +1），
+     * 不依赖客户端时钟，同一毫秒内多次保存也能产生新版本，避免漏更新。
      * @param userId 用户ID
-     * @return 版本号（毫秒时间戳），无任何数据时返回 0
+     * @return 版本号（单调递增序列），无任何数据时返回 0
      */
     public long getChatHistoryVersion(String userId) {
         Long v = jdbcTemplate.queryForObject(
-                "SELECT MAX(ts) FROM (" +
-                "SELECT MAX(updated_at_ts) AS ts FROM t_chat_session WHERE user_id = ? " +
-                "UNION ALL " +
-                "SELECT MAX(updated_at_ts) AS ts FROM t_chat_user_state WHERE user_id = ?)",
-                Long.class, userId, userId);
+                "SELECT sync_seq FROM t_chat_user_state WHERE user_id = ?", Long.class, userId);
         return v != null ? v : 0L;
     }
 
     /**
-     * 加载用户全部会话行（含消息正文，导出/全文搜索等全量场景用）
+     * 原子递增用户会话同步序列号并返回新值（每次保存会话数据成功后调用）。
+     * 调用方须处于该用户的同步锁与事务内，update+select 之间不会被其他写入插队。
+     * @param userId 用户ID
+     * @return 递增后的新序列号；状态行不存在时返回 0
+     */
+    public long bumpChatSyncSeq(String userId) {
+        jdbcTemplate.update(
+                "UPDATE t_chat_user_state SET sync_seq = sync_seq + 1 WHERE user_id = ?", userId);
+        return getChatHistoryVersion(userId);
+    }
+
+    /**
+     * 原子递增文件夹定义版本号并返回新值（文件夹定义变更时调用）。
+     * @param userId 用户ID
+     * @return 递增后的文件夹版本号
+     */
+    public long bumpChatFoldersVersion(String userId) {
+        jdbcTemplate.update(
+                "UPDATE t_chat_user_state SET folders_version = folders_version + 1 WHERE user_id = ?", userId);
+        Long v = jdbcTemplate.queryForObject(
+                "SELECT folders_version FROM t_chat_user_state WHERE user_id = ?", Long.class, userId);
+        return v != null ? v : 0L;
+    }
+
+    /**
+     * 加载用户全部会话行（含消息正文，导出/全文搜索等全量场景用；不含回收站已删会话）
      * @param userId 用户ID
      * @return 每条记录含 chat_id/messages/meta，按插入顺序返回
      */
     public List<Map<String, Object>> listChatSessions(String userId) {
         return jdbcTemplate.queryForList(
-                "SELECT chat_id, messages, meta FROM t_chat_session WHERE user_id = ? ORDER BY rowid", userId);
+                "SELECT chat_id, messages, meta FROM t_chat_session WHERE user_id = ? AND deleted_at IS NULL ORDER BY rowid", userId);
     }
 
     /**
-     * 加载用户全部会话摘要行（仅冗余摘要列 + 元信息，不含消息正文，侧边栏首屏用）
+     * 加载用户全部会话摘要行（仅冗余摘要列 + 元信息 + 版本号，不含消息正文与回收站会话，侧边栏首屏用）
      * @param userId 用户ID
-     * @return 每条记录含 chat_id/title/preview/last_time/msg_count/meta，按插入顺序返回
+     * @return 每条记录含 chat_id/title/preview/last_time/msg_count/meta/version，按插入顺序返回
      */
     public List<Map<String, Object>> listChatSessionSummaries(String userId) {
         return jdbcTemplate.queryForList(
-                "SELECT chat_id, title, preview, last_time, msg_count, meta FROM t_chat_session WHERE user_id = ? ORDER BY rowid",
+                "SELECT chat_id, title, preview, last_time, msg_count, meta, version FROM t_chat_session " +
+                "WHERE user_id = ? AND deleted_at IS NULL ORDER BY rowid",
                 userId);
     }
 
     /**
-     * 加载单个会话行（切换会话按需加载用）
+     * 加载单个会话行（切换会话按需加载用；回收站中的会话返回不存在）
      * @param userId 用户ID
      * @param chatId 会话ID
-     * @return 含 messages/meta 的记录，不存在返回 null
+     * @return 含 messages/meta/version 的记录，不存在或已删除返回 null
      */
     public Map<String, Object> getChatSession(String userId, String chatId) {
         List<Map<String, Object>> list = jdbcTemplate.queryForList(
-                "SELECT messages, meta FROM t_chat_session WHERE user_id = ? AND chat_id = ?", userId, chatId);
+                "SELECT messages, meta, version FROM t_chat_session WHERE user_id = ? AND chat_id = ? AND deleted_at IS NULL", userId, chatId);
         return list.isEmpty() ? null : list.get(0);
     }
 
     /**
-     * 查询用户全部会话 ID（仅 ID 列，分享状态判定等存在性检查用，不加载消息正文）
+     * 查询单个会话行的当前版本号（乐观锁校验用；回收站中的会话也返回，供同步判定"已删除"冲突）
+     * @param userId 用户ID
+     * @param chatId 会话ID
+     * @return 当前版本号，会话不存在返回 null
+     */
+    public Integer getChatSessionVersion(String userId, String chatId) {
+        List<Integer> list = jdbcTemplate.queryForList(
+                "SELECT version FROM t_chat_session WHERE user_id = ? AND chat_id = ?",
+                Integer.class, userId, chatId);
+        return list.isEmpty() ? null : list.get(0);
+    }
+
+    /**
+     * 查询会话行的软删除标记（回收站判定用）
+     * @return deleted_at 时间字符串；不存在或未删除返回 null
+     */
+    public String getChatSessionDeletedAt(String userId, String chatId) {
+        List<String> list = jdbcTemplate.queryForList(
+                "SELECT deleted_at FROM t_chat_session WHERE user_id = ? AND chat_id = ?",
+                String.class, userId, chatId);
+        return list.isEmpty() ? null : list.get(0);
+    }
+
+    /**
+     * 查询用户全部会话 ID（仅 ID 列，分享状态判定等存在性检查用，不加载消息正文；不含回收站）
      * @param userId 用户ID
      * @return 会话ID列表
      */
     public List<String> listChatSessionIds(String userId) {
         return jdbcTemplate.queryForList(
-                "SELECT chat_id FROM t_chat_session WHERE user_id = ?", String.class, userId);
+                "SELECT chat_id FROM t_chat_session WHERE user_id = ? AND deleted_at IS NULL", String.class, userId);
     }
 
+    // ========== 会话上下文摘要缓存 ==========
+
     /**
-     * 按关键字粗筛标题或消息正文命中的会话行（SQL LIKE 下推，跨会话全文搜索用）。
-     * 仅做候选集收窄：消息 LIKE 命中的是 JSON 全文（可能误命中字段名等非内容文本），
-     * 调用方需对标题和消息内容做精确二次匹配。按最近更新时间倒序，限定候选会话数防止重度用户全表解析。
+     * 读取会话上下文摘要（仅当覆盖范围与本次裁剪一致时才有效：
+     * 编辑/重新生成/版本切换/清除上下文会改变历史前缀，coveredCount 不匹配即视为过期）
      * @param userId 用户ID
-     * @param keyword 关键字（不含 %/_ 通配符语义，原样作为子串匹配）
-     * @param sessionLimit 候选会话数上限
-     * @return 每条记录含 chat_id/title/messages，按 updated_at_ts 降序
+     * @param chatId 会话ID
+     * @param coveredCount 本次裁剪覆盖的历史条数
+     * @return 有效摘要内容，无或过期返回 null
      */
-    public List<Map<String, Object>> searchChatSessionsByKeyword(String userId, String keyword, int sessionLimit) {
-        return jdbcTemplate.queryForList(
-                "SELECT chat_id, title, messages FROM t_chat_session " +
-                "WHERE user_id = ? AND (title LIKE ? OR messages LIKE ?) ORDER BY updated_at_ts DESC LIMIT ?",
-                userId, "%" + keyword + "%", "%" + keyword + "%", sessionLimit);
+    public String getChatContextSummary(String userId, String chatId, int coveredCount) {
+        List<Map<String, Object>> list = jdbcTemplate.queryForList(
+                "SELECT content FROM t_chat_context_summary WHERE user_id=? AND chat_id=? AND covered_count=?",
+                userId, chatId, coveredCount);
+        if (list.isEmpty()) return null;
+        Object content = list.get(0).get("content");
+        return content instanceof String s && !s.isEmpty() ? s : null;
     }
 
     /**
-     * 插入或更新单个会话行
+     * 写入会话上下文摘要（覆盖旧值；同一 chatId 仅保留最新覆盖范围的摘要）
+     */
+    public void saveChatContextSummary(String userId, String chatId, int coveredCount, String content) {
+        jdbcTemplate.update(
+                "INSERT INTO t_chat_context_summary (user_id, chat_id, covered_count, content, updated_at) VALUES (?,?,?,?,?) " +
+                "ON CONFLICT(user_id, chat_id) DO UPDATE SET covered_count=excluded.covered_count, content=excluded.content, updated_at=excluded.updated_at",
+                userId, chatId, coveredCount, content, nowString());
+    }
+
+    /**
+     * 删除会话的上下文摘要（会话彻底删除/清除上下文时调用，防止过期摘要被继续使用）
+     */
+    public void deleteChatContextSummary(String userId, String chatId) {
+        jdbcTemplate.update("DELETE FROM t_chat_context_summary WHERE user_id=? AND chat_id=?", userId, chatId);
+    }
+
+    /**
+     * 按关键字粗筛标题或消息正文命中的会话行（SQL LIKE 下推 + ESCAPE 字面量转义，跨会话全文搜索用）。
+     * 仅做候选集收窄：消息 LIKE 命中的是 JSON 全文（可能误命中字段名等非内容文本），
+     * 调用方需对标题和消息内容做精确二次匹配。
+     * 关键字中的 %/_/\ 会被转义为字面量，保证参数化查询的字面匹配语义；
+     * 支持 updated_at_ts 时间范围与文件夹归属（meta JSON 包含匹配）粗筛；
+     * 按 updated_at_ts DESC + chat_id 稳定排序分页，不以固定候选上限截断旧结果。
+     * @param userId 用户ID
+     * @param keyword 关键字（字面量子串，无通配符语义）
+     * @param batchLimit 本批候选会话数
+     * @param batchOffset 候选偏移量（分页扫描用）
+     * @param fromTs 起始时间戳（毫秒，可空）
+     * @param toTs 结束时间戳（毫秒，可空）
+     * @param folderId 文件夹归属筛选（可空）
+     * @return 每批记录含 chat_id/title/messages，按 updated_at_ts 降序
+     */
+    public List<Map<String, Object>> searchChatSessionsByKeyword(String userId, String keyword,
+                                                                  int batchLimit, int batchOffset,
+                                                                  Long fromTs, Long toTs, String folderId) {
+        String escaped = escapeLike(keyword);
+        StringBuilder sql = new StringBuilder(
+                "SELECT chat_id, title, messages, meta FROM t_chat_session " +
+                "WHERE user_id = ? AND deleted_at IS NULL AND (title LIKE ? ESCAPE '!' OR messages LIKE ? ESCAPE '!')");
+        List<Object> args = new ArrayList<>();
+        args.add(userId);
+        args.add("%" + escaped + "%");
+        args.add("%" + escaped + "%");
+        if (fromTs != null) {
+            sql.append(" AND updated_at_ts >= ?");
+            args.add(fromTs);
+        }
+        if (toTs != null) {
+            sql.append(" AND updated_at_ts <= ?");
+            args.add(toTs);
+        }
+        if (folderId != null && !folderId.isEmpty()) {
+            // meta JSON 中的文件夹归属粗筛（精确匹配由调用方完成）
+            sql.append(" AND meta LIKE ? ESCAPE '!'");
+            args.add("%\"folderId\":\"" + escapeLike(folderId) + "\"%");
+        }
+        sql.append(" ORDER BY updated_at_ts DESC, chat_id ASC LIMIT ? OFFSET ?");
+        args.add(batchLimit);
+        args.add(batchOffset);
+        return jdbcTemplate.queryForList(sql.toString(), args.toArray());
+    }
+
+    /**
+     * LIKE 字面量转义（转义符为 !）：! → !!、% → !%、_ → !_（配合 ESCAPE '!' 使用）
+     */
+    private String escapeLike(String keyword) {
+        if (keyword == null) return "";
+        return keyword.replace("!", "!!").replace("%", "!%").replace("_", "!_");
+    }
+
+    /**
+     * 插入或更新单个会话行（无版本校验的兼容入口：旧数据迁移、备份恢复等内部场景使用，
+     * 多端同步保存请使用 {@link #upsertChatSessionChecked}）。
      * @param userId 用户ID
      * @param chatId 会话ID
      * @param messagesJson 消息列表 JSON
-     * @param metaJson 会话元信息 JSON（null 时保留原值，上传数据可能不带该会话的元信息）
+     * @param metaJson 会话元信息 JSON（null 时保留原值）
      * @param title 会话标题
      * @param preview 首条用户消息预览
      * @param lastTime 最后消息时间
@@ -2154,20 +2309,159 @@ public class SqliteStorageService implements StorageService {
     public void upsertChatSession(String userId, String chatId, String messagesJson, String metaJson,
                                    String title, String preview, String lastTime, int msgCount,
                                    String updatedAt, long updatedAtTs) {
+        upsertChatSessionChecked(userId, chatId, messagesJson, metaJson, title, preview,
+                lastTime, msgCount, updatedAt, updatedAtTs, null);
+    }
+
+    /**
+     * 带乐观版本校验的会话行写入（多端同步防覆盖的核心）。
+     * expectedVersion 语义：null=旧客户端无版本概念，按原逻辑直接覆盖（兼容入口）；
+     * 0=客户端认为是全新会话，服务端必须尚不存在该行；其余值必须等于服务端当前版本。
+     * 版本不匹配或行状态与预期不符时抛出 {@link ChatSyncConflictException}，绝不静默覆盖。
+     * 写入成功后版本号由服务端 +1（不依赖客户端时钟）。
+     * @param expectedVersion 客户端基准版本（null/0/具体值，语义见上）
+     * @return 写入后的新版本号
+     */
+    public long upsertChatSessionChecked(String userId, String chatId, String messagesJson, String metaJson,
+                                          String title, String preview, String lastTime, int msgCount,
+                                          String updatedAt, long updatedAtTs, Long expectedVersion) {
+        Integer current = getChatSessionVersion(userId, chatId);
+        if (current == null) {
+            if (expectedVersion != null && expectedVersion > 0) {
+                // 客户端基于某个版本编辑，但服务端该行已不存在（已被其他端删除）
+                throw new ChatSyncConflictException(chatId, 0);
+            }
+            jdbcTemplate.update(
+                    "INSERT INTO t_chat_session (user_id, chat_id, messages, meta, title, preview, last_time, msg_count, version, updated_at, updated_at_ts) " +
+                    "VALUES (?,?,?,?,?,?,?,?,1,?,?)",
+                    userId, chatId, messagesJson, metaJson, title, preview, lastTime, msgCount, updatedAt, updatedAtTs);
+            return 1;
+        }
+        if (expectedVersion != null && expectedVersion != current.longValue()) {
+            throw new ChatSyncConflictException(chatId, current);
+        }
+        // UPDATE 带版本条件兜底并发：即使查询与更新之间被插队也不会错误覆盖；
+        // 写入即视为正常会话（显式恢复场景），清除软删除标记
         int updated = jdbcTemplate.update(
                 "UPDATE t_chat_session SET messages=?, meta=COALESCE(?, meta), title=?, preview=?, last_time=?, " +
-                "msg_count=?, updated_at=?, updated_at_ts=? WHERE user_id=? AND chat_id=?",
-                messagesJson, metaJson, title, preview, lastTime, msgCount, updatedAt, updatedAtTs, userId, chatId);
+                "msg_count=?, updated_at=?, updated_at_ts=?, version=version+1, deleted_at=NULL WHERE user_id=? AND chat_id=? AND version=?",
+                messagesJson, metaJson, title, preview, lastTime, msgCount, updatedAt, updatedAtTs,
+                userId, chatId, current);
         if (updated == 0) {
+            Integer latest = getChatSessionVersion(userId, chatId);
+            throw new ChatSyncConflictException(chatId, latest == null ? 0 : latest);
+        }
+        return current + 1;
+    }
+
+    /**
+     * 带乐观版本校验的会话元信息更新（仅改 meta，不动消息正文）。
+     * 用于置顶/重命名/文件夹归属等纯元信息变更，无需上传整个消息列表。
+     * 会话行不存在时不创建幽灵行，直接返回 false（由调用方决定忽略或报冲突）。
+     * @param expectedVersion 客户端基准版本（null 兼容旧逻辑直接覆盖）
+     * @return true=更新成功；false=会话行不存在
+     */
+    public boolean updateChatSessionMetaChecked(String userId, String chatId, String metaJson,
+                                                 Long expectedVersion, String updatedAt, long updatedAtTs) {
+        Integer current = getChatSessionVersion(userId, chatId);
+        if (current == null) return false;
+        if (expectedVersion != null && expectedVersion > 0 && expectedVersion != current.longValue()) {
+            throw new ChatSyncConflictException(chatId, current);
+        }
+        int updated = jdbcTemplate.update(
+                "UPDATE t_chat_session SET meta=?, updated_at=?, updated_at_ts=?, version=version+1 " +
+                "WHERE user_id=? AND chat_id=? AND version=?",
+                metaJson, updatedAt, updatedAtTs, userId, chatId, current);
+        if (updated == 0) {
+            Integer latest = getChatSessionVersion(userId, chatId);
+            throw new ChatSyncConflictException(chatId, latest == null ? 0 : latest);
+        }
+        return true;
+    }
+
+    /**
+     * 软删除用户的指定会话（回收站：标记 deleted_at，行保留可恢复）
+     * @param userId 用户ID
+     * @param chatIds 待删除的会话ID集合
+     * @param deletedAt 删除时间字符串
+     */
+    public void softDeleteChatSessions(String userId, Collection<String> chatIds, String deletedAt) {
+        if (chatIds == null || chatIds.isEmpty()) return;
+        for (String chatId : chatIds) {
             jdbcTemplate.update(
-                    "INSERT INTO t_chat_session (user_id, chat_id, messages, meta, title, preview, last_time, msg_count, updated_at, updated_at_ts) " +
-                    "VALUES (?,?,?,?,?,?,?,?,?,?)",
-                    userId, chatId, messagesJson, metaJson, title, preview, lastTime, msgCount, updatedAt, updatedAtTs);
+                    "UPDATE t_chat_session SET deleted_at = ? WHERE user_id = ? AND chat_id = ? AND deleted_at IS NULL",
+                    deletedAt, userId, chatId);
         }
     }
 
     /**
-     * 删除用户的指定会话行（同步 deletedChatIds 时清理）
+     * 恢复回收站中的会话（清除软删除标记，版本号 +1 触发多端刷新）
+     * @param userId 用户ID
+     * @param chatIds 待恢复的会话ID集合
+     * @return 实际恢复的会话ID列表（仅回收站中的会话可恢复）
+     */
+    public List<String> restoreChatSessions(String userId, Collection<String> chatIds) {
+        List<String> restored = new ArrayList<>();
+        if (chatIds == null || chatIds.isEmpty()) return restored;
+        for (String chatId : chatIds) {
+            int n = jdbcTemplate.update(
+                    "UPDATE t_chat_session SET deleted_at = NULL, version = version + 1, updated_at_ts = ? " +
+                    "WHERE user_id = ? AND chat_id = ? AND deleted_at IS NOT NULL",
+                    System.currentTimeMillis(), userId, chatId);
+            if (n > 0) restored.add(chatId);
+        }
+        return restored;
+    }
+
+    /**
+     * 彻底删除回收站中的会话行（不可恢复；仅允许删除已软删除的行，防止误删正常会话）
+     * @param userId 用户ID
+     * @param chatIds 待彻底删除的会话ID集合；null 或空列表表示清空该用户全部回收站
+     * @return 删除行数
+     */
+    public int purgeChatSessions(String userId, Collection<String> chatIds) {
+        if (chatIds == null || chatIds.isEmpty()) {
+            jdbcTemplate.update("DELETE FROM t_chat_context_summary WHERE user_id = ?", userId);
+            return jdbcTemplate.update(
+                    "DELETE FROM t_chat_session WHERE user_id = ? AND deleted_at IS NOT NULL", userId);
+        }
+        int total = 0;
+        for (String chatId : chatIds) {
+            int n = jdbcTemplate.update(
+                    "DELETE FROM t_chat_session WHERE user_id = ? AND chat_id = ? AND deleted_at IS NOT NULL",
+                    userId, chatId);
+            if (n > 0) {
+                jdbcTemplate.update("DELETE FROM t_chat_context_summary WHERE user_id = ? AND chat_id = ?", userId, chatId);
+                total += n;
+            }
+        }
+        return total;
+    }
+
+    /**
+     * 清理保留期之外的回收站会话（每日定时任务用）
+     * @param cutoff 删除时间下限（deleted_at 早于此时间的会话被彻底删除）
+     * @return 删除行数
+     */
+    public int purgeTrashBefore(String cutoff) {
+        return jdbcTemplate.update(
+                "DELETE FROM t_chat_session WHERE deleted_at IS NOT NULL AND deleted_at < ?", cutoff);
+    }
+
+    /**
+     * 查询用户回收站会话列表（按删除时间倒序，含摘要列，不含消息正文）
+     * @param userId 用户ID
+     * @return 每条记录含 chat_id/title/preview/last_time/msg_count/deleted_at/version
+     */
+    public List<Map<String, Object>> listTrashSessions(String userId) {
+        return jdbcTemplate.queryForList(
+                "SELECT chat_id, title, preview, last_time, msg_count, deleted_at, version FROM t_chat_session " +
+                "WHERE user_id = ? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC",
+                userId);
+    }
+
+    /**
+     * 删除用户的指定会话行（整户清理等内部场景物理删除）
      * @param userId 用户ID
      * @param chatIds 待删除的会话ID集合
      */
@@ -2191,6 +2485,17 @@ public class SqliteStorageService implements StorageService {
             if (row.get("meta") instanceof String s) payloads.add(s);
         }
         return payloads;
+    }
+
+    /**
+     * 加载全部分享快照的原始 JSON 文本（孤儿上传文件清理时统计分享快照中的附件引用，
+     * 防止源会话已删但分享仍有效的快照资源被误删）
+     * @return 快照 JSON 文本列表
+     */
+    public List<String> listAllShareSnapshots() {
+        return jdbcTemplate.queryForList(
+                "SELECT snapshot_json FROM t_chat_share WHERE snapshot_json IS NOT NULL AND snapshot_json != ''",
+                String.class);
     }
 
     // ========== 登录 Token 持久化 ==========
@@ -2385,6 +2690,20 @@ public class SqliteStorageService implements StorageService {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    /**
+     * 清空全部内存缓存并从数据库重建（系统备份恢复后调用）：
+     * 设置、模型配置、公告与用户缓存全部失效，下次读取时从恢复后的数据库重新加载。
+     */
+    public void reloadCaches() {
+        settingsCache.clear();
+        loadSettingsCache();
+        modelConfigsCache = null;
+        enabledAnnouncementCache = null;
+        userCache.clear();
+        ipRegisterMap.clear();
+        log.info("SQLite 内存缓存已全部刷新");
     }
 
     /**

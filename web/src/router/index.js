@@ -79,6 +79,12 @@ const routes = [
         name: 'AuditLogs',
         component: () => import('@/views/admin/AuditLogs.vue'),
         meta: { title: '审计日志' }
+      },
+      {
+        path: 'backups',
+        name: 'Backups',
+        component: () => import('@/views/admin/Backups.vue'),
+        meta: { title: '备份与恢复' }
       }
     ]
   }

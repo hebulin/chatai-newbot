@@ -18,7 +18,7 @@
               <template #label>
                 <span class="settings-tab-label">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
-                  <span>个人资料</span>
+                  <span>{{ t('settings.tabProfile') }}</span>
                 </span>
               </template>
             </el-tab-pane>
@@ -81,33 +81,33 @@
           </el-tabs>
           <div ref="settingsContent" class="settings-content">
             <div v-if="tab === 'profile'" class="settings-panel">
-              <h3 class="settings-panel-title">个人资料</h3>
+              <h3 class="settings-panel-title">{{ t('settings.tabProfile') }}</h3>
               <div class="profile-avatar-row">
-                <div class="profile-avatar-preview" aria-label="头像预览">
-                  <img v-if="profileAvatarSrc" :src="profileAvatarSrc" alt="用户头像预览" />
+                <div class="profile-avatar-preview" :aria-label="t('settings.profileAvatarPreview')">
+                  <img v-if="profileAvatarSrc" :src="profileAvatarSrc" :alt="t('settings.profileAvatarPreview')" />
                   <span v-else>{{ (profileForm.displayName || profileForm.username || 'U').slice(0, 1).toUpperCase() }}</span>
                 </div>
                 <div class="settings-form-group profile-avatar-control">
-                  <label for="profile-avatar-type">头像类型</label>
+                  <label for="profile-avatar-type">{{ t('settings.profileAvatarType') }}</label>
                   <select id="profile-avatar-type" v-model="profileForm.avatarType" class="settings-input">
-                    <option value="default">默认头像</option>
-                    <option value="svg">SVG 代码</option>
+                    <option value="default">{{ t('settings.profileAvatarDefault') }}</option>
+                    <option value="svg">{{ t('settings.profileAvatarSvg') }}</option>
                   </select>
                 </div>
               </div>
               <div v-if="profileForm.avatarType === 'svg'" class="settings-form-group">
-                <label for="profile-avatar-svg">SVG 头像代码</label>
-                <textarea id="profile-avatar-svg" v-model="profileForm.avatarValue" class="settings-input settings-textarea" rows="6" maxlength="20000" placeholder="粘贴完整的 <svg>...</svg> 代码"></textarea>
-                <div class="settings-form-note">SVG 会在服务端清理危险标签与事件，并只通过图片方式展示。</div>
+                <label for="profile-avatar-svg">{{ t('settings.profileAvatarSvgLabel') }}</label>
+                <textarea id="profile-avatar-svg" v-model="profileForm.avatarValue" class="settings-input settings-textarea" rows="6" maxlength="20000" :placeholder="t('settings.profileAvatarSvgPlaceholder')"></textarea>
+                <div class="settings-form-note">{{ t('settings.profileAvatarSvgNote') }}</div>
               </div>
               <div class="profile-form-grid">
-                <div class="settings-form-group"><label for="profile-display-name">显示名称</label><input id="profile-display-name" v-model="profileForm.displayName" class="settings-input" maxlength="80" /></div>
-                <div class="settings-form-group"><label for="profile-email">邮箱</label><input id="profile-email" v-model="profileForm.email" type="email" class="settings-input" maxlength="160" /></div>
-                <div class="settings-form-group"><label for="profile-phone">联系电话</label><input id="profile-phone" v-model="profileForm.phone" type="tel" class="settings-input" maxlength="40" /></div>
+                <div class="settings-form-group"><label for="profile-display-name">{{ t('settings.profileDisplayName') }}</label><input id="profile-display-name" v-model="profileForm.displayName" class="settings-input" maxlength="80" /></div>
+                <div class="settings-form-group"><label for="profile-email">{{ t('settings.profileEmail') }}</label><input id="profile-email" v-model="profileForm.email" type="email" class="settings-input" maxlength="160" /></div>
+                <div class="settings-form-group"><label for="profile-phone">{{ t('settings.profilePhone') }}</label><input id="profile-phone" v-model="profileForm.phone" type="tel" class="settings-input" maxlength="40" /></div>
               </div>
-              <div class="settings-form-group"><label for="profile-bio">个人简介</label><textarea id="profile-bio" v-model="profileForm.bio" class="settings-input settings-textarea" rows="4" maxlength="500"></textarea></div>
+              <div class="settings-form-group"><label for="profile-bio">{{ t('settings.profileBio') }}</label><textarea id="profile-bio" v-model="profileForm.bio" class="settings-input settings-textarea" rows="4" maxlength="500"></textarea></div>
               <div class="settings-form-actions">
-                <button type="button" class="settings-btn settings-btn-primary" :disabled="profileSaving" @click="submitProfile">{{ profileSaving ? '保存中...' : '保存个人资料' }}</button>
+                <button type="button" class="settings-btn settings-btn-primary" :disabled="profileSaving" @click="submitProfile">{{ profileSaving ? t('settings.profileSaving') : t('settings.profileSave') }}</button>
               </div>
             </div>
 
@@ -359,6 +359,13 @@
                   <button class="settings-btn settings-btn-primary" @click="importFileRef && importFileRef.click()">{{ t('settings.chooseFile') }}</button>
                   <input ref="importFileRef" type="file" accept=".json,application/json" style="display:none" @change="handleImportJson" />
                 </div>
+                <div class="data-mgmt-row">
+                  <div class="data-mgmt-info">
+                    <div class="data-mgmt-title">{{ t('trash.title') }}</div>
+                    <div class="data-mgmt-desc">{{ t('trash.entryDesc') }}</div>
+                  </div>
+                  <button class="settings-btn settings-btn-primary" @click="showRecycleBin = true">{{ t('trash.open') }}</button>
+                </div>
                 <div class="data-mgmt-row data-mgmt-row-danger">
                   <div class="data-mgmt-info">
                     <div class="data-mgmt-title">{{ t('settings.deleteAll') }}</div>
@@ -379,6 +386,11 @@
       @close="shareEditVisible = false"
       @saved="onShareEditSaved"
     />
+    <RecycleBinModal
+      v-if="showRecycleBin"
+      @close="showRecycleBin = false"
+      @changed="onTrashChanged"
+    />
   </Teleport>
 </template>
 
@@ -395,6 +407,7 @@ import {
 import { getPromptPresets, savePromptPresets, getUserProfile, saveUserProfile } from '@/api/user'
 import { getMyShares, deleteShare, batchDeleteMyShares } from '@/api/share'
 import ShareSettingsModal from './ShareSettingsModal.vue'
+import RecycleBinModal from './RecycleBinModal.vue'
 import { useChatStore } from '@/stores/chat'
 
 const emit = defineEmits(['close', 'logout'])
@@ -406,6 +419,13 @@ const settingsContent = ref(null)
 // 默认展示"通用"页（个人设置弹窗打开后默认进入通用设置，而非修改密码）
 const tab = ref('profile')
 const profileSaving = ref(false)
+// 回收站弹窗显隐
+const showRecycleBin = ref(false)
+
+// 回收站恢复/删除后刷新侧边栏会话列表（静默拉取服务端最新摘要）
+function onTrashChanged() {
+  chatStore.refreshFromServer()
+}
 const profileForm = ref({ username: '', displayName: '', email: '', phone: '', bio: '', avatarType: 'default', avatarValue: '' })
 const profileAvatarSrc = computed(() => profileForm.value.avatarType === 'svg' && profileForm.value.avatarValue.trim()
   ? 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(profileForm.value.avatarValue.trim()) : '')
@@ -451,8 +471,8 @@ async function submitProfile() {
     if (res?.success) {
       profileForm.value = { ...profileForm.value, ...(res.data || {}) }
       window.dispatchEvent(new CustomEvent('user-profile-updated', { detail: res.data || {} }))
-      ElMessage.success(res.message || '个人资料已保存')
-    } else ElMessage.error(res?.message || '保存失败')
+      ElMessage.success(res.message || t('settings.profileSaved'))
+    } else ElMessage.error(res?.message || t('common.error'))
   } finally {
     profileSaving.value = false
   }

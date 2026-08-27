@@ -162,6 +162,20 @@
             <span v-else-if="sidebarSearchKeyword.trim()">{{ t('sidebar.searchResultCount', { count: searchResults.length }) }}</span>
             <span v-else>{{ t('sidebar.searchHint') }}</span>
           </div>
+          <!-- 搜索筛选：时间范围 / 文件夹 / 模型（均可清空） -->
+          <div class="sidebar-search-filters">
+            <input v-model="filterDateFrom" type="date" class="sidebar-search-filter-input" :aria-label="t('sidebar.filterDateFrom')" @change="onFilterChange" />
+            <input v-model="filterDateTo" type="date" class="sidebar-search-filter-input" :aria-label="t('sidebar.filterDateTo')" @change="onFilterChange" />
+            <select v-model="filterFolderId" class="sidebar-search-filter-input" :aria-label="t('sidebar.filterFolder')" @change="onFilterChange">
+              <option value="">{{ t('sidebar.filterFolderAll') }}</option>
+              <option v-for="f in chatStore.folders" :key="f.id" :value="f.id">{{ f.name }}</option>
+            </select>
+            <select v-model="filterModelName" class="sidebar-search-filter-input" :aria-label="t('sidebar.filterModel')" @change="onFilterChange">
+              <option value="">{{ t('sidebar.filterModelAll') }}</option>
+              <option v-for="m in allModelNames" :key="m" :value="m">{{ m }}</option>
+            </select>
+            <button v-if="hasActiveFilter" type="button" class="sidebar-search-filter-clear" @click="clearFilters">{{ t('sidebar.filterClear') }}</button>
+          </div>
         </div>
         <div id="sidebar-chat-search-results" class="sidebar-search-results-area">
           <div v-if="sidebarSearchKeyword.trim()" class="sidebar-search-results" :aria-busy="searching">
@@ -179,6 +193,10 @@
               <span class="sidebar-search-result-snippet" :class="{ empty: !result.snippet }">
                 {{ result.snippet ? ((result.role === 'user' ? t('sidebar.mePrefix') : t('sidebar.aiPrefix')) + result.snippet) : t('sidebar.noMessagePreview') }}
               </span>
+            </button>
+            <!-- 分页加载更多：不以固定上限截断旧结果 -->
+            <button v-if="searchHasMore && !searching" type="button" class="sidebar-search-load-more" @click="loadMoreResults">
+              {{ t('sidebar.loadMore') }}
             </button>
             <div v-if="!searching && searchResults.length === 0" class="sidebar-search-empty">
               {{ t('sidebar.noMatch') }}
@@ -238,6 +256,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessageBox } from 'element-plus'
 import { useChatStore } from '@/stores/chat'
+import { useModelsStore } from '@/stores/models'
 import { useAuthStore } from '@/stores/auth'
 import { useTheme } from '@/composables/useTheme'
 import { searchChatHistory } from '@/api/chat'
@@ -247,6 +266,7 @@ import { APP_VERSION } from '@/config/version'
 const router = useRouter()
 const { t } = useI18n()
 const chatStore = useChatStore()
+const modelsStore = useModelsStore()
 const authStore = useAuthStore()
 const { getTheme } = useTheme()
 
@@ -475,35 +495,109 @@ function onDelete(id) {
   emit('delete-chat', id)
 }
 
-// 跨会话搜索：关键字变化后 300ms 防抖调用服务端检索标题与消息内容
+// 跨会话搜索：关键字变化后 300ms 防抖调用服务端检索标题与消息内容；
+// 支持分页（加载更多）与筛选（时间范围/文件夹/模型），请求序号防止过期响应覆盖新结果
 const searchResults = ref([])
 const searching = ref(false)
+const searchHasMore = ref(false)
+const SEARCH_PAGE_SIZE = 20
 let searchTimer = null
 let searchRequestSeq = 0
+// 搜索筛选条件（时间范围/文件夹/模型）
+const filterDateFrom = ref('')
+const filterDateTo = ref('')
+const filterFolderId = ref('')
+const filterModelName = ref('')
+
+// 当前有激活的筛选条件（决定"清空筛选"按钮显隐）
+const hasActiveFilter = computed(() =>
+  !!(filterDateFrom.value || filterDateTo.value || filterFolderId.value || filterModelName.value))
+
+// 模型筛选下拉选项：从已加载的模型列表提取显示名（去重）
+const allModelNames = computed(() => {
+  const names = new Set()
+  ;(modelsStore.models || []).forEach(m => {
+    if (m && m.displayName) names.add(m.displayName)
+  })
+  return [...names].sort()
+})
+
+// 组装搜索筛选参数（日期转毫秒时间戳，含整天边界）
+function buildSearchOptions(offset) {
+  const options = { offset, limit: SEARCH_PAGE_SIZE }
+  if (filterDateFrom.value) {
+    options.timeFrom = new Date(filterDateFrom.value + 'T00:00:00').getTime()
+  }
+  if (filterDateTo.value) {
+    options.timeTo = new Date(filterDateTo.value + 'T23:59:59.999').getTime()
+  }
+  if (filterFolderId.value) options.folderId = filterFolderId.value
+  if (filterModelName.value) options.modelName = filterModelName.value
+  return options
+}
+
+// 执行搜索：append=false 替换结果（新关键字/筛选变化），true 追加（加载更多）
+async function performSearch(append) {
+  const q = sidebarSearchKeyword.value.trim()
+  if (!q) return
+  const requestSeq = ++searchRequestSeq
+  const offset = append ? searchResults.value.length : 0
+  searching.value = true
+  try {
+    const res = await searchChatHistory(q, buildSearchOptions(offset))
+    // 只保留当前关键字与筛选条件下的结果（避免慢请求覆盖新输入）
+    if (requestSeq !== searchRequestSeq) return
+    const data = res?.success ? (res.data || []) : []
+    searchResults.value = append ? [...searchResults.value, ...data] : data
+    searchHasMore.value = !!res?.hasMore
+  } catch {
+    if (requestSeq === searchRequestSeq && !append) {
+      searchResults.value = []
+      searchHasMore.value = false
+    }
+  } finally {
+    if (requestSeq === searchRequestSeq) searching.value = false
+  }
+}
+
+// 加载更多结果（稳定分页）
+function loadMoreResults() {
+  performSearch(true)
+}
+
+// 筛选条件变化：重新从第一页搜索
+function onFilterChange() {
+  searchResults.value = []
+  searchHasMore.value = false
+  if (sidebarSearchKeyword.value.trim()) {
+    if (searchTimer) clearTimeout(searchTimer)
+    searchTimer = setTimeout(() => performSearch(false), 300)
+  }
+}
+
+// 清空全部筛选条件并重新搜索
+function clearFilters() {
+  filterDateFrom.value = ''
+  filterDateTo.value = ''
+  filterFolderId.value = ''
+  filterModelName.value = ''
+  onFilterChange()
+}
+
 watch(sidebarSearchKeyword, (kw) => {
   if (searchTimer) clearTimeout(searchTimer)
-  const requestSeq = ++searchRequestSeq
+  searchRequestSeq++
   const q = (kw || '').trim()
   if (!q) {
     searchResults.value = []
+    searchHasMore.value = false
     searching.value = false
     return
   }
   searching.value = true
   searchResults.value = []
-  searchTimer = setTimeout(async () => {
-    try {
-      const res = await searchChatHistory(q)
-      // 只保留当前关键字的结果（避免慢请求覆盖新输入）
-      if (requestSeq === searchRequestSeq && q === sidebarSearchKeyword.value.trim()) {
-        searchResults.value = res?.success ? (res.data || []) : []
-      }
-    } catch {
-      if (requestSeq === searchRequestSeq) searchResults.value = []
-    } finally {
-      if (requestSeq === searchRequestSeq) searching.value = false
-    }
-  }, 300)
+  searchHasMore.value = false
+  searchTimer = setTimeout(() => performSearch(false), 300)
 })
 
 // 打开侧边栏搜索区域并聚焦输入框；供搜索图标与 Ctrl/Cmd+K 快捷键共用
@@ -525,7 +619,12 @@ function closeSidebarSearch(restoreFocus = true) {
   sidebarSearchOpen.value = false
   sidebarSearchKeyword.value = ''
   searchResults.value = []
+  searchHasMore.value = false
   searching.value = false
+  filterDateFrom.value = ''
+  filterDateTo.value = ''
+  filterFolderId.value = ''
+  filterModelName.value = ''
   if (restoreFocus) nextTick(() => sidebarSearchTriggerRef.value?.focus())
 }
 
@@ -925,4 +1024,24 @@ defineExpose({ openSidebarSearch })
 }
 .sidebar-search-result-snippet.empty { font-style:italic; }
 .sidebar-search-empty { padding:32px 10px; color:var(--ink-3,#999); font-size:12px; text-align:center; }
+
+/* 搜索筛选行（时间范围/文件夹/模型）与加载更多按钮 */
+.sidebar-search-filters { display:flex; flex-wrap:wrap; gap:6px; padding-top:8px; }
+.sidebar-search-filter-input {
+  flex:1 1 30%; min-width:0; padding:5px 8px; border-radius:7px;
+  border:1px solid var(--border,#e2e2e2); background:var(--bg-2,#fff);
+  color:var(--ink-1,#222); font-size:11.5px; outline:none;
+}
+.sidebar-search-filter-input:focus { border-color:var(--primary,#4a7dff); }
+.sidebar-search-filter-clear {
+  flex:0 0 auto; border:0; border-radius:7px; padding:5px 10px;
+  background:var(--surface-2,#f2f2f2); color:var(--ink-3,#888); font-size:11.5px; cursor:pointer;
+}
+.sidebar-search-filter-clear:hover { color:var(--ink-1,#222); }
+.sidebar-search-load-more {
+  margin:6px 0 2px; padding:7px 0; width:100%; border:1px dashed var(--border,#ddd);
+  border-radius:8px; background:transparent; color:var(--primary,#4a7dff);
+  font-size:12px; cursor:pointer;
+}
+.sidebar-search-load-more:hover { background:var(--primary-soft,#eef3ff); }
 </style>

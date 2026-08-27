@@ -101,6 +101,32 @@ public final class ApiKeyCrypto {
     }
 
     /**
+     * 用指定的密钥内容（Base64）试解密给定密文（备份恢复前的密钥匹配校验用，
+     * 不影响进程内当前密钥）。
+     * @param encrypted ENC: 前缀密文
+     * @param keyContent Base64 编码的密钥文件内容
+     * @return true=该密钥可以解密此密文
+     */
+    public static boolean canDecryptWith(String encrypted, String keyContent) {
+        if (!isEncrypted(encrypted) || keyContent == null || keyContent.isEmpty()) {
+            return false;
+        }
+        try {
+            byte[] keyBytes = Base64.getDecoder().decode(keyContent.trim());
+            SecretKey trialKey = new SecretKeySpec(keyBytes, "AES");
+            byte[] combined = Base64.getDecoder().decode(encrypted.substring(PREFIX.length()));
+            byte[] iv = new byte[GCM_IV_LENGTH];
+            System.arraycopy(combined, 0, iv, 0, GCM_IV_LENGTH);
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.DECRYPT_MODE, trialKey, new GCMParameterSpec(GCM_TAG_LENGTH, iv));
+            cipher.doFinal(combined, GCM_IV_LENGTH, combined.length - GCM_IV_LENGTH);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
      * 加载密钥：优先读取 data/apikey.secret，不存在则生成随机密钥并落盘
      */
     private static SecretKey loadKey() throws Exception {

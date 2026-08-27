@@ -31,9 +31,36 @@ export function loadSingleChatHistory(chatId, config) {
   return request.get('/chat/history/single', { params: { chatId }, ...config })
 }
 
-// 跨会话全文搜索
-export function searchChatHistory(q) {
-  return request.get('/chat/history/search', { params: { q } })
+// 跨会话全文搜索（分页 + 筛选：时间范围/文件夹/模型；options 全部可选）
+export function searchChatHistory(q, options = {}) {
+  return request.get('/chat/history/search', {
+    params: {
+      q,
+      offset: options.offset || 0,
+      limit: options.limit || 20,
+      timeFrom: options.timeFrom || undefined,
+      timeTo: options.timeTo || undefined,
+      folderId: options.folderId || undefined,
+      modelName: options.modelName || undefined
+    }
+  })
+}
+
+// ===== 回收站（软删除会话管理） =====
+
+// 获取回收站会话列表
+export function listTrash() {
+  return request.get('/chat/trash')
+}
+
+// 从回收站恢复会话（chatIds 数组）
+export function restoreTrash(chatIds) {
+  return request.post('/chat/trash/restore', { chatIds })
+}
+
+// 彻底删除回收站会话（chatIds 为空数组表示清空回收站，不可恢复）
+export function purgeTrash(chatIds) {
+  return request.post('/chat/trash/purge', { chatIds })
 }
 
 // AI 自动命名会话（生成失败时后端返回 success=false，前端自行回退）

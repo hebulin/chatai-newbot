@@ -193,6 +193,10 @@
         <el-form-item label="多模态">
           <el-switch v-model="editForm.supportsMultimodal" />
         </el-form-item>
+        <el-form-item label="上下文容量">
+          <el-input-number v-model="editForm.contextWindow" :min="0" :step="1000" style="width:100%" />
+          <div style="font-size:11px;color:var(--ink-3);margin-top:2px;">模型上下文窗口 Token 数；0 或留空按默认 32000 处理，用于长对话预算管理</div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="editVisible = false">取消</el-button>

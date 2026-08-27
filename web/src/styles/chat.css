@@ -1897,6 +1897,137 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
 }
 @keyframes syncTipIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
+/* 多端同步冲突横幅：列出冲突会话并提供"使用服务端/保留本地"的明确处理入口 */
+.sync-conflict-bar {
+    margin: 0 40px 8px;
+    padding: 10px 14px;
+    border: 1px solid color-mix(in srgb, #e6a23c 45%, transparent);
+    border-radius: 10px;
+    background: color-mix(in srgb, #e6a23c 10%, var(--bg));
+    font-size: 12.5px;
+    color: var(--fg);
+    animation: syncTipIn 0.25s ease;
+}
+.sync-conflict-head {
+    color: var(--fg-2);
+    margin-bottom: 6px;
+    line-height: 1.5;
+}
+.sync-conflict-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 0;
+    flex-wrap: wrap;
+}
+.sync-conflict-item + .sync-conflict-item {
+    border-top: 1px dashed color-mix(in srgb, #e6a23c 30%, transparent);
+}
+.sync-conflict-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+}
+.sync-conflict-name em {
+    font-style: normal;
+    color: #e6a23c;
+    margin-left: 6px;
+    font-size: 11.5px;
+}
+.sync-conflict-btn {
+    flex-shrink: 0;
+    padding: 4px 12px;
+    border-radius: 7px;
+    border: 1px solid var(--border, rgba(128,128,128,0.3));
+    background: var(--bg-2, transparent);
+    color: var(--fg-2);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.sync-conflict-btn:hover {
+    color: var(--fg);
+    border-color: var(--fg-3);
+}
+.sync-conflict-btn.primary {
+    background: var(--primary, #e6a23c);
+    border-color: transparent;
+    color: #fff;
+}
+.sync-conflict-btn.primary:hover {
+    filter: brightness(1.08);
+    color: #fff;
+}
+@media (max-width: 768px) {
+    .sync-conflict-bar { margin: 0 12px 6px; padding: 8px 10px; font-size: 12px; }
+}
+
+/* 上下文占用估算提示（输入区上方小字，超 85% 容量警示色） */
+.context-usage-tip {
+    text-align: center;
+    font-size: 11px;
+    color: var(--fg-3);
+    padding: 2px 0 4px;
+    user-select: none;
+    letter-spacing: 0.02em;
+}
+.context-usage-tip.warn {
+    color: #e6a23c;
+    font-weight: 600;
+}
+
+/* 中断回答操作条：网络中断/超时后保留已生成内容，并提供重新生成/继续生成入口 */
+.interrupted-action-bar {
+    margin: 0 40px 8px;
+    padding: 8px 14px;
+    border: 1px solid color-mix(in srgb, #e6a23c 40%, transparent);
+    border-radius: 10px;
+    background: color-mix(in srgb, #e6a23c 8%, var(--bg));
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    font-size: 12.5px;
+    color: var(--fg-2);
+    animation: syncTipIn 0.25s ease;
+}
+.interrupted-action-text {
+    flex: 1;
+    min-width: 200px;
+    line-height: 1.5;
+}
+.interrupted-action-btn {
+    flex-shrink: 0;
+    padding: 4px 12px;
+    border-radius: 7px;
+    border: 1px solid var(--border, rgba(128,128,128,0.3));
+    background: var(--bg-2, transparent);
+    color: var(--fg-2);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.interrupted-action-btn:hover {
+    color: var(--fg);
+    border-color: var(--fg-3);
+}
+.interrupted-action-btn.primary {
+    background: var(--primary, #4285f4);
+    border-color: transparent;
+    color: #fff;
+}
+.interrupted-action-btn.primary:hover {
+    filter: brightness(1.08);
+    color: #fff;
+}
+@media (max-width: 768px) {
+    .interrupted-action-bar { margin: 0 12px 6px; padding: 8px 10px; font-size: 12px; }
+    .interrupted-action-text { min-width: 0; }
+}
+
 .input-area {
     padding: 14px 40px 12px;
     /* 底部预留 Home Indicator 高度（无刘海设备 env() 为 0，无副作用） */
@@ -3177,6 +3308,9 @@ textarea.settings-textarea {
     .msg-time-top, .msg-footer { padding-left: 38px; padding-right: 38px; }
     /* bot 侧底部模型名 chip：字号/内边距缩小，避免窄屏下换行 */
     .msg-model-name { font-size: 9px; padding: 2px 6px; letter-spacing: 0.02em; }
+    /* 窄屏隐藏消息底部 token 统计（用户侧 promptTokens、bot 侧 completionTokens
+       及流式中的"Token 计算中"），为模型名/操作按钮腾出横向空间 */
+    .msg-token-info { display: none; }
     /* 思考块、代码块字号收紧 */
     .thinking-body { font-size: 12px; line-height: 1.5; }
     .msg-bubble pre code { font-size: 11.5px; line-height: 1.55; }

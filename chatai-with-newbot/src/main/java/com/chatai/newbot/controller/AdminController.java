@@ -534,6 +534,9 @@ public class AdminController {
         data.put("dailyCostLimitCny", storageService.getDailyCostLimitCny());
         data.put("rateLimitPerMinute", storageService.getRateLimitPerMinute());
         data.put("contextMaxMessages", storageService.getContextMaxMessages());
+        // 历史摘要开关（长对话裁剪时自动生成摘要注入；关闭则纯截断）
+        String summaryVal = storageService.getSetting("context_summary_enabled");
+        data.put("contextSummaryEnabled", summaryVal == null || !"false".equals(summaryVal));
         result.put("success", true);
         result.put("data", data);
         return result;
@@ -602,6 +605,10 @@ public class AdminController {
             storageService.setDailyChatLimit(limit);
             if (ratePerMinute >= 0) storageService.setRateLimitPerMinute(ratePerMinute);
             if (contextMax >= 0) storageService.setContextMaxMessages(contextMax);
+            // 历史摘要开关（可选，body.contextSummaryEnabled 为布尔时更新）
+            if (body != null && body.get("contextSummaryEnabled") instanceof Boolean summaryEnabled) {
+                storageService.setSetting("context_summary_enabled", summaryEnabled ? "true" : "false");
+            }
             if (tokenLimit >= 0) storageService.setDailyTokenLimit(tokenLimit);
             if (costLimitCny >= 0) storageService.setDailyCostLimitCny(costLimitCny);
             admin.audit(request, "settings.quota", "修改配额设置：每日上限 " + limit);
