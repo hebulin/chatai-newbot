@@ -1,6 +1,7 @@
-// 用户端中英双语字典（登录页/聊天界面/分享页）；管理后台保持中文不走 i18n
+// 全站中英双语字典；后台页面的源文案映射单独维护在 admin.en.js。
 // locale 持久化在 localStorage('locale')，默认中文，缺失 key 回退中文
 import { createI18n } from 'vue-i18n'
+import { ADMIN_EN } from './admin.en'
 
 const zh = {
   common: {
@@ -366,7 +367,7 @@ const zh = {
     profileSave: '保存个人资料',
     profileSaved: '个人资料已保存',
     language: '界面语言',
-    languageNote: '切换后立即生效；管理后台暂仅提供中文。',
+    languageNote: '切换后全站立即生效，包括后台管理。',
     oldPwd: '当前密码',
     newPwd: '新密码',
     confirmPwd: '确认新密码',
@@ -927,7 +928,7 @@ const en = {
     profileSave: 'Save Profile',
     profileSaved: 'Profile saved',
     language: 'Language',
-    languageNote: 'Takes effect immediately; the admin console is Chinese-only for now.',
+    languageNote: 'Takes effect immediately across the app, including the admin console.',
     oldPwd: 'Current password',
     newPwd: 'New password',
     confirmPwd: 'Confirm new password',
@@ -1145,6 +1146,36 @@ export function setLocale(locale) {
 
 export function getLocale() {
   return i18n.global.locale.value
+}
+
+/**
+ * 将后台中文源文案转换为当前语言，并替换 {name} 形式的插值参数。
+ * 中文直接返回源文案；英文缺少映射时回退中文，避免出现空白标签。
+ */
+export function adminText(source, params = {}) {
+  let text = i18n.global.locale.value === 'en' ? (ADMIN_EN[source] || source) : source
+  Object.entries(params).forEach(([key, value]) => {
+    text = text.split(`{${key}}`).join(String(value))
+  })
+  return text
+}
+
+/**
+ * 后台接口提示本身未携带语言标识：中文模式展示服务端消息，英文模式使用调用方提供的英文映射兜底。
+ */
+export function adminApiText(message, fallbackSource, params = {}) {
+  if (i18n.global.locale.value !== 'en' && message) return message
+  return adminText(fallbackSource, params)
+}
+
+/**
+ * 处理后台接口返回的多条提示：中文保留服务端明细，英文使用已维护的本地兜底文案。
+ */
+export function adminApiMessages(messages, message, fallbackSource) {
+  if (i18n.global.locale.value !== 'en' && Array.isArray(messages) && messages.length) {
+    return messages.join('；')
+  }
+  return adminApiText(message, fallbackSource)
 }
 
 export default i18n

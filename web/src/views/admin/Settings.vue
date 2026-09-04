@@ -2,143 +2,142 @@
   <div>
     <div class="section-header">
       <div class="section-title">
-        <span class="section-eyebrow">06 / SETTINGS · 设置</span>
-        <h2>系统设置</h2>
+        <span class="section-eyebrow">06 / SETTINGS · {{ $adminText('设置') }}</span>
+        <h2>{{ $adminText('系统设置') }}</h2>
       </div>
     </div>
 
     <div class="admin-card" v-loading="loading">
-      <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;color:var(--ink);">存储模式</h3>
+      <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;color:var(--ink);">{{ $adminText('存储模式') }}</h3>
 
       <div style="display:flex;gap:32px;margin-bottom:20px;flex-wrap:wrap;">
         <div>
-          <div style="font-size:12px;color:var(--ink-3);margin-bottom:4px;">当前模式</div>
+          <div style="font-size:12px;color:var(--ink-3);margin-bottom:4px;">{{ $adminText('当前模式') }}</div>
           <div :style="{ fontSize:'15px', fontWeight:'600', color: settings.useSqlite ? '#10b981' : '#f59e0b' }">
-            {{ settings.useSqlite ? 'SQLite 数据库' : 'JSON 文件' }}
+            {{ $adminText(settings.useSqlite ? 'SQLite 数据库' : 'JSON 文件') }}
           </div>
         </div>
         <div>
-          <div style="font-size:12px;color:var(--ink-3);margin-bottom:4px;">数据库文件大小</div>
+          <div style="font-size:12px;color:var(--ink-3);margin-bottom:4px;">{{ $adminText('数据库文件大小') }}</div>
           <div style="font-size:15px;font-weight:600;color:var(--ink);">{{ settings.dbFileSize || '-' }}</div>
         </div>
       </div>
 
       <div style="font-size:13px;color:var(--ink-3);line-height:1.8;background:var(--paper-2);padding:12px 16px;border-radius:8px;border:1px solid var(--line);">
-        系统数据统一存储于 SQLite 数据库文件 (data/chatai.db)，包括用户、模型配置、使用记录与会话分享等。
+        {{ $adminText('系统数据统一存储于 SQLite 数据库文件 (data/chatai.db)，包括用户、模型配置、使用记录与会话分享等。') }}
       </div>
     </div>
 
     <div class="admin-card" v-loading="observabilityLoading" style="margin-top:20px;">
       <div class="observability-heading">
         <div>
-          <h3 style="font-size:16px;font-weight:600;margin:0 0 4px;color:var(--ink);">运行状态</h3>
-          <div class="observability-subtitle">进程启动后累计指标，用于快速定位错误、慢请求与聊天流拥塞。</div>
+          <h3 style="font-size:16px;font-weight:600;margin:0 0 4px;color:var(--ink);">{{ $adminText('运行状态') }}</h3>
+          <div class="observability-subtitle">{{ $adminText('进程启动后累计指标，用于快速定位错误、慢请求与聊天流拥塞。') }}</div>
         </div>
-        <el-button @click="loadObservability()">刷新</el-button>
+        <el-button @click="loadObservability()">{{ $adminText('刷新') }}</el-button>
       </div>
       <div class="observability-grid">
-        <div class="metric-item"><span>运行时长</span><strong>{{ formatDuration(observability.uptimeSeconds) }}</strong></div>
-        <div class="metric-item"><span>HTTP 请求</span><strong>{{ observability.requestCount ?? 0 }}</strong></div>
-        <div class="metric-item"><span>服务端错误</span><strong>{{ observability.serverErrorCount ?? 0 }}</strong></div>
-        <div class="metric-item"><span>慢请求</span><strong>{{ observability.slowRequestCount ?? 0 }}</strong></div>
-        <div class="metric-item"><span>平均延迟</span><strong>{{ observability.averageLatencyMs ?? 0 }} ms</strong></div>
-        <div class="metric-item"><span>活跃聊天流</span><strong>{{ observability.activeChats ?? 0 }}</strong></div>
-        <div class="metric-item"><span>聊天失败</span><strong>{{ observability.chatFailureCount ?? 0 }} / {{ observability.chatRequestCount ?? 0 }}</strong></div>
-        <div class="metric-item"><span>JVM 堆内存</span><strong>{{ formatBytes(observability.heapUsedBytes) }} / {{ formatBytes(observability.heapMaxBytes) }}</strong></div>
+        <div class="metric-item"><span>{{ $adminText('运行时长') }}</span><strong>{{ formatDuration(observability.uptimeSeconds) }}</strong></div>
+        <div class="metric-item"><span>{{ $adminText('HTTP 请求') }}</span><strong>{{ observability.requestCount ?? 0 }}</strong></div>
+        <div class="metric-item"><span>{{ $adminText('服务端错误') }}</span><strong>{{ observability.serverErrorCount ?? 0 }}</strong></div>
+        <div class="metric-item"><span>{{ $adminText('慢请求') }}</span><strong>{{ observability.slowRequestCount ?? 0 }}</strong></div>
+        <div class="metric-item"><span>{{ $adminText('平均延迟') }}</span><strong>{{ observability.averageLatencyMs ?? 0 }} ms</strong></div>
+        <div class="metric-item"><span>{{ $adminText('活跃聊天流') }}</span><strong>{{ observability.activeChats ?? 0 }}</strong></div>
+        <div class="metric-item"><span>{{ $adminText('聊天失败') }}</span><strong>{{ observability.chatFailureCount ?? 0 }} / {{ observability.chatRequestCount ?? 0 }}</strong></div>
+        <div class="metric-item"><span>{{ $adminText('JVM 堆内存') }}</span><strong>{{ formatBytes(observability.heapUsedBytes) }} / {{ formatBytes(observability.heapMaxBytes) }}</strong></div>
       </div>
     </div>
 
     <div class="admin-card" v-loading="healthLoading" style="margin-top:20px;">
-      <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;color:var(--ink);">模型健康检查</h3>
+      <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;color:var(--ink);">{{ $adminText('模型健康检查') }}</h3>
 
       <div class="security-setting-row">
-        <span class="security-setting-label">定时健康检查</span>
-        <el-switch v-model="healthEnabled" active-text="开启" inactive-text="关闭" />
+        <span class="security-setting-label">{{ $adminText('定时健康检查') }}</span>
+        <el-switch v-model="healthEnabled" :active-text="$adminText('开启')" :inactive-text="$adminText('关闭')" />
       </div>
 
       <div class="security-setting-row">
-        <span class="security-setting-label">检查间隔</span>
+        <span class="security-setting-label">{{ $adminText('检查间隔') }}</span>
         <el-input-number v-model="healthIntervalMinutes" :min="1" :max="10080" :step="30" style="width:160px;" />
-        <span style="font-size:13px;color:var(--ink-3);">分钟</span>
-        <el-button type="primary" @click="handleSaveHealth" :loading="healthSaving">保存</el-button>
+        <span style="font-size:13px;color:var(--ink-3);">{{ $adminText('分钟') }}</span>
+        <el-button type="primary" @click="handleSaveHealth" :loading="healthSaving">{{ $adminText('保存') }}</el-button>
       </div>
 
-      <div style="font-size:13px;color:var(--ink-3);margin-bottom:10px;">检查项目（关闭的模型不参与定时连通测试）</div>
+      <div style="font-size:13px;color:var(--ink-3);margin-bottom:10px;">{{ $adminText('检查项目（关闭的模型不参与定时连通测试）') }}</div>
       <div class="health-model-list">
         <div v-for="m in healthModels" :key="m.id" class="health-model-row">
           <span class="health-model-name" :title="m.modelId">{{ m.displayName || m.modelId }}</span>
           <span class="health-model-provider">{{ m.providerName || m.providerId }}</span>
-          <span v-if="!m.enabled" class="health-model-disabled">已禁用</span>
+          <span v-if="!m.enabled" class="health-model-disabled">{{ $adminText('已禁用') }}</span>
           <el-switch
             :model-value="m.healthCheckEnabled !== false"
             @change="(val) => toggleModelHealth(m, val)"
           />
         </div>
-        <div v-if="healthModels.length === 0" style="font-size:13px;color:var(--ink-4);padding:8px 0;">暂无模型</div>
+        <div v-if="healthModels.length === 0" style="font-size:13px;color:var(--ink-4);padding:8px 0;">{{ $adminText('暂无模型') }}</div>
       </div>
 
       <div class="settings-note">
-        定时任务按上述间隔对开启的模型执行连通测试（最小请求测连通 + 短生成测速），结果展示在"模型管理"的延迟/速度列。
-        总开关与间隔保存后 1 分钟内生效，无需重启；已禁用的模型无论开关与否都不会被检查；模型管理中的手动"测试连接"不受此开关影响。
+        {{ $adminText('定时任务按上述间隔对开启的模型执行连通测试（最小请求测连通 + 短生成测速），结果展示在"模型管理"的延迟/速度列。总开关与间隔保存后 1 分钟内生效，无需重启；已禁用的模型无论开关与否都不会被检查；模型管理中的手动"测试连接"不受此开关影响。') }}
       </div>
     </div>
 
     <div class="admin-card" v-loading="quotaLoading" style="margin-top:20px;">
-      <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;color:var(--ink);">调用限制</h3>
+      <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;color:var(--ink);">{{ $adminText('调用限制') }}</h3>
 
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
-        <span style="font-size:13px;color:var(--ink-3);width:150px;">每个普通用户每日最多可调用</span>
+        <span style="font-size:13px;color:var(--ink-3);width:150px;">{{ $adminText('每个普通用户每日最多可调用') }}</span>
         <el-input-number v-model="dailyChatLimit" :min="0" :max="100000" :step="10" style="width:160px;" />
-        <span style="font-size:13px;color:var(--ink-3);">次（填 0 表示不限制）</span>
+        <span style="font-size:13px;color:var(--ink-3);">{{ $adminText('次（填 0 表示不限制）') }}</span>
       </div>
 
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
-        <span style="font-size:13px;color:var(--ink-3);width:150px;">每个普通用户每日 Token 上限</span>
+        <span style="font-size:13px;color:var(--ink-3);width:150px;">{{ $adminText('每个普通用户每日 Token 上限') }}</span>
         <el-input-number v-model="dailyTokenLimit" :min="0" :max="10000000000" :step="10000" style="width:200px;" />
-        <span style="font-size:13px;color:var(--ink-3);">Token（0 表示不限制）</span>
+        <span style="font-size:13px;color:var(--ink-3);">{{ $adminText('Token（0 表示不限制）') }}</span>
       </div>
 
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
-        <span style="font-size:13px;color:var(--ink-3);width:150px;">每个普通用户每日预算</span>
+        <span style="font-size:13px;color:var(--ink-3);width:150px;">{{ $adminText('每个普通用户每日预算') }}</span>
         <el-input-number v-model="dailyCostLimitCny" :min="0" :max="100000000" :precision="2" :step="10" style="width:200px;" />
-        <span style="font-size:13px;color:var(--ink-3);">人民币元（0 表示不限制）</span>
+        <span style="font-size:13px;color:var(--ink-3);">{{ $adminText('人民币元（0 表示不限制）') }}</span>
       </div>
 
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
-        <span style="font-size:13px;color:var(--ink-3);width:150px;">每个普通用户每分钟最多可发起</span>
+        <span style="font-size:13px;color:var(--ink-3);width:150px;">{{ $adminText('每个普通用户每分钟最多可发起') }}</span>
         <el-input-number v-model="rateLimitPerMinute" :min="0" :max="10000" :step="1" style="width:160px;" />
-        <span style="font-size:13px;color:var(--ink-3);">次（填 0 表示不限制）</span>
+        <span style="font-size:13px;color:var(--ink-3);">{{ $adminText('次（填 0 表示不限制）') }}</span>
       </div>
 
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
-        <span style="font-size:13px;color:var(--ink-3);width:150px;">上下文最多携带消息条数</span>
+        <span style="font-size:13px;color:var(--ink-3);width:150px;">{{ $adminText('上下文最多携带消息条数') }}</span>
         <el-input-number v-model="contextMaxMessages" :min="0" :max="1000" :step="2" style="width:160px;" />
-        <span style="font-size:13px;color:var(--ink-3);">条（填 0 表示不限制）</span>
-        <el-button type="primary" @click="handleSaveQuota" :loading="quotaSaving">保存</el-button>
+        <span style="font-size:13px;color:var(--ink-3);">{{ $adminText('条（填 0 表示不限制）') }}</span>
+        <el-button type="primary" @click="handleSaveQuota" :loading="quotaSaving">{{ $adminText('保存') }}</el-button>
       </div>
 
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
-        <span style="font-size:13px;color:var(--ink-3);width:150px;">历史摘要</span>
+        <span style="font-size:13px;color:var(--ink-3);width:150px;">{{ $adminText('历史摘要') }}</span>
         <el-switch v-model="contextSummaryEnabled" />
-        <span style="font-size:13px;color:var(--ink-3);">长对话超出上下文预算时自动生成历史摘要注入（失败时降级为截断，摘要调用按计费规则记录）</span>
+        <span style="font-size:13px;color:var(--ink-3);">{{ $adminText('长对话超出上下文预算时自动生成历史摘要注入（失败时降级为截断，摘要调用按计费规则记录）') }}</span>
       </div>
 
       <div style="font-size:13px;color:var(--ink-3);line-height:1.8;background:var(--paper-2);padding:12px 16px;border-radius:8px;border:1px solid var(--line);">
-        以上限制均仅对非管理员用户生效。每日调用达上限后次日自动恢复；每分钟限流用于防止短时频繁请求；上下文条数限制只保留最近若干条消息发送给模型，可降低 Token 消耗。单个用户可在“用户管理”中单独设置每日限额（优先于全局配额）。
+        {{ $adminText('以上限制均仅对非管理员用户生效。每日调用达上限后次日自动恢复；每分钟限流用于防止短时频繁请求；上下文条数限制只保留最近若干条消息发送给模型，可降低 Token 消耗。单个用户可在“用户管理”中单独设置每日限额（优先于全局配额）。') }}
       </div>
     </div>
 
     <div class="admin-card" v-loading="billingLoading" style="margin-top:20px;">
-      <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;color:var(--ink);">计费与币种</h3>
+      <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;color:var(--ink);">{{ $adminText('计费与币种') }}</h3>
       <div class="billing-row">
-        <span class="billing-label">默认展示</span>
+        <span class="billing-label">{{ $adminText('默认展示') }}</span>
         <el-radio-group v-model="billing.displayMode">
           <el-radio-button value="token">Token</el-radio-button>
-          <el-radio-button value="currency">金额</el-radio-button>
+          <el-radio-button value="currency">{{ $adminText('金额') }}</el-radio-button>
         </el-radio-group>
       </div>
       <div class="billing-row">
-        <span class="billing-label">默认币种</span>
+        <span class="billing-label">{{ $adminText('默认币种') }}</span>
         <el-select v-model="billing.defaultCurrency" style="width:220px;">
           <el-option v-for="c in billing.currencies" :key="c.code" :label="`${c.name} (${c.code})`" :value="c.code" />
         </el-select>
@@ -146,57 +145,57 @@
       <div class="currency-table">
         <div v-for="(currency, index) in billing.currencies" :key="currency.code || index" class="currency-row">
           <el-input v-model="currency.code" placeholder="USD" :disabled="currency.code === 'CNY'" maxlength="8" style="width:100px;" />
-          <el-input v-model="currency.name" placeholder="美元" :disabled="currency.code === 'CNY'" style="width:150px;" />
+          <el-input v-if="currency.code === 'CNY'" :model-value="$adminText('人民币')" disabled style="width:150px;" />
+          <el-input v-else v-model="currency.name" :placeholder="$adminText('美元')" style="width:150px;" />
           <el-input v-model="currency.symbol" placeholder="$" :disabled="currency.code === 'CNY'" style="width:90px;" />
           <span class="currency-rate-prefix">1 CNY =</span>
           <el-input-number v-model="currency.rate" :min="0.000001" :precision="6" :step="0.01" :disabled="currency.code === 'CNY'" style="width:160px;" />
-          <span class="currency-code-label">{{ currency.code || '币种' }}</span>
-          <el-button v-if="currency.code !== 'CNY'" type="danger" plain @click="removeCurrency(index)">删除</el-button>
+          <span class="currency-code-label">{{ currency.code || $adminText('币种') }}</span>
+          <el-button v-if="currency.code !== 'CNY'" type="danger" plain @click="removeCurrency(index)">{{ $adminText('删除') }}</el-button>
         </div>
       </div>
       <div style="display:flex;gap:10px;margin-top:16px;">
-        <el-button @click="addCurrency">新增币种</el-button>
-        <el-button type="primary" :loading="billingSaving" @click="handleSaveBilling">保存计费设置</el-button>
+        <el-button @click="addCurrency">{{ $adminText('新增币种') }}</el-button>
+        <el-button type="primary" :loading="billingSaving" @click="handleSaveBilling">{{ $adminText('保存计费设置') }}</el-button>
       </div>
       <div class="settings-note">
-        人民币是成本基础币种且汇率固定为 1。其他币种必须配置“1 人民币兑换多少目标币种”；历史数据保存人民币成本，展示时按当前汇率实时换算。
+        {{ $adminText('人民币是成本基础币种且汇率固定为 1。其他币种必须配置“1 人民币兑换多少目标币种”；历史数据保存人民币成本，展示时按当前汇率实时换算。') }}
       </div>
     </div>
 
     <div class="admin-card" v-loading="securityLoading" style="margin-top:20px;">
-      <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;color:var(--ink);">安全设置</h3>
+      <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;color:var(--ink);">{{ $adminText('安全设置') }}</h3>
 
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
-        <span style="font-size:13px;color:var(--ink-3);width:150px;">IP绑定校验</span>
-        <el-switch v-model="ipBindingEnabled" active-text="开启" inactive-text="关闭" />
+        <span style="font-size:13px;color:var(--ink-3);width:150px;">{{ $adminText('IP绑定校验') }}</span>
+        <el-switch v-model="ipBindingEnabled" :active-text="$adminText('开启')" :inactive-text="$adminText('关闭')" />
       </div>
 
       <div class="security-setting-row">
-        <span class="security-setting-label">开放用户注册</span>
-        <el-switch v-model="registrationEnabled" active-text="开启" inactive-text="关闭" />
+        <span class="security-setting-label">{{ $adminText('开放用户注册') }}</span>
+        <el-switch v-model="registrationEnabled" :active-text="$adminText('开启')" :inactive-text="$adminText('关闭')" />
       </div>
 
       <div class="security-setting-row">
-        <span class="security-setting-label">注册验证码</span>
-        <el-switch v-model="registrationCaptchaEnabled" active-text="开启" inactive-text="关闭" />
+        <span class="security-setting-label">{{ $adminText('注册验证码') }}</span>
+        <el-switch v-model="registrationCaptchaEnabled" :active-text="$adminText('开启')" :inactive-text="$adminText('关闭')" />
       </div>
 
       <div class="security-setting-row">
-        <span class="security-setting-label">注册邀请码</span>
-        <el-input v-model="inviteCode" type="password" show-password style="width:280px" :placeholder="inviteCodeConfigured ? '已配置，留空表示保持不变' : '留空表示不限制邀请码'" />
-        <el-checkbox v-if="inviteCodeConfigured" v-model="clearInviteCode">清除现有邀请码</el-checkbox>
+        <span class="security-setting-label">{{ $adminText('注册邀请码') }}</span>
+        <el-input v-model="inviteCode" type="password" show-password style="width:280px" :placeholder="$adminText(inviteCodeConfigured ? '已配置，留空表示保持不变' : '留空表示不限制邀请码')" />
+        <el-checkbox v-if="inviteCodeConfigured" v-model="clearInviteCode">{{ $adminText('清除现有邀请码') }}</el-checkbox>
       </div>
 
       <div class="security-setting-row security-setting-row-top">
-        <span class="security-setting-label">Bot SVG 头像</span>
-        <el-input v-model="botAvatarSvg" type="textarea" :rows="6" maxlength="20000" show-word-limit placeholder="粘贴完整的 <svg>...</svg> 代码；留空使用默认头像" style="max-width:620px" />
+        <span class="security-setting-label">{{ $adminText('Bot SVG 头像') }}</span>
+        <el-input v-model="botAvatarSvg" type="textarea" :rows="6" maxlength="20000" show-word-limit :placeholder="$adminText('粘贴完整的 <svg>...</svg> 代码；留空使用默认头像')" style="max-width:620px" />
       </div>
 
-      <el-button type="primary" @click="handleSaveSecurity" :loading="securitySaving">保存安全设置</el-button>
+      <el-button type="primary" @click="handleSaveSecurity" :loading="securitySaving">{{ $adminText('保存安全设置') }}</el-button>
 
       <div style="font-size:13px;color:var(--ink-3);line-height:1.8;background:var(--paper-2);padding:12px 16px;border-radius:8px;border:1px solid var(--line);">
-        开启后，登录时的 IP 会绑定到登录凭证，后续请求 IP 发生变更将强制下线并要求重新登录，可防止凭证被盗用。
-        若用户网络环境 IP 频繁变化（如移动网络、公司出口多 IP）导致频繁被踢下线，可关闭此开关。保存后立即生效。
+        {{ $adminText('开启后，登录时的 IP 会绑定到登录凭证，后续请求 IP 发生变更将强制下线并要求重新登录，可防止凭证被盗用。若用户网络环境 IP 频繁变化（如移动网络、公司出口多 IP）导致频繁被踢下线，可关闭此开关。保存后立即生效。') }}
       </div>
     </div>
 
@@ -208,6 +207,7 @@ import { ref, onMounted, onActivated } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getStorageSettings, getQuotaSettings, setQuotaSettings, getSecuritySettings, setSecuritySettings, getBillingSettings, setBillingSettings, getObservability, getHealthCheckSettings, setHealthCheckSettings } from '@/api/settings'
 import { getModels, updateModel } from '@/api/models'
+import { adminApiMessages, adminApiText, adminText } from '@/i18n'
 
 const loading = ref(false)
 const settings = ref({ useSqlite: true, dbFileSize: '' })
@@ -264,9 +264,9 @@ async function handleSaveHealth() {
       intervalMinutes: healthIntervalMinutes.value ?? 360
     })
     if (res?.success) {
-      ElMessage.success(res.message || '保存成功')
+      ElMessage.success(adminApiText(res.message, '保存成功'))
     } else {
-      ElMessage.error(res?.message || '保存失败')
+      ElMessage.error(adminApiText(res?.message, '保存失败'))
     }
   } finally {
     healthSaving.value = false
@@ -278,9 +278,9 @@ async function toggleModelHealth(m, val) {
   const res = await updateModel(m.id, { ...m, healthCheckEnabled: val })
   if (res?.success) {
     m.healthCheckEnabled = val
-    ElMessage.success(val ? `已开启「${m.displayName || m.modelId}」健康检查` : `已关闭「${m.displayName || m.modelId}」健康检查`)
+    ElMessage.success(adminText(val ? '已开启「{name}」健康检查' : '已关闭「{name}」健康检查', { name: m.displayName || m.modelId }))
   } else {
-    ElMessage.error(res?.message || '保存失败')
+    ElMessage.error(adminApiText(res?.message, '保存失败'))
     await loadHealth(true)
   }
 }
@@ -337,9 +337,9 @@ function formatDuration(seconds) {
   const days = Math.floor(value / 86400)
   const hours = Math.floor((value % 86400) / 3600)
   const minutes = Math.floor((value % 3600) / 60)
-  if (days) return `${days}天 ${hours}小时`
-  if (hours) return `${hours}小时 ${minutes}分钟`
-  return `${minutes}分钟`
+  if (days) return `${days}${adminText('天')} ${hours}${adminText('小时')}`
+  if (hours) return `${hours}${adminText('小时')} ${minutes}${adminText('分钟')}`
+  return `${minutes}${adminText('分钟')}`
 }
 
 // 将字节数格式化为 MB/GB，避免后台展示难读的长整数
@@ -380,9 +380,9 @@ async function handleSaveQuota() {
       contextSummaryEnabled: contextSummaryEnabled.value
     })
     if (res?.success) {
-      ElMessage.success({ message: (res.messages || [res.message || '保存成功']).join('；'), duration: 5000, showClose: true })
+      ElMessage.success({ message: adminApiMessages(res.messages, res.message, '保存成功'), duration: 5000, showClose: true })
     } else {
-      ElMessage.error(res?.message || '保存失败')
+      ElMessage.error(adminApiText(res?.message, '保存失败'))
     }
   } finally {
     quotaSaving.value = false
@@ -422,10 +422,10 @@ async function handleSaveSecurity() {
     if (inviteCode.value.trim()) payload.inviteCode = inviteCode.value.trim()
     const res = await setSecuritySettings(payload)
     if (res?.success) {
-      ElMessage.success(res.message || '保存成功')
+      ElMessage.success(adminApiText(res.message, '保存成功'))
       await loadSecurity(true)
     } else {
-      ElMessage.error(res?.message || '保存失败')
+      ElMessage.error(adminApiText(res?.message, '保存失败'))
     }
   } finally {
     securitySaving.value = false
@@ -466,8 +466,8 @@ async function handleSaveBilling() {
     const res = await setBillingSettings(payload)
     if (res?.success) {
       billing.value = res.data
-      ElMessage.success(res.message || '保存成功')
-    } else ElMessage.error(res?.message || '保存失败')
+      ElMessage.success(adminApiText(res.message, '保存成功'))
+    } else ElMessage.error(adminApiText(res?.message, '保存失败'))
   } finally {
     billingSaving.value = false
   }

@@ -111,7 +111,7 @@
               </div>
             </div>
 
-            <!-- 通用：界面语言切换（用户端中英双语，管理后台保持中文） -->
+            <!-- 通用：全站界面语言切换（含后台管理） -->
             <div v-if="tab === 'general'" class="settings-panel">
               <h3 class="settings-panel-title">{{ t('settings.tabGeneral') }}</h3>
               <div class="settings-form-group">

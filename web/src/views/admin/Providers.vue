@@ -2,26 +2,26 @@
   <div>
     <div class="section-header">
       <div class="section-title">
-        <span class="section-eyebrow">03 / PROVIDERS · 厂商</span>
-        <h2>厂商管理</h2>
+        <span class="section-eyebrow">03 / PROVIDERS · {{ $adminText('厂商') }}</span>
+        <h2>{{ $adminText('厂商管理') }}</h2>
       </div>
-      <span class="section-tip">预置厂商仅可修改显示名，ID/协议/默认URL不可改；自定义厂商可修改显示名（同步至所有关联模型）</span>
+      <span class="section-tip">{{ $adminText('预置厂商仅可修改显示名，ID/协议/默认URL不可改；自定义厂商可修改显示名（同步至所有关联模型）') }}</span>
     </div>
 
     <div class="admin-card">
       <!-- 筛选栏 -->
       <div class="filter-bar">
-        <el-input v-model="filterName" placeholder="名称模糊查询" clearable style="width:200px" @input="providerPage = 1" />
-        <el-select v-model="filterType" placeholder="类型" clearable style="width:120px" @change="providerPage = 1">
-          <el-option label="预置" value="preset" />
-          <el-option label="自定义" value="custom" />
+        <el-input v-model="filterName" :placeholder="$adminText('名称模糊查询')" clearable style="width:200px" @input="providerPage = 1" />
+        <el-select v-model="filterType" :placeholder="$adminText('类型')" clearable style="width:120px" @change="providerPage = 1">
+          <el-option :label="$adminText('预置')" value="preset" />
+          <el-option :label="$adminText('自定义')" value="custom" />
         </el-select>
-        <el-button @click="resetFilter">重置</el-button>
+        <el-button @click="resetFilter">{{ $adminText('重置') }}</el-button>
       </div>
 
       <!-- 厂商表格：列宽按内容自适应（上限 50 汉字），border 模式支持拖拽表头调宽，超宽时横向滚动 -->
       <el-table :data="pagedProviders" v-loading="loading" stripe border style="width:100%">
-        <el-table-column label="厂商" :width="colW.name">
+        <el-table-column :label="$adminText('厂商')" :width="colW.name">
           <template #default="{ row }">
             <div class="model-name-cell">
               <img v-if="providerIconMap[row.id]" :src="providerIconMap[row.id]" class="provider-icon" />
@@ -31,45 +31,45 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="类型" :width="colW.type" align="center">
+        <el-table-column :label="$adminText('类型')" :width="colW.type" align="center">
           <template #default="{ row }">
             <span class="status-badge" :class="row.type === 'custom' ? 'vis-admin' : 'status-enabled'">
-              {{ row.type === 'custom' ? '自定义' : '预置' }}
+              {{ $adminText(row.type === 'custom' ? '自定义' : '预置') }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="厂商ID" :width="colW.id" show-overflow-tooltip>
+        <el-table-column :label="$adminText('厂商ID')" :width="colW.id" show-overflow-tooltip>
           <template #default="{ row }">
             <span class="model-id-text">{{ row.id }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="defaultApiUrl" label="API 地址" min-width="220" show-overflow-tooltip />
-        <el-table-column label="模型数" :width="colW.count" align="center">
+        <el-table-column prop="defaultApiUrl" :label="$adminText('API 地址')" min-width="220" show-overflow-tooltip />
+        <el-table-column :label="$adminText('模型数')" :width="colW.count" align="center">
           <template #default="{ row }">{{ getModelCount(row) }}</template>
         </el-table-column>
-        <el-table-column label="预设名称" :width="colW.defaultName" show-overflow-tooltip>
+        <el-table-column :label="$adminText('预设名称')" :width="colW.defaultName" show-overflow-tooltip>
           <template #default="{ row }">
             <span style="color:var(--ink-3)">{{ row.type === 'custom' ? '-' : (row.defaultName || row.name) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="显示名称" :width="colW.displayName" show-overflow-tooltip>
+        <el-table-column :label="$adminText('显示名称')" :width="colW.displayName" show-overflow-tooltip>
           <template #default="{ row }">
             <span style="font-weight:500;">{{ row.name }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="图标" :width="colW.icon" align="center">
+        <el-table-column :label="$adminText('图标')" :width="colW.icon" align="center">
           <template #default="{ row }">
             <span v-if="row.icon" style="font-size:18px;">{{ row.icon }}</span>
-            <span v-else style="color:var(--ink-4)">未设置</span>
+            <span v-else style="color:var(--ink-4)">{{ $adminText('未设置') }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="210" align="center" fixed="right">
+        <el-table-column :label="$adminText('操作')" width="210" align="center" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" text @click="showDetail(row)">明细</el-button>
-            <el-button size="small" text aria-label="编辑厂商" @click="showRename(row)">
+            <el-button size="small" text @click="showDetail(row)">{{ $adminText('明细') }}</el-button>
+            <el-button size="small" text :aria-label="$adminText('编辑厂商')" @click="showRename(row)">
               <el-icon><Edit /></el-icon>
             </el-button>
-            <el-button size="small" text aria-label="获取上游模型" @click="showCatalog(row)">获取模型</el-button>
+            <el-button size="small" text :aria-label="$adminText('获取上游模型')" @click="showCatalog(row)">{{ $adminText('获取模型') }}</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -80,46 +80,46 @@
     </div>
 
     <!-- 厂商明细弹窗：模型数与列表页统一按厂商模型目录计算 -->
-    <el-dialog v-model="detailVisible" :title="'厂商明细 - ' + detailProvider.name" width="760px" destroy-on-close>
+    <el-dialog v-model="detailVisible" :title="$adminText('厂商明细 - {name}', { name: detailProvider.name })" width="760px" destroy-on-close>
       <el-descriptions :column="2" border>
-        <el-descriptions-item label="厂商 ID">{{ detailProvider.id || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="类型">{{ detailProvider.type === 'custom' ? '自定义' : '预置' }}</el-descriptions-item>
-        <el-descriptions-item label="显示名称">{{ detailProvider.name || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="协议">{{ formatProtocol(detailProvider.protocol) }}</el-descriptions-item>
-        <el-descriptions-item label="API 地址" :span="2">{{ detailProvider.defaultApiUrl || '-' }}</el-descriptions-item>
+        <el-descriptions-item :label="$adminText('厂商 ID')">{{ detailProvider.id || '-' }}</el-descriptions-item>
+        <el-descriptions-item :label="$adminText('类型')">{{ $adminText(detailProvider.type === 'custom' ? '自定义' : '预置') }}</el-descriptions-item>
+        <el-descriptions-item :label="$adminText('显示名称')">{{ detailProvider.name || '-' }}</el-descriptions-item>
+        <el-descriptions-item :label="$adminText('协议')">{{ formatProtocol(detailProvider.protocol) }}</el-descriptions-item>
+        <el-descriptions-item :label="$adminText('API 地址')" :span="2">{{ detailProvider.defaultApiUrl || '-' }}</el-descriptions-item>
       </el-descriptions>
       <div class="detail-toolbar">
-        <strong>支持模型（{{ getModelCount(detailProvider) }}）</strong>
-        <el-input v-model="detailModelQuery" placeholder="按模型名称模糊查询" clearable style="width:240px" />
+        <strong>{{ $adminText('支持模型（{count}）', { count: getModelCount(detailProvider) }) }}</strong>
+        <el-input v-model="detailModelQuery" :placeholder="$adminText('按模型名称模糊查询')" clearable style="width:240px" />
       </div>
-      <el-table :data="filteredDetailModels" height="340" border empty-text="暂无匹配模型">
-        <el-table-column prop="id" label="模型 ID" min-width="220" show-overflow-tooltip />
-        <el-table-column prop="name" label="模型名称" min-width="200" show-overflow-tooltip>
+      <el-table :data="filteredDetailModels" height="340" border :empty-text="$adminText('暂无匹配模型')">
+        <el-table-column prop="id" :label="$adminText('模型 ID')" min-width="220" show-overflow-tooltip />
+        <el-table-column prop="name" :label="$adminText('模型名称')" min-width="200" show-overflow-tooltip>
           <template #default="{ row }">{{ row.name || row.id }}</template>
         </el-table-column>
-        <el-table-column label="思考" width="80" align="center">
-          <template #default="{ row }">{{ row.supportsThinking ? '支持' : '不支持' }}</template>
+        <el-table-column :label="$adminText('思考')" width="80" align="center">
+          <template #default="{ row }">{{ $adminText(row.supportsThinking ? '支持' : '不支持') }}</template>
         </el-table-column>
-        <el-table-column label="多模态" width="90" align="center">
-          <template #default="{ row }">{{ row.supportsMultimodal ? '支持' : '不支持' }}</template>
+        <el-table-column :label="$adminText('多模态')" width="90" align="center">
+          <template #default="{ row }">{{ $adminText(row.supportsMultimodal ? '支持' : '不支持') }}</template>
         </el-table-column>
       </el-table>
-      <template #footer><el-button @click="detailVisible = false">关闭</el-button></template>
+      <template #footer><el-button @click="detailVisible = false">{{ $adminText('关闭') }}</el-button></template>
     </el-dialog>
 
     <!-- 修改厂商弹窗 -->
-    <el-dialog v-model="renameVisible" :title="renameForm.isCustom ? '修改自定义厂商' : '修改预置厂商'" width="520px" destroy-on-close>
+    <el-dialog v-model="renameVisible" :title="$adminText(renameForm.isCustom ? '修改自定义厂商' : '修改预置厂商')" width="520px" destroy-on-close>
       <el-form label-width="120px">
-        <el-form-item label="厂商ID">
+        <el-form-item :label="$adminText('厂商ID')">
           <el-input :model-value="renameForm.providerId" disabled />
         </el-form-item>
-        <el-form-item v-if="!renameForm.isCustom" label="预设名称">
+        <el-form-item v-if="!renameForm.isCustom" :label="$adminText('预设名称')">
           <span style="color:var(--ink-3)">{{ renameForm.currentName }}</span>
         </el-form-item>
-        <el-form-item label="显示名称">
-          <el-input v-model="renameForm.newName" maxlength="100" placeholder="请输入新的显示名" />
+        <el-form-item :label="$adminText('显示名称')">
+          <el-input v-model="renameForm.newName" maxlength="100" :placeholder="$adminText('请输入新的显示名')" />
         </el-form-item>
-        <el-form-item label="模型图标">
+        <el-form-item :label="$adminText('模型图标')">
           <template v-if="renameForm.isCustom">
             <div class="icon-picker">
               <span
@@ -129,62 +129,62 @@
                 :class="{ selected: renameForm.newIcon === ic }"
                 @click="renameForm.newIcon = ic"
               >{{ ic }}</span>
-              <el-input v-model="renameForm.newIcon" maxlength="4" placeholder="自定义 emoji" style="width:120px;margin-left:8px;" />
+              <el-input v-model="renameForm.newIcon" maxlength="4" :placeholder="$adminText('自定义 emoji')" style="width:120px;margin-left:8px;" />
             </div>
           </template>
           <template v-else>
             <span v-if="renameForm.currentIcon" style="font-size:22px;">{{ renameForm.currentIcon }}</span>
-            <span v-else style="color:var(--ink-4)">未设置</span>
-            <span style="font-size:12px;color:var(--ink-4);margin-left:8px;">预置厂商的图标不可修改</span>
+            <span v-else style="color:var(--ink-4)">{{ $adminText('未设置') }}</span>
+            <span style="font-size:12px;color:var(--ink-4);margin-left:8px;">{{ $adminText('预置厂商的图标不可修改') }}</span>
           </template>
         </el-form-item>
-        <el-form-item label="当前模型">
+        <el-form-item :label="$adminText('当前模型')">
           <div class="provider-model-list">
             <el-tag v-for="model in renameForm.models" :key="model.id" size="small">{{ model.name || model.id }}</el-tag>
-            <span v-if="!renameForm.models.length" style="color:var(--ink-4)">暂无已知模型</span>
+            <span v-if="!renameForm.models.length" style="color:var(--ink-4)">{{ $adminText('暂无已知模型') }}</span>
           </div>
         </el-form-item>
         <div style="font-size:12px;color:var(--ink-3);margin-top:4px;">
-          {{ renameForm.isCustom ? '修改后将同步更新所有该自定义厂商下的模型（仅匹配当前原名）' : '修改后预置厂商的显示名将立即更新，并同步至所有关联模型（ID/协议/默认URL等不可改）' }}
+          {{ $adminText(renameForm.isCustom ? '修改后将同步更新所有该自定义厂商下的模型（仅匹配当前原名）' : '修改后预置厂商的显示名将立即更新，并同步至所有关联模型（ID/协议/默认URL等不可改）') }}
         </div>
       </el-form>
       <template #footer>
-        <el-button @click="renameVisible = false">取消</el-button>
-        <el-button type="primary" @click="submitRename" :loading="submitting">保存</el-button>
+        <el-button @click="renameVisible = false">{{ $adminText('取消') }}</el-button>
+        <el-button type="primary" @click="submitRename" :loading="submitting">{{ $adminText('保存') }}</el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="catalogVisible" :title="'获取上游模型 - ' + catalogForm.name" width="680px" destroy-on-close>
+    <el-dialog v-model="catalogVisible" :title="$adminText('获取上游模型 - {name}', { name: catalogForm.name })" width="680px" destroy-on-close>
       <el-form label-width="90px">
-        <el-form-item label="API 地址">
-          <el-input v-model="catalogForm.apiUrl" placeholder="例如 https://api.example.com/v1" />
+        <el-form-item :label="$adminText('API 地址')">
+          <el-input v-model="catalogForm.apiUrl" :placeholder="$adminText('例如 https://api.example.com/v1')" />
         </el-form-item>
         <el-form-item label="API Key">
-          <el-input v-model="catalogForm.apiKey" type="password" show-password placeholder="可留空，优先复用该厂商已接入模型的 Key" />
+          <el-input v-model="catalogForm.apiKey" type="password" show-password :placeholder="$adminText('可留空，优先复用该厂商已接入模型的 Key')" />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" :loading="catalogLoading" @click="loadUpstreamModels">获取最新模型</el-button>
+          <el-button type="primary" :loading="catalogLoading" @click="loadUpstreamModels">{{ $adminText('获取最新模型') }}</el-button>
           <span v-if="catalogEndpoint" style="margin-left:10px;color:var(--ink-3);font-size:12px">{{ catalogEndpoint }}</span>
         </el-form-item>
       </el-form>
       <el-table ref="catalogTable" :data="fetchedModels" height="320" border @selection-change="handleCatalogSelection">
         <el-table-column type="selection" width="46" />
-        <el-table-column prop="id" label="模型 ID" min-width="220" show-overflow-tooltip />
-        <el-table-column prop="name" label="模型名称" min-width="180" show-overflow-tooltip />
-        <el-table-column label="思考" width="90" align="center">
+        <el-table-column prop="id" :label="$adminText('模型 ID')" min-width="220" show-overflow-tooltip />
+        <el-table-column prop="name" :label="$adminText('模型名称')" min-width="180" show-overflow-tooltip />
+        <el-table-column :label="$adminText('思考')" width="90" align="center">
           <template #default="{ row }">
-            <el-switch v-model="row.supportsThinking" inline-prompt active-text="支持" inactive-text="不支持" @click.stop />
+            <el-switch v-model="row.supportsThinking" inline-prompt :active-text="$adminText('支持')" :inactive-text="$adminText('不支持')" @click.stop />
           </template>
         </el-table-column>
-        <el-table-column label="多模态" width="90" align="center">
+        <el-table-column :label="$adminText('多模态')" width="90" align="center">
           <template #default="{ row }">
-            <el-switch v-model="row.supportsMultimodal" inline-prompt active-text="支持" inactive-text="不支持" @click.stop />
+            <el-switch v-model="row.supportsMultimodal" inline-prompt :active-text="$adminText('支持')" :inactive-text="$adminText('不支持')" @click.stop />
           </template>
         </el-table-column>
       </el-table>
       <template #footer>
-        <el-button @click="catalogVisible = false">取消</el-button>
-        <el-button type="primary" :disabled="!selectedModels.length" :loading="catalogSaving" @click="saveCatalog">保存选中模型（{{ selectedModels.length }}）</el-button>
+        <el-button @click="catalogVisible = false">{{ $adminText('取消') }}</el-button>
+        <el-button type="primary" :disabled="!selectedModels.length" :loading="catalogSaving" @click="saveCatalog">{{ $adminText('保存选中模型（{count}）', { count: selectedModels.length }) }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -197,6 +197,7 @@ import { Edit } from '@element-plus/icons-vue'
 import { getProviders, renameProvider, fetchProviderModels, saveProviderModels } from '@/api/providers'
 import { autoColWidth } from '@/composables/useTableAutoWidth'
 import AdminPager from '@/components/admin/AdminPager.vue'
+import { adminApiText, adminText } from '@/i18n'
 
 const PRESET_ICONS = ['🔮','🟣','🌙','🟢','⚡','🫘','⭐','🚀','🤖','💎','🎨','🛠️']
 
@@ -241,15 +242,15 @@ const colW = computed(() => {
   const list = allProviders.value
   return {
     // 名称列：图标(20+间距8) extra 34
-    name: autoColWidth(list.map(p => p.name), { header: '厂商', extra: 34, min: 110 }),
-    type: autoColWidth(['自定义', '预置'], { header: '类型', extra: 24 }),
+    name: autoColWidth(list.map(p => p.name), { header: adminText('厂商'), extra: 34, min: 110 }),
+    type: autoColWidth(['自定义', '预置'].map(adminText), { header: adminText('类型'), extra: 24 }),
     // 厂商ID列以等宽字体渲染，按 mono 测宽
-    id: autoColWidth(list.map(p => p.id), { header: '厂商ID', min: 100, mono: true }),
-    apiUrl: autoColWidth(list.map(p => p.defaultApiUrl || ''), { header: 'API 地址', min: 160 }),
-    count: autoColWidth(list.map(getModelCount), { header: '模型数' }),
-    defaultName: autoColWidth(list.map(p => p.type === 'custom' ? '-' : (p.defaultName || p.name)), { header: '预设名称', min: 100 }),
-    displayName: autoColWidth(list.map(p => p.name), { header: '显示名称', min: 100 }),
-    icon: autoColWidth(list.map(p => p.icon || '未设置'), { header: '图标' })
+    id: autoColWidth(list.map(p => p.id), { header: adminText('厂商ID'), min: 100, mono: true }),
+    apiUrl: autoColWidth(list.map(p => p.defaultApiUrl || ''), { header: adminText('API 地址'), min: 160 }),
+    count: autoColWidth(list.map(getModelCount), { header: adminText('模型数') }),
+    defaultName: autoColWidth(list.map(p => p.type === 'custom' ? '-' : (p.defaultName || p.name)), { header: adminText('预设名称'), min: 100 }),
+    displayName: autoColWidth(list.map(p => p.name), { header: adminText('显示名称'), min: 100 }),
+    icon: autoColWidth(list.map(p => p.icon || adminText('未设置')), { header: adminText('图标') })
   }
 })
 
@@ -287,7 +288,7 @@ function showDetail(row) {
 // 将后端协议值转换为管理员可读文本
 function formatProtocol(protocol) {
   if (protocol === 'anthropic') return 'Anthropic'
-  if (protocol === 'openai') return 'OpenAI 兼容'
+  if (protocol === 'openai') return adminText('OpenAI 兼容')
   return protocol || '-'
 }
 
@@ -344,18 +345,18 @@ function showCatalog(row) {
 
 // 获取上游模型并默认全选，管理员可取消不希望入库的条目
 async function loadUpstreamModels() {
-  if (!catalogForm.value.apiUrl.trim()) { ElMessage.warning('请输入 API 地址'); return }
+  if (!catalogForm.value.apiUrl.trim()) { ElMessage.warning(adminText('请输入 API 地址')); return }
   catalogLoading.value = true
   try {
     const res = await fetchProviderModels(catalogForm.value.providerId, {
       apiUrl: catalogForm.value.apiUrl.trim(), apiKey: catalogForm.value.apiKey.trim()
     })
-    if (!res?.success) { ElMessage.error(res?.message || '获取失败'); return }
+    if (!res?.success) { ElMessage.error(adminApiText(res?.message, '获取失败')); return }
     fetchedModels.value = res.data || []
     catalogEndpoint.value = res.endpoint || ''
     await nextTick()
     fetchedModels.value.forEach(row => catalogTable.value?.toggleRowSelection(row, true))
-    ElMessage.success(`已获取 ${fetchedModels.value.length} 个模型`)
+    ElMessage.success(adminText('已获取 {count} 个模型', { count: fetchedModels.value.length }))
   } finally {
     catalogLoading.value = false
   }
@@ -367,10 +368,10 @@ async function saveCatalog() {
   try {
     const res = await saveProviderModels(catalogForm.value.providerId, selectedModels.value)
     if (res?.success) {
-      ElMessage.success(res.message || '模型目录已保存')
+      ElMessage.success(adminApiText(res.message, '模型目录已保存'))
       catalogVisible.value = false
       await loadData()
-    } else ElMessage.error(res?.message || '保存失败')
+    } else ElMessage.error(adminApiText(res?.message, '保存失败'))
   } finally {
     catalogSaving.value = false
   }
@@ -378,7 +379,7 @@ async function saveCatalog() {
 
 async function submitRename() {
   if (!renameForm.value.newName.trim()) {
-    ElMessage.warning('请输入新的显示名')
+    ElMessage.warning(adminText('请输入新的显示名'))
     return
   }
   submitting.value = true
@@ -390,11 +391,11 @@ async function submitRename() {
     }
     const res = await renameProvider(renameForm.value.providerId, payload)
     if (res?.success) {
-      ElMessage.success(res.message || '已更新')
+      ElMessage.success(adminApiText(res.message, '已更新'))
       renameVisible.value = false
       await loadData()
     } else {
-      ElMessage.error(res?.message || '更新失败')
+      ElMessage.error(adminApiText(res?.message, '更新失败'))
     }
   } finally {
     submitting.value = false

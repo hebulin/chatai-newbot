@@ -8,16 +8,23 @@
         </span>
         <span class="nav-brand-text">
           <span class="nav-brand-name">Atelier</span>
-          <span class="nav-brand-sub">管理后台 · ADMIN</span>
+          <span class="nav-brand-sub">{{ $adminText('管理后台') }} · ADMIN</span>
         </span>
       </div>
       <div class="nav-actions">
-        <button class="theme-toggle-btn" @click="handleToggleTheme" title="切换主题" aria-label="主题">
+        <button
+          class="language-toggle-btn"
+          type="button"
+          @click="handleToggleLocale"
+          :title="$adminText(currentLocale === 'en' ? '切换为中文' : '切换为英文')"
+          :aria-label="$adminText(currentLocale === 'en' ? '切换为中文' : '切换为英文')"
+        >{{ currentLocale === 'en' ? '中' : 'EN' }}</button>
+        <button class="theme-toggle-btn" @click="handleToggleTheme" :title="$adminText('切换主题')" :aria-label="$adminText('主题')">
           <span class="toggle-track"><span class="toggle-knob"></span></span>
         </button>
         <el-button text @click="goChat">
           <el-icon><Back /></el-icon>
-          <span>返回聊天</span>
+          <span>{{ $adminText('返回聊天') }}</span>
         </el-button>
       </div>
     </nav>
@@ -25,16 +32,16 @@
     <!-- Tab 导航 -->
     <div class="admin-tabs-wrapper">
       <el-tabs v-model="activeTab" @tab-change="onTabChange" class="admin-tabs">
-        <el-tab-pane label="快速接入" name="quick-start" />
-        <el-tab-pane label="模型管理" name="models" />
-        <el-tab-pane label="厂商管理" name="providers" />
-        <el-tab-pane label="用户管理" name="users" />
-        <el-tab-pane label="分享管理" name="shares" />
-        <el-tab-pane label="系统设置" name="settings" />
-        <el-tab-pane label="联网配置" name="websearch" />
-        <el-tab-pane label="公告管理" name="announcements" />
-        <el-tab-pane label="审计日志" name="audit-logs" />
-        <el-tab-pane label="备份恢复" name="backups" />
+        <el-tab-pane :label="$adminText('快速接入')" name="quick-start" />
+        <el-tab-pane :label="$adminText('模型管理')" name="models" />
+        <el-tab-pane :label="$adminText('厂商管理')" name="providers" />
+        <el-tab-pane :label="$adminText('用户管理')" name="users" />
+        <el-tab-pane :label="$adminText('分享管理')" name="shares" />
+        <el-tab-pane :label="$adminText('系统设置')" name="settings" />
+        <el-tab-pane :label="$adminText('联网配置')" name="websearch" />
+        <el-tab-pane :label="$adminText('公告管理')" name="announcements" />
+        <el-tab-pane :label="$adminText('审计日志')" name="audit-logs" />
+        <el-tab-pane :label="$adminText('备份恢复')" name="backups" />
       </el-tabs>
     </div>
 
@@ -61,17 +68,21 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { Grid, Back } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { useTheme } from '@/composables/useTheme'
 import { APP_VERSION } from '@/config/version'
+import { setLocale } from '@/i18n'
 
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
 const { toggleTheme, initTheme } = useTheme()
+const { locale } = useI18n()
+const currentLocale = computed(() => locale.value)
 
 const activeTab = ref('quick-start')
 
@@ -87,6 +98,11 @@ function onTabChange(name) {
 
 function handleToggleTheme() {
   toggleTheme()
+}
+
+// 在中文与英文之间切换，并复用全站语言持久化逻辑。
+function handleToggleLocale() {
+  setLocale(currentLocale.value === 'en' ? 'zh' : 'en')
 }
 
 function goChat() {
@@ -197,6 +213,26 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+.language-toggle-btn {
+  min-width: 38px;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.2s var(--ease), color 0.2s var(--ease);
+}
+.language-toggle-btn:hover,
+.language-toggle-btn:focus-visible {
+  border-color: var(--primary);
+  color: var(--primary);
+  outline: none;
 }
 /* Theme toggle - pill-shaped switch (unified with chat/login) */
 .theme-toggle-btn {

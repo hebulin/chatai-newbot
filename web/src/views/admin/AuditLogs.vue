@@ -2,42 +2,42 @@
   <div>
     <div class="section-header">
       <div class="section-title">
-        <span class="section-eyebrow">09 / AUDIT · 审计</span>
-        <h2>审计日志</h2>
+        <span class="section-eyebrow">09 / AUDIT · {{ $adminText('审计') }}</span>
+        <h2>{{ $adminText('审计日志') }}</h2>
       </div>
     </div>
 
     <div class="admin-card">
       <!-- 筛选栏 -->
       <div class="filter-bar">
-        <el-input v-model="filterUser" placeholder="用户名模糊查询" clearable style="width:180px" @change="reload" />
-        <el-select v-model="filterAction" placeholder="全部操作" clearable filterable style="width:200px" @change="reload">
+        <el-input v-model="filterUser" :placeholder="$adminText('用户名模糊查询')" clearable style="width:180px" @change="reload" />
+        <el-select v-model="filterAction" :placeholder="$adminText('全部操作')" clearable filterable style="width:200px" @change="reload">
           <el-option v-for="a in actions" :key="a" :label="actionText(a)" :value="a" />
         </el-select>
         <el-date-picker v-model="dateRange" type="daterange" value-format="YYYY-MM-DD"
-                        range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期"
+                        :range-separator="$adminText('至')" :start-placeholder="$adminText('开始日期')" :end-placeholder="$adminText('结束日期')"
                         style="width:260px" @change="reload" />
-        <el-button @click="handleReset">重置</el-button>
-        <el-button type="danger" plain :loading="resetting" style="margin-left:auto" @click="handleResetAudit">重置审计日志</el-button>
+        <el-button @click="handleReset">{{ $adminText('重置') }}</el-button>
+        <el-button type="danger" plain :loading="resetting" style="margin-left:auto" @click="handleResetAudit">{{ $adminText('重置审计日志') }}</el-button>
       </div>
 
       <!-- 日志表格（服务端分页） -->
       <el-table :data="logs" v-loading="loading" stripe border style="width:100%">
-        <el-table-column prop="timestamp" label="时间" width="170" show-overflow-tooltip />
-        <el-table-column prop="username" label="用户" width="130" show-overflow-tooltip>
+        <el-table-column prop="timestamp" :label="$adminText('时间')" width="170" show-overflow-tooltip />
+        <el-table-column prop="username" :label="$adminText('用户')" width="130" show-overflow-tooltip>
           <template #default="{ row }">
             <span :style="row.username ? '' : 'color:var(--ink-3);'">{{ row.username || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="150">
+        <el-table-column :label="$adminText('操作')" width="150">
           <template #default="{ row }">
             <span class="status-badge" :class="isDangerAction(row.action) ? 'status-disabled' : 'status-enabled'">
               {{ actionText(row.action) }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="detail" label="详情" min-width="240" show-overflow-tooltip />
-        <el-table-column prop="ip" label="来源IP" width="140" show-overflow-tooltip />
+        <el-table-column prop="detail" :label="$adminText('详情')" min-width="240" show-overflow-tooltip />
+        <el-table-column prop="ip" :label="$adminText('来源IP')" width="140" show-overflow-tooltip />
       </el-table>
       <!-- 统一分页组件（服务端分页；审计日志每页选项为 20/50/100） -->
       <AdminPager v-model:page="page" v-model:page-size="pageSize"
@@ -53,6 +53,7 @@ import { ref, onMounted, onActivated } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getAuditLogs, getAuditActions, resetAuditLogs } from '@/api/audit'
 import AdminPager from '@/components/admin/AdminPager.vue'
+import { adminApiText, adminText } from '@/i18n'
 
 const loading = ref(false)
 const resetting = ref(false)
@@ -109,7 +110,7 @@ const ACTION_TEXT = {
   'share.settings': '修改分享安全设置'
 }
 function actionText(a) {
-  return ACTION_TEXT[a] || a
+  return adminText(ACTION_TEXT[a] || a)
 }
 // 删除类/失败类操作用红色标识
 function isDangerAction(a) {
@@ -134,10 +135,10 @@ async function load(silent = false) {
       totalPages.value = res.totalPages || 1
       page.value = res.page || 1
     } else {
-      ElMessage.error(res?.message || '加载失败')
+      ElMessage.error(adminApiText(res?.message, '加载失败'))
     }
   } catch (e) {
-    ElMessage.error('加载审计日志失败')
+    ElMessage.error(adminText('加载审计日志失败'))
   } finally {
     loading.value = false
   }
@@ -160,23 +161,23 @@ function handleReset() {
 async function handleResetAudit() {
   try {
     await ElMessageBox.confirm(
-      '重置将永久清空全部审计日志且不可恢复，清空后仅保留本次重置的一条记录。确定继续吗？',
-      '重置审计日志',
-      { type: 'warning', confirmButtonText: '继续', cancelButtonText: '取消' }
+      adminText('重置将永久清空全部审计日志且不可恢复，清空后仅保留本次重置的一条记录。确定继续吗？'),
+      adminText('重置审计日志'),
+      { type: 'warning', confirmButtonText: adminText('继续'), cancelButtonText: adminText('取消') }
     )
   } catch { return }
 
   let password
   try {
     const { value } = await ElMessageBox.prompt(
-      '请输入当前管理员账号密码以确认重置：',
-      '验证管理员密码',
+      adminText('请输入当前管理员账号密码以确认重置：'),
+      adminText('验证管理员密码'),
       {
         inputType: 'password',
-        confirmButtonText: '确认重置',
-        cancelButtonText: '取消',
-        inputPlaceholder: '管理员密码',
-        inputValidator: v => (v && v.trim()) ? true : '密码不能为空'
+        confirmButtonText: adminText('确认重置'),
+        cancelButtonText: adminText('取消'),
+        inputPlaceholder: adminText('管理员密码'),
+        inputValidator: v => (v && v.trim()) ? true : adminText('密码不能为空')
       }
     )
     password = value
@@ -186,14 +187,14 @@ async function handleResetAudit() {
   try {
     const res = await resetAuditLogs(password)
     if (res?.success) {
-      ElMessage.success(res.message || '审计日志已重置')
+      ElMessage.success(adminApiText(res.message, '审计日志已重置'))
       reload()
       loadActions()
     } else {
-      ElMessage.error(res?.message || '重置失败')
+      ElMessage.error(adminApiText(res?.message, '重置失败'))
     }
   } catch {
-    ElMessage.error('重置审计日志失败')
+    ElMessage.error(adminText('重置审计日志失败'))
   } finally {
     resetting.value = false
   }

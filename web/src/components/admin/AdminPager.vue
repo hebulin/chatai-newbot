@@ -2,11 +2,11 @@
   <!-- 后台统一分页组件（复用全站 .admin-pager 样式，格式：[条数/页] [上一页] 第X/Y页·共N条 [下一页]） -->
   <div class="admin-pager">
     <select :value="pageSize" class="admin-pager-size" @change="onSizeChange">
-      <option v-for="opt in sizeOptions" :key="opt" :value="opt">{{ opt }}条/页</option>
+      <option v-for="opt in sizeOptions" :key="opt" :value="opt">{{ $adminText('{count}条/页', { count: opt }) }}</option>
     </select>
-    <button class="admin-pager-btn" :disabled="page <= 1" @click="onPrev">上一页</button>
-    <span class="admin-pager-info">第 {{ page }} / {{ totalPages }} 页 · 共 {{ total }} 条</span>
-    <button class="admin-pager-btn" :disabled="page >= totalPages" @click="onNext">下一页</button>
+    <button class="admin-pager-btn" :disabled="page <= 1" @click="onPrev">{{ $adminText('上一页') }}</button>
+    <span class="admin-pager-info">{{ $adminText('第 {page} / {pages} 页 · 共 {total} 条', { page, pages: totalPages, total }) }}</span>
+    <button class="admin-pager-btn" :disabled="page >= totalPages" @click="onNext">{{ $adminText('下一页') }}</button>
   </div>
 </template>
 

@@ -2,10 +2,10 @@
   <div>
     <div class="section-header">
       <div class="section-title">
-        <span class="section-eyebrow">01 / QUICK START · 快速接入</span>
-        <h2>快速接入模型</h2>
+        <span class="section-eyebrow">01 / QUICK START · {{ $adminText('快速接入') }}</span>
+        <h2>{{ $adminText('快速接入模型') }}</h2>
       </div>
-      <span class="section-tip">选择厂商，填入 API Key 即可一键接入所有模型</span>
+      <span class="section-tip">{{ $adminText('选择厂商，填入 API Key 即可一键接入所有模型') }}</span>
     </div>
 
     <div class="provider-grid" v-loading="loading">
@@ -22,7 +22,7 @@
         </div>
         <div class="provider-card-info">
           <div class="provider-card-name">{{ p.name }}</div>
-          <div class="provider-card-count">已接入 {{ getExistingCount(p.id) }} / {{ getTotalModels(p) }} 个模型</div>
+          <div class="provider-card-count">{{ $adminText('已接入 {current} / {total} 个模型', { current: getExistingCount(p.id), total: getTotalModels(p) }) }}</div>
         </div>
         <div>
           <el-button
@@ -30,19 +30,19 @@
             type="primary"
             size="small"
             @click.stop="showQuickAdd(p)"
-          >一键接入</el-button>
-          <span v-else class="provider-card-done">已全部接入</span>
+          >{{ $adminText('一键接入') }}</el-button>
+          <span v-else class="provider-card-done">{{ $adminText('已全部接入') }}</span>
         </div>
       </div>
       <div v-if="!loading && presetProviders.length === 0" style="text-align:center;color:var(--ink-3);padding:40px;grid-column:1/-1;">
-        暂无厂商数据
+        {{ $adminText('暂无厂商数据') }}
       </div>
     </div>
 
     <!-- 快速接入弹窗 -->
-    <el-dialog v-model="quickAddVisible" :title="'快速接入 - ' + (currentProvider?.name || '')" width="560px" destroy-on-close>
-      <el-form label-width="80px">
-        <el-form-item label="厂商">
+    <el-dialog v-model="quickAddVisible" :title="$adminText('快速接入 - {name}', { name: currentProvider?.name || '' })" width="560px" destroy-on-close>
+      <el-form label-width="120px">
+        <el-form-item :label="$adminText('厂商')">
           <span style="display:flex;align-items:center;gap:8px;">
             <img v-if="providerIconMap[currentProvider?.id]" :src="providerIconMap[currentProvider?.id]" style="width:20px;height:20px;border-radius:4px;" />
             {{ currentProvider?.name }}
@@ -51,17 +51,17 @@
         <el-form-item label="API Key">
           <el-input v-model="quickAddForm.apiKey" placeholder="sk-..." />
         </el-form-item>
-        <el-form-item label="选择模型">
+        <el-form-item :label="$adminText('选择模型')">
           <div class="quick-model-picker">
-            <el-input v-model="modelKeyword" placeholder="搜索模型名称或 ID" clearable />
+            <el-input v-model="modelKeyword" :placeholder="$adminText('搜索模型名称或 ID')" clearable />
             <div class="quick-model-actions">
               <el-checkbox
                 :model-value="allFilteredSelected"
                 :indeterminate="someFilteredSelected"
                 :disabled="filteredAvailableModels.length === 0"
                 @change="toggleSelectAll"
-              >全选（{{ filteredAvailableModels.length }}）</el-checkbox>
-              <span>已选 {{ selectedModelCount }} 个</span>
+              >{{ $adminText('全选（{count}）', { count: filteredAvailableModels.length }) }}</el-checkbox>
+              <span>{{ $adminText('已选 {count} 个', { count: selectedModelCount }) }}</span>
             </div>
             <div class="quick-model-list">
             <el-checkbox
@@ -70,20 +70,20 @@
               v-model="quickAddForm.selectedIds[pm.id]"
             >
               {{ pm.name }}
-              <span v-if="pm.supportsThinking" class="think-badge" style="margin-left:4px;">思考</span>
-              <span v-if="pm.supportsMultimodal" class="mm-badge" style="margin-left:4px;">多模态</span>
+              <span v-if="pm.supportsThinking" class="think-badge" style="margin-left:4px;">{{ $adminText('思考') }}</span>
+              <span v-if="pm.supportsMultimodal" class="mm-badge" style="margin-left:4px;">{{ $adminText('多模态') }}</span>
             </el-checkbox>
-              <div v-if="filteredAvailableModels.length === 0" class="quick-model-empty">暂无匹配模型</div>
+              <div v-if="filteredAvailableModels.length === 0" class="quick-model-empty">{{ $adminText('暂无匹配模型') }}</div>
             </div>
           </div>
         </el-form-item>
-        <el-form-item label="可见性">
-          <el-switch v-model="quickAddForm.visibleToAll" active-text="所有人" inactive-text="仅管理员" />
+        <el-form-item :label="$adminText('可见性')">
+          <el-switch v-model="quickAddForm.visibleToAll" :active-text="$adminText('所有人')" :inactive-text="$adminText('仅管理员')" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="quickAddVisible = false">取消</el-button>
-        <el-button type="primary" @click="submitQuickAdd" :loading="submitting">确认接入</el-button>
+        <el-button @click="quickAddVisible = false">{{ $adminText('取消') }}</el-button>
+        <el-button type="primary" @click="submitQuickAdd" :loading="submitting">{{ $adminText('确认接入') }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -95,6 +95,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getProviders } from '@/api/providers'
 import { getModels, batchAddModels } from '@/api/models'
+import { adminApiText, adminText } from '@/i18n'
 
 const providerIconMap = {
   deepseek: '/icons/deepseek-icon.svg',
@@ -195,12 +196,12 @@ function toggleSelectAll(checked) {
 
 async function submitQuickAdd() {
   if (!quickAddForm.value.apiKey.trim()) {
-    ElMessage.warning('请输入 API Key')
+    ElMessage.warning(adminText('请输入 API Key'))
     return
   }
   const selectedModelIds = Object.keys(quickAddForm.value.selectedIds).filter(id => quickAddForm.value.selectedIds[id])
   if (selectedModelIds.length === 0) {
-    ElMessage.warning('请至少选择一个模型')
+    ElMessage.warning(adminText('请至少选择一个模型'))
     return
   }
   submitting.value = true
@@ -212,11 +213,11 @@ async function submitQuickAdd() {
       visibleToAll: quickAddForm.value.visibleToAll
     })
     if (res && res.success) {
-      ElMessage.success(res.message || '接入成功')
+      ElMessage.success(adminApiText(res.message, '接入成功'))
       quickAddVisible.value = false
       await loadData()
     } else {
-      ElMessage.error(res?.message || '接入失败')
+      ElMessage.error(adminApiText(res?.message, '接入失败'))
     }
   } finally {
     submitting.value = false
