@@ -1102,12 +1102,22 @@ public class AdminController {
 
     // ========== 审计日志 ==========
 
-    /** 获取进程级请求、聊天流、延迟与内存指标快照。 */
+    /** 获取跨重启累计请求、聊天流、延迟与当前进程内存指标快照。 */
     @GetMapping("/observability")
     public Map<String, Object> getObservability(HttpServletRequest request) {
         admin.requireAdmin(request);
         return Map.of("success", true, "healthy", storageService.isReady(),
                 "data", observabilityService.snapshot());
+    }
+
+    /** 获取最近若干小时的运行指标时间序列，hours 允许 1～720。 */
+    @GetMapping("/observability/history")
+    public Map<String, Object> getObservabilityHistory(
+            @RequestParam(defaultValue = "24") int hours, HttpServletRequest request) {
+        admin.requireAdmin(request);
+        int safeHours = Math.max(1, Math.min(720, hours));
+        return Map.of("success", true, "hours", safeHours,
+                "data", observabilityService.history(safeHours));
     }
 
     /**

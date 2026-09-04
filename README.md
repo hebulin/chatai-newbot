@@ -117,7 +117,7 @@ chatai-newbot/
 
 - JDK 21+
 - Maven 3.6+
-- Node.js 18+（仅前端开发/构建需要）
+- Node.js 22.22.2、24.15.0 或 26+（与 `web/package.json`、CI 保持一致）
 
 ### 构建运行
 
@@ -125,29 +125,44 @@ chatai-newbot/
 git clone https://github.com/hebulin/chatai-newbot.git
 cd chatai-newbot
 
-# 1. 构建前端
-cd web
-npm install
-npm run lint
-npm test
-npm run build          # 产物仅输出到 web/dist
+# 1. 安装前端依赖（根目录命令会统一调度 web 与后端模块）
+npm --prefix web install
 
-# 2. 构建后端（Maven 自动把 ../web/dist 打入 JAR 的 static 目录）
-cd ../chatai-with-newbot
-mvn clean verify
+# 2. 运行静态检查、前后端测试与生产构建
+npm run check
 
 # 3. 运行（空白部署无需预建任何目录/文件，首次启动自动初始化）
-java -jar target/*.jar
+java -jar chatai-with-newbot/target/*.jar
 ```
 
 访问 `http://localhost:9092`。
 
-前端开发模式（热更新，代理到后端 9092 端口）：
+同时启动 Spring Boot 与 Vite 开发服务（Vite 自动代理 `/api` 到 9092）：
 
 ```bash
-cd web
 npm run dev
 ```
+
+也可以分别执行 `npm run dev:server` 与 `npm run dev:web`。Maven 不在 PATH 时可设置
+`MAVEN_HOME` 或 `MAVEN_CMD`；Windows 开发机同时兼容 `D:\apache-maven-3.9.16`。
+
+### 测试
+
+```bash
+# 前后端全部单元与集成测试
+npm test
+
+# 首次运行浏览器端到端测试前安装 Chromium
+cd web
+npx playwright install chromium
+cd ..
+
+# 后端真实 HTTP + SQLite 核心链路，以及前端登录/SSE/刷新恢复链路
+npm run test:e2e
+```
+
+后端端到端测试使用独立的 `target/chatai-core-e2e.db`，前端端到端测试使用 API 替身，
+两者都不会改动开发环境的 `data/chatai.db`。CI 会自动安装 Chromium 并执行浏览器测试。
 
 ### 首次启动自动完成
 
@@ -205,6 +220,7 @@ npm run dev
 | 会话分享 | `t_chat_share` |
 | 系统公告 | `t_announcement` |
 | 用量日志（Token 与人民币成本快照，默认保留 120 天） | `t_usage_log` |
+| 运行指标（UTC 小时桶，跨重启累计，保留 90 天） | `t_observability_hourly` |
 | 审计日志（自动按保留期清理） | `t_audit_log` |
 | 键值配置 | `t_setting` |
 

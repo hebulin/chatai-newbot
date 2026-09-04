@@ -32,7 +32,7 @@
       <div class="observability-heading">
         <div>
           <h3 style="font-size:16px;font-weight:600;margin:0 0 4px;color:var(--ink);">{{ $adminText('运行状态') }}</h3>
-          <div class="observability-subtitle">{{ $adminText('进程启动后累计指标，用于快速定位错误、慢请求与聊天流拥塞。') }}</div>
+          <div class="observability-subtitle">{{ $adminText('指标按小时持久化并跨重启累计，用于定位错误、慢请求与聊天流拥塞。') }}</div>
         </div>
         <el-button @click="loadObservability()">{{ $adminText('刷新') }}</el-button>
       </div>
@@ -43,9 +43,31 @@
         <div class="metric-item"><span>{{ $adminText('慢请求') }}</span><strong>{{ observability.slowRequestCount ?? 0 }}</strong></div>
         <div class="metric-item"><span>{{ $adminText('平均延迟') }}</span><strong>{{ observability.averageLatencyMs ?? 0 }} ms</strong></div>
         <div class="metric-item"><span>{{ $adminText('活跃聊天流') }}</span><strong>{{ observability.activeChats ?? 0 }}</strong></div>
+        <div class="metric-item"><span>{{ $adminText('聊天成功') }}</span><strong>{{ observability.chatSuccessCount ?? 0 }} / {{ observability.chatRequestCount ?? 0 }}</strong></div>
         <div class="metric-item"><span>{{ $adminText('聊天失败') }}</span><strong>{{ observability.chatFailureCount ?? 0 }} / {{ observability.chatRequestCount ?? 0 }}</strong></div>
+        <div class="metric-item"><span>{{ $adminText('聊天拒绝') }}</span><strong>{{ observability.chatRejectedCount ?? 0 }}</strong></div>
+        <div class="metric-item"><span>{{ $adminText('平均首字延迟') }}</span><strong>{{ observability.chatAvgTimeToFirstTokenMs ?? 0 }} ms</strong></div>
         <div class="metric-item"><span>{{ $adminText('JVM 堆内存') }}</span><strong>{{ formatBytes(observability.heapUsedBytes) }} / {{ formatBytes(observability.heapMaxBytes) }}</strong></div>
       </div>
+      <div class="metrics-period">
+        {{ $adminText('累计起点') }}：{{ formatMetricTime(observability.metricsSince) }} · {{ $adminText('保留最近 90 天') }}
+      </div>
+      <div class="observability-history-heading">
+        <span>{{ $adminText('最近 24 小时趋势') }}</span>
+        <span>{{ $adminText('按小时聚合，仅展示有流量的时段') }}</span>
+      </div>
+      <el-table :data="observabilityHistory" size="small" max-height="280" class="observability-history-table">
+        <el-table-column :label="$adminText('时段')" min-width="150">
+          <template #default="scope">{{ formatMetricTime(scope.row.bucketStart) }}</template>
+        </el-table-column>
+        <el-table-column prop="requestCount" :label="$adminText('请求')" min-width="80" />
+        <el-table-column prop="serverErrorCount" :label="$adminText('错误')" min-width="80" />
+        <el-table-column prop="averageLatencyMs" :label="$adminText('平均延迟（ms）')" min-width="120" />
+        <el-table-column prop="chatRequestCount" :label="$adminText('聊天')" min-width="80" />
+        <el-table-column prop="chatFailureCount" :label="$adminText('聊天失败')" min-width="95" />
+        <el-table-column prop="chatAvgTimeToFirstTokenMs" :label="$adminText('首字延迟（ms）')" min-width="120" />
+        <template #empty>{{ $adminText('暂无持久化指标') }}</template>
+      </el-table>
     </div>
 
     <div class="admin-card" v-loading="healthLoading" style="margin-top:20px;">
@@ -205,7 +227,7 @@
 <script setup>
 import { ref, onMounted, onActivated } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getStorageSettings, getQuotaSettings, setQuotaSettings, getSecuritySettings, setSecuritySettings, getBillingSettings, setBillingSettings, getObservability, getHealthCheckSettings, setHealthCheckSettings } from '@/api/settings'
+import { getStorageSettings, getQuotaSettings, setQuotaSettings, getSecuritySettings, setSecuritySettings, getBillingSettings, setBillingSettings, getObservability, getObservabilityHistory, getHealthCheckSettings, setHealthCheckSettings } from '@/api/settings'
 import { getModels, updateModel } from '@/api/models'
 import { adminApiMessages, adminApiText, adminText } from '@/i18n'
 
@@ -213,6 +235,7 @@ const loading = ref(false)
 const settings = ref({ useSqlite: true, dbFileSize: '' })
 const observabilityLoading = ref(false)
 const observability = ref({})
+const observabilityHistory = ref([])
 const quotaLoading = ref(false)
 const quotaSaving = ref(false)
 const dailyChatLimit = ref(0)
@@ -320,15 +343,29 @@ onActivated(() => {
   loadHealth(true)
 })
 
-// 加载当前进程的运行指标；静默刷新时不显示整卡遮罩
+// 加载持久累计快照和最近 24 小时时间序列；静默刷新时不显示整卡遮罩
 async function loadObservability(silent = false) {
   if (!silent) observabilityLoading.value = true
   try {
-    const res = await getObservability()
-    if (res?.success) observability.value = res.data || {}
+    const [snapshotRes, historyRes] = await Promise.all([
+      getObservability(),
+      getObservabilityHistory(24)
+    ])
+    if (snapshotRes?.success) observability.value = snapshotRes.data || {}
+    if (historyRes?.success) observabilityHistory.value = historyRes.data || []
   } finally {
     observabilityLoading.value = false
   }
+}
+
+// 将 ISO 时间格式化为当前后台语言下的紧凑日期小时
+function formatMetricTime(value) {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return String(value)
+  return new Intl.DateTimeFormat(undefined, {
+    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false
+  }).format(date)
 }
 
 // 将秒数格式化为适合后台概览的紧凑时长
@@ -478,5 +515,6 @@ async function handleSaveBilling() {
 .billing-row,.currency-row{display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap}.billing-label{width:150px;font-size:13px;color:var(--ink-3)}.currency-table{padding:14px;border:1px solid var(--line);border-radius:8px;background:var(--paper-2)}.currency-rate-prefix,.currency-code-label{font-size:12px;color:var(--ink-3)}.settings-note{margin-top:16px;font-size:13px;color:var(--ink-3);line-height:1.8;background:var(--paper-2);padding:12px 16px;border-radius:8px;border:1px solid var(--line)}
 .security-setting-row{display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}.security-setting-row-top{align-items:flex-start}.security-setting-label{width:150px;font-size:13px;color:var(--ink-3);flex:0 0 auto}
 .observability-heading{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:16px}.observability-subtitle{font-size:12px;color:var(--ink-3)}.observability-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}.metric-item{display:flex;flex-direction:column;gap:6px;padding:14px;border:1px solid var(--line);border-radius:8px;background:var(--paper-2)}.metric-item span{font-size:12px;color:var(--ink-3)}.metric-item strong{font-size:16px;color:var(--ink);font-weight:600}
+.metrics-period{margin-top:12px;font-size:12px;color:var(--ink-3)}.observability-history-heading{display:flex;justify-content:space-between;gap:12px;align-items:center;margin:20px 0 10px;font-size:13px;font-weight:600;color:var(--ink)}.observability-history-heading span:last-child{font-size:12px;font-weight:400;color:var(--ink-3)}.observability-history-table{width:100%}
 .health-model-list{border:1px solid var(--line);border-radius:8px;background:var(--paper-2);padding:6px 14px;max-height:320px;overflow-y:auto}.health-model-row{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--line)}.health-model-row:last-child{border-bottom:none}.health-model-name{font-size:13px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px}.health-model-provider{font-size:12px;color:var(--ink-3)}.health-model-disabled{font-size:12px;color:#f59e0b}.health-model-row .el-switch{margin-left:auto}
 </style>

@@ -55,6 +55,9 @@ logging:
 # CHATAI_HEALTHCHECK_ENABLED / CHATAI_HEALTHCHECK_INTERVAL_MINUTES / CHATAI_HEALTHCHECK_INITIAL_DELAY_MINUTES 覆盖；
 # 单个模型是否参与检查由后台"健康检查"开关控制（t_model_config.health_check_enabled，默认参与）
 chatai:
+  observability:
+    # 高频请求先在内存计数，默认每分钟批量聚合到 SQLite 小时桶，减少写锁竞争。
+    flush-interval-ms: 60000
   health-check:
     enabled: true
     interval-minutes: 360

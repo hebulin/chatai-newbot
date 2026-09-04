@@ -50,12 +50,13 @@ public class BackupService {
     /** 备份保留数量（超出后删除最旧备份） */
     private static final int DEFAULT_KEEP = 5;
     /** 备份文件名时间格式 */
-    private static final DateTimeFormatter NAME_FMT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
+    private static final DateTimeFormatter NAME_FMT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS");
     /** 恢复时需要逐表导入的表清单（固定白名单，防止导入未知表结构） */
     private static final List<String> RESTORE_TABLES = List.of(
             "t_user", "t_model_config", "t_usage_log", "t_setting", "t_token",
             "t_chat_session", "t_chat_user_state", "t_chat_history", "t_chat_share",
-            "t_custom_provider", "t_file_asset", "t_file_asset_grant", "t_announcement");
+            "t_custom_provider", "t_file_asset", "t_file_asset_grant", "t_announcement",
+            "t_observability_hourly");
 
     private final JdbcTemplate jdbcTemplate;
     private final StorageManager storageManager;
@@ -107,8 +108,8 @@ public class BackupService {
      */
     public Map<String, Object> createBackup() throws Exception {
         Path dir = backupDir();
-        String name = "backup-" + LocalDateTime.now().format(NAME_FMT) + ".zip";
-        Path zipPath = dir.resolve(name);
+        Path zipPath = nextBackupPath(dir);
+        String name = zipPath.getFileName().toString();
         Path snapshot = Files.createTempFile("chatai-backup-snapshot", ".db");
         try {
             // VACUUM INTO 生成一致性数据库快照（SQLite 官方在线备份方式，WAL 模式下安全）
@@ -155,6 +156,19 @@ public class BackupService {
         } finally {
             Files.deleteIfExists(snapshot);
         }
+    }
+
+    /**
+     * 生成不会覆盖现有文件的备份路径；同一毫秒内并发创建时自动追加序号。
+     */
+    private Path nextBackupPath(Path dir) {
+        String baseName = "backup-" + LocalDateTime.now().format(NAME_FMT);
+        Path candidate = dir.resolve(baseName + ".zip");
+        int suffix = 1;
+        while (Files.exists(candidate)) {
+            candidate = dir.resolve(baseName + "-" + suffix++ + ".zip");
+        }
+        return candidate;
     }
 
     /** 向 zip 写入一个文件并记录其 SHA-256 校验到清单 */

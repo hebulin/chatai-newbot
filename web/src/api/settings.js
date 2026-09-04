@@ -35,9 +35,14 @@ export function setSecuritySettings(payload) {
   return request.put('/admin/settings/security', payload)
 }
 
-// 获取当前进程的请求、聊天流和 JVM 内存诊断指标
+// 获取跨重启累计请求、聊天流和当前 JVM 内存诊断指标
 export function getObservability() {
   return request.get('/admin/observability')
+}
+
+// 获取最近若干小时的持久化运行指标时间序列
+export function getObservabilityHistory(hours = 24) {
+  return request.get('/admin/observability/history', { params: { hours } })
 }
 
 // 获取联网搜索设置（Key 仅返回掩码）
