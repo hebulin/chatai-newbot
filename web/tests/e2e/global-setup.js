@@ -1,21 +1,24 @@
-import { createServer } from 'vite'
+import { build, preview } from 'vite'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 
 /**
- * 在 Playwright 进程内启动并托管 Vite；返回的清理回调会在全部用例结束后关闭服务，
+ * 构建生产包并在 Playwright 进程内托管预览，直接验证分块及实际网络加载行为；
  * 避免 Windows 下外层命令包装进程残留导致测试不能自然退出。
  */
 export default async function globalSetup() {
   const currentDir = dirname(fileURLToPath(import.meta.url))
   const webRoot = resolve(currentDir, '../..')
-  const server = await createServer({
+  await build({ root: webRoot, logLevel: 'warn' })
+  const server = await preview({
     root: webRoot,
     logLevel: 'error',
-    server: { host: '127.0.0.1', port: 4173, strictPort: true }
+    preview: { host: '127.0.0.1', port: 4173, strictPort: true }
   })
-  await server.listen()
   return async () => {
-    await server.close()
+    await new Promise((resolveClose, reject) => {
+      server.httpServer.close(error => error ? reject(error) : resolveClose())
+      server.httpServer.closeAllConnections()
+    })
   }
 }

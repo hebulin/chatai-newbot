@@ -10,7 +10,9 @@ async function installApiMock(page) {
     chatMeta: {},
     lastChatId: null,
     version: 0,
-    saveCount: 0
+    saveCount: 0,
+    chatRequests: [],
+    reply: 'E2E stream reply'
   }
   await page.route('**/api/**', async route => {
     const request = route.request()
@@ -64,8 +66,9 @@ async function installApiMock(page) {
       })
     }
     if (path === '/api/chat' && method === 'POST') {
+      state.chatRequests.push(request.postDataJSON())
       const body = [
-        'data: {"choices":[{"delta":{"content":"E2E stream reply"}}]}',
+        `data: ${JSON.stringify({ choices: [{ delta: { content: state.reply } }] })}`,
         'data: {"choices":[],"usage":{"prompt_tokens":4,"completion_tokens":3}}',
         'data: [DONE]',
         ''
@@ -187,6 +190,46 @@ test('管理员登录、SSE 对话并在刷新后恢复服务端会话', async (
   await expect(page.getByText('E2E stream reply')).toBeVisible()
 })
 
+test('编辑用户消息在原会话生成回答分页版本并在刷新后保留', async ({ page }) => {
+  const state = await installApiMock(page)
+  state.lastChatId = 'edit-resend-chat'
+  state.chatMeta[state.lastChatId] = { title: '编辑重发测试' }
+  state.chats[state.lastChatId] = [
+    { id: 'user-original', role: 'user', content: '编辑前的问题' },
+    { id: 'reply-original', role: 'assistant', content: '编辑前的回答' }
+  ]
+  state.reply = '编辑后生成的新回答'
+  await page.addInitScript(() => {
+    localStorage.setItem('username', 'admin')
+    localStorage.setItem('role', 'admin')
+  })
+  await page.goto('/')
+  await expect(page.getByText('编辑前的回答', { exact: true })).toBeVisible()
+  await page.getByTitle('编辑重发', { exact: true }).click()
+  await page.locator('.el-message-box textarea').fill('编辑后的问题')
+  await page.locator('.el-message-box').getByRole('button', { name: '重新发送', exact: true }).click()
+  await expect(page.getByText('编辑后生成的新回答', { exact: true })).toBeVisible()
+  await expect(page.locator('.version-indicator')).toHaveText('2/2')
+  await expect(page.locator('.msg-wrapper')).toHaveCount(2)
+  await expect.poll(() => state.chats['edit-resend-chat'][1].versions?.length).toBe(2)
+  expect(Object.keys(state.chats)).toEqual(['edit-resend-chat'])
+  expect(state.lastChatId).toBe('edit-resend-chat')
+  expect(state.chatRequests[0]).toMatchObject({
+    chatId: 'edit-resend-chat', messages: [{ role: 'user', content: '编辑后的问题' }]
+  })
+  expect(state.chats['edit-resend-chat'][0].id).toBe('user-original')
+  await page.getByRole('button', { name: '上一版本', exact: true }).click()
+  await expect(page.getByText('编辑前的回答', { exact: true })).toBeVisible()
+  await expect(page.locator('.version-indicator')).toHaveText('1/2')
+  await page.getByRole('button', { name: '下一版本', exact: true }).click()
+  await expect(page.getByText('编辑后生成的新回答', { exact: true })).toBeVisible()
+  await page.reload()
+  await expect(page.getByText('编辑后的问题', { exact: true })).toBeVisible()
+  await expect(page.getByText('编辑后生成的新回答', { exact: true })).toBeVisible()
+  await expect(page.locator('.version-indicator')).toHaveText('2/2')
+  expect(Object.keys(state.chats)).toEqual(['edit-resend-chat'])
+})
+
 test('管理员可查看跨重启累计指标与 24 小时趋势', async ({ page }) => {
   await installApiMock(page)
   await page.addInitScript(() => {
@@ -199,4 +242,48 @@ test('管理员可查看跨重启累计指标与 24 小时趋势', async ({ page
   await expect(page.getByText('最近 24 小时趋势')).toBeVisible()
   await expect(page.locator('.observability-history-table')).toContainText('42')
   await expect(page.locator('.observability-history-table')).toContainText('260')
+})
+
+test('生产包按图表类型加载布局引擎，Excel 仅在导出时加载', async ({ page }) => {
+  test.setTimeout(60000)
+  const state = await installApiMock(page)
+  const loaded = new Set()
+  const pageErrors = []
+  page.on('request', request => loaded.add(new URL(request.url()).pathname))
+  page.on('pageerror', error => pageErrors.push(error.message))
+  await page.addInitScript(() => {
+    localStorage.setItem('username', 'admin')
+    localStorage.setItem('role', 'admin')
+  })
+  await page.goto('/')
+  await expect(page.locator('.input-area textarea')).toBeVisible()
+  expect([...loaded].some(path => /mermaid|xlsx/.test(path))).toBe(false)
+
+  state.reply = '```mermaid\nflowchart TD\nA[开始] --> B[完成]\n```'
+  await page.locator('.input-area textarea').fill('普通流程图')
+  await page.locator('.send-btn').click()
+  await expect(page.locator('.mermaid-view svg')).toHaveCount(1)
+  expect([...loaded].some(path => /mermaid\.core/.test(path))).toBe(true)
+  expect([...loaded].some(path => /mermaid-elk|mermaid-mindmap|xlsx-export/.test(path))).toBe(false)
+
+  state.reply = '```mermaid\nflowchart-elk TD\nA[开始] --> B[完成]\n```'
+  await page.locator('.input-area textarea').fill('ELK 流程图')
+  await page.locator('.send-btn').click()
+  await expect(page.locator('.mermaid-view svg')).toHaveCount(2)
+  expect([...loaded].some(path => /mermaid-elk/.test(path))).toBe(true)
+  expect([...loaded].some(path => /mermaid-mindmap|xlsx-export/.test(path))).toBe(false)
+
+  state.reply = '```mermaid\nmindmap\n  root((主题))\n    分支一\n    分支二\n```\n\n| 名称 | 数量 |\n| --- | --- |\n| 测试 | 2 |'
+  await page.locator('.input-area textarea').fill('思维导图和表格')
+  await page.locator('.send-btn').click()
+  await expect(page.locator('.mermaid-view svg')).toHaveCount(3)
+  expect([...loaded].some(path => /mermaid-mindmap/.test(path))).toBe(true)
+  expect([...loaded].some(path => /xlsx-export/.test(path))).toBe(false)
+  await page.locator('.md-table-btn').click()
+  expect([...loaded].some(path => /xlsx-export/.test(path))).toBe(false)
+  const download = page.waitForEvent('download')
+  await page.locator('.md-table-menu-item[data-fmt="xlsx"]').click()
+  expect((await download).suggestedFilename()).toMatch(/\.xlsx$/)
+  expect([...loaded].some(path => /xlsx-export/.test(path))).toBe(true)
+  expect(pageErrors).toEqual([])
 })

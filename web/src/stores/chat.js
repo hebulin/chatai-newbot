@@ -1,6 +1,10 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { loadChatHistory, loadChatSummaries, loadChatVersion, saveChatHistory, loadSingleChatHistory } from '@/api/chat'
+import { buildChatListProjection, normalizeChatFolders as normalizeFolders } from '@/stores/chat/chatListProjection'
+import { downloadAllChats, downloadChatsJson, downloadSingleChatMarkdown, prepareChatImport } from '@/stores/chat/chatArchive'
+import { appendMessageVersion, getMessageVersionView, selectMessageVersion as selectVersion } from '@/stores/chat/messageVersions'
+import { createRecoveryKey, createSyncPayload, persistSyncRecovery, readSyncRecovery } from '@/stores/chat/chatSyncState'
 
 export const useChatStore = defineStore('chat', () => {
   const chats = ref({})
@@ -50,9 +54,7 @@ export const useChatStore = defineStore('chat', () => {
 
   // 当前账号的未同步恢复快照键，避免不同用户之间读取彼此草稿
   function recoveryKey() {
-    let username = 'anonymous'
-    try { username = localStorage.getItem('username') || 'anonymous' } catch (e) { /* ignore */ }
-    return `chatai-chat-recovery:${username}`
+    return createRecoveryKey(localStorage)
   }
 
   // 生成稳定的消息标识（幂等去重键）：重试上传时服务端/本地合并据此识别同一条消息
@@ -75,50 +77,34 @@ export const useChatStore = defineStore('chat', () => {
 
   // 生成当前增量保存载荷：仅包含脏会话/脏元信息，携带每会话基准版本供服务端乐观锁校验
   function buildSyncPayload() {
-    const chatsPayload = {}
-    const metaPayload = {}
-    dirtyChatIds.forEach((rev, id) => {
-      if (chats.value[id] !== undefined) chatsPayload[id] = chats.value[id]
-      if (chatMeta.value[id]) metaPayload[id] = chatMeta.value[id]
+    return createSyncPayload({
+      chats: chats.value,
+      chatMeta: chatMeta.value,
+      deletedChatIds: deletedChatIds.value,
+      folders: folders.value,
+      chatVersions: chatVersions.value,
+      foldersVersion: foldersVersion.value,
+      currentChatId: currentChatId.value,
+      dirtyChatIds,
+      dirtyMetaIds,
+      foldersDirty,
+      pendingRestoreIds,
+      remoteVersion
     })
-    dirtyMetaIds.forEach((rev, id) => {
-      if (!dirtyChatIds.has(id) && chatMeta.value[id]) metaPayload[id] = chatMeta.value[id]
-    })
-    const baseVersions = {}
-    Object.keys(chatsPayload).forEach(id => { baseVersions[id] = chatVersions.value[id] || 0 })
-    Object.keys(metaPayload).forEach(id => {
-      if (baseVersions[id] === undefined) baseVersions[id] = chatVersions.value[id] || 0
-    })
-    return {
-      lastChatId: currentChatId.value,
-      chats: chatsPayload,
-      chatMeta: metaPayload,
-      deletedChatIds: [...deletedChatIds.value],
-      folders: foldersDirty ? folders.value : undefined,
-      baseVersions,
-      baseFoldersVersion: foldersVersion.value,
-      restoreChatIds: [...pendingRestoreIds],
-      baseVersion: remoteVersion
-    }
   }
 
   // 写入刷新/断网恢复快照；保存成功且无后续变更时才清除
   function persistRecoveryDraft(payload) {
     try {
-      localStorage.setItem(recoveryKey(), JSON.stringify({ revision: localRevision, savedAt: Date.now(), payload }))
-    } catch (e) { /* 存储空间不足时仍继续服务端同步 */ }
+      persistSyncRecovery(localStorage, recoveryKey(), localRevision, payload)
+    } catch { /* 浏览器可能在访问 localStorage 属性时即抛错，不能中断服务器保存 */ }
   }
 
   // 将尚未成功上传的本地恢复快照合并进服务端摘要状态
   function restoreRecoveryDraft() {
     try {
-      const raw = localStorage.getItem(recoveryKey())
-      if (!raw) return
-      const draft = JSON.parse(raw)
-      if (!draft?.payload || Date.now() - Number(draft.savedAt || 0) > 7 * 86400000) {
-        localStorage.removeItem(recoveryKey())
-        return
-      }
+      const draft = readSyncRecovery(localStorage, recoveryKey())
+      if (!draft) return
       const payload = draft.payload
       Object.entries(payload.chats || {}).forEach(([id, messages]) => {
         const serverCount = Number(chatSummaries.value[id]?.count || 0)
@@ -143,152 +129,18 @@ export const useChatStore = defineStore('chat', () => {
     } catch (e) { /* 损坏草稿忽略，服务端数据仍可使用 */ }
   }
 
-  // 按日期分组的会话列表（已加载会话按消息实时推导，未加载会话用服务端摘要）
-  const sortedChatList = computed(() => {
-    const chatInfos = []
-    const ids = new Set([...Object.keys(chats.value), ...Object.keys(chatSummaries.value)])
-    ids.forEach(id => {
-      const meta = chatMeta.value[id] || {}
-      let autoTitle, fullContent, lastTime
-      if (chats.value[id] !== undefined) {
-        const msgs = chats.value[id] || []
-        let first = null
-        lastTime = null
-        for (let i = 0; i < msgs.length; i++) {
-          if (msgs[i].role === 'user' && !first) first = msgs[i]
-          if (msgs[i].time) lastTime = msgs[i].time
-        }
-        // 空会话（尚未发送过用户消息）不在侧边栏展示，发送首条消息后才出现
-        if (!first) return
-        autoTitle = first.content.substring(0, 20)
-        fullContent = first.content
-      } else {
-        const s = chatSummaries.value[id] || {}
-        // 未加载会话：服务端摘要显示无消息的空会话同样不展示
-        if ((s.count || 0) === 0) return
-        autoTitle = s.title || '新会话'
-        fullContent = s.preview || ''
-        lastTime = s.lastTime || null
-      }
-      const title = (meta.title && meta.title.trim()) ? meta.title : autoTitle
-      chatInfos.push({
-        id,
-        title,
-        pinned: !!meta.pinned,
-        folderId: meta.folderId || null,
-        fullContent,
-        lastTime,
-        lastTimeDate: parseDateFromStr(lastTime)
-      })
-    })
-
-    // 模糊搜索过滤
-    const keyword = searchKeyword.value.trim().toLowerCase()
-    let filtered = chatInfos
-    if (keyword) {
-      filtered = chatInfos.filter(info =>
-        info.title.toLowerCase().includes(keyword) ||
-        info.fullContent.toLowerCase().includes(keyword)
-      )
-    }
-
-    // 置顶会话优先，其次按最后对话时间排序
-    filtered.sort((a, b) => {
-      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
-      if (!a.lastTimeDate && !b.lastTimeDate) return 0
-      if (!a.lastTimeDate) return -1
-      if (!b.lastTimeDate) return 1
-      return b.lastTimeDate - a.lastTimeDate
-    })
-
-    const validFolderIds = new Set(folders.value.map(f => f.id))
-
-    // 搜索时不做文件夹分组：命中的会话（含文件夹内）平铺到日期分组，便于快速定位
-    const groupingByFolder = !keyword
-    let folderGroups = []
-    if (groupingByFolder) {
-      const byFolder = {}
-      filtered.forEach(info => {
-        if (info.folderId && validFolderIds.has(info.folderId)) {
-          if (!byFolder[info.folderId]) byFolder[info.folderId] = []
-          byFolder[info.folderId].push(info)
-        }
-      })
-      folderGroups = folders.value
-        .map(f => ({ folder: f, chats: byFolder[f.id] || [] }))
-    }
-
-    // 按日期分组（置顶会话归入“置顶”分组，因排序后靠前故分组也在最前）；
-    // 分组阶段排除已归入文件夹的会话（搜索态除外）
-    const groups = {}
-    const groupOrder = []
-    filtered.forEach(info => {
-      if (groupingByFolder && info.folderId && validFolderIds.has(info.folderId)) return
-      const dateLabel = info.pinned ? '置顶' : getDateLabel(info.lastTimeDate)
-      if (!groups[dateLabel]) {
-        groups[dateLabel] = []
-        groupOrder.push(dateLabel)
-      }
-      groups[dateLabel].push(info)
-    })
-
-    return { groups, groupOrder, total: filtered.length, folderGroups }
-  })
-
-  // 规整服务端/备份返回的文件夹列表：仅保留含合法 id 与 name 的项，去除重复 id
-  function normalizeFolders(raw) {
-    const list = []
-    const seen = new Set()
-    if (!Array.isArray(raw)) return list
-    raw.forEach(f => {
-      if (!f || typeof f !== 'object') return
-      const id = typeof f.id === 'string' ? f.id : String(f.id || '')
-      const name = typeof f.name === 'string' ? f.name.trim() : ''
-      if (!id || !name || seen.has(id)) return
-      seen.add(id)
-      list.push({ id, name, collapsed: !!f.collapsed })
-    })
-    return list
-  }
+  // 按日期分组的会话列表（投影逻辑独立，Store 仅提供响应式状态）
+  const sortedChatList = computed(() => buildChatListProjection({
+    chats: chats.value,
+    chatSummaries: chatSummaries.value,
+    chatMeta: chatMeta.value,
+    folders: folders.value,
+    searchKeyword: searchKeyword.value
+  }))
 
   const currentMessages = computed(() => {
     return chats.value[currentChatId.value] || []
   })
-
-  function parseDateFromStr(timeStr) {
-    if (!timeStr) return null
-    try {
-      let date = new Date(timeStr.replace(/\//g, '-'))
-      if (!isNaN(date.getTime())) return date
-      date = new Date(timeStr)
-      if (!isNaN(date.getTime())) return date
-    } catch (e) { /* ignore */ }
-    return null
-  }
-
-  function getDateLabel(date) {
-    if (!date) return '今天'
-    const now = new Date()
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    const chatDate = new Date(date.getFullYear(), date.getMonth(), date.getDate())
-
-    // 今天
-    if (chatDate.getTime() === today.getTime()) return '今天'
-
-    // 本周（以周一为一周起点，排除今天）
-    const dowMon = (today.getDay() + 6) % 7 // 周一=0 … 周日=6
-    const weekStart = new Date(today)
-    weekStart.setDate(today.getDate() - dowMon)
-    if (chatDate.getTime() >= weekStart.getTime() && chatDate.getTime() < today.getTime()) return '本周'
-
-    // 本月（同年同月，排除已归入本周的部分）
-    if (chatDate.getFullYear() === today.getFullYear() && chatDate.getMonth() === today.getMonth()) return '本月'
-
-    // 超过本月：按月份区分，格式 YYYY年MM月（月份补零，如 2025年06月）
-    const year = date.getFullYear()
-    const month = String(date.getMonth() + 1).padStart(2, '0')
-    return `${year}年${month}月`
-  }
 
   // 从服务端加载会话列表（只拉摘要，不含消息内容），再按需加载上次打开的会话
   async function loadFromServer() {
@@ -796,16 +648,30 @@ export const useChatStore = defineStore('chat', () => {
     return null
   }
 
-  function addMessage(chatId, msg) {
+  /** 追加消息；补发缺失回答时允许插入指定位置，保留后续对话。 */
+  function addMessage(chatId, msg, insertIndex) {
     if (!chats.value[chatId]) chats.value[chatId] = []
     // 为消息分配稳定标识：重试/多端合并时按 id 去重，防止重复消息
     if (!msg.id) msg.id = genMsgId()
-    chats.value[chatId].push(msg)
+    if (Number.isInteger(insertIndex)) chats.value[chatId].splice(insertIndex, 0, msg)
+    else chats.value[chatId].push(msg)
     markChatDirty(chatId)
     syncToServer()
   }
 
-  // 截断会话消息：删除 fromIdx（含）之后的所有消息（用于重新生成/编辑重发）
+  /** 原位更新用户消息正文，保留消息标识及附件并加入同步队列。 */
+  function editUserMessage(chatId, msgIdx, content) {
+    const message = chats.value[chatId]?.[msgIdx]
+    if (!message || message.role !== 'user' || !content?.trim()) return false
+    message.content = content.trim()
+    // 原输入 Token 属于旧问题，在新回答返回前不可继续展示为新问题的统计。
+    delete message.promptTokens
+    markChatDirty(chatId)
+    syncToServer()
+    return true
+  }
+
+  // 显式截断会话消息：删除 fromIdx（含）之后的所有消息，不用于编辑重发或回答版本生成。
   function truncateMessages(chatId, fromIdx) {
     const msgs = chats.value[chatId]
     if (!msgs) return
@@ -838,114 +704,44 @@ export const useChatStore = defineStore('chat', () => {
     return (s && s.title) ? s.title : '新会话'
   }
 
-  // 导出全部会话（先补齐未加载的会话内容），format: txt=纯文本 md=Markdown json=完整 JSON 备份
+  // 导出全部会话前先补齐懒加载正文，再委托归档模块生成文件。
   async function exportChats(format = 'txt') {
     await ensureAllChatsLoaded()
-    if (format === 'json') {
-      exportChatsJson()
-      return
-    }
-    if (format === 'md') {
-      exportChatsMarkdown()
-      return
-    }
-    let text = ''
-    Object.entries(chats.value).forEach((entry, idx) => {
-      if (idx > 0) text += '\n====================\n\n'
-      entry[1].forEach(m => {
-        text += '[' + (m.time || '') + '] ' + m.role + ': ' + m.content + '\n'
-      })
-    })
-    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = 'chat-export-' + new Date().toISOString().slice(0, 10) + '.txt'
-    a.click()
-    URL.revokeObjectURL(a.href)
-  }
-
-  // 全量 Markdown 导出：每个会话一个一级标题，会话之间以分隔线分隔（格式与单会话导出一致）
-  function exportChatsMarkdown() {
-    const sections = []
-    Object.keys(chats.value).forEach(id => {
-      const msgs = chats.value[id] || []
-      if (!msgs.some(m => m.role === 'user')) return
-      let md = '# ' + chatTitle(id) + '\n\n'
-      msgs.forEach(m => {
-        const roleLabel = m.role === 'user' ? '👤 用户' : '🤖 助手'
-        md += '## ' + roleLabel + (m.time ? '  `' + m.time + '`' : '') + '\n\n'
-        md += (m.content || '') + '\n\n'
-      })
-      sections.push(md.trimEnd())
-    })
-    const blob = new Blob([sections.join('\n\n---\n\n') + '\n'], { type: 'text/markdown;charset=utf-8' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = 'chat-export-' + new Date().toISOString().slice(0, 10) + '.md'
-    a.click()
-    URL.revokeObjectURL(a.href)
-  }
-
-  // 全量 JSON 备份：导出会话内容与元信息，可用于跨账号/跨部署迁移后导回
-  function exportChatsJson() {
-    const data = {
-      app: 'chatai-newbot',
-      version: 1,
-      exportedAt: new Date().toISOString(),
+    downloadAllChats(format, {
       chats: chats.value,
       chatMeta: chatMeta.value,
-      folders: folders.value
-    }
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = 'chat-backup-' + new Date().toISOString().slice(0, 10) + '.json'
-    a.click()
-    URL.revokeObjectURL(a.href)
+      folders: folders.value,
+      resolveTitle: chatTitle
+    })
   }
 
-  // 导入 JSON 备份：按会话 ID 合并，已存在的会话跳过不覆盖；返回 { imported, skipped }
+  // 保留原公开入口，直接导出当前内存中的完整 JSON 备份。
+  function exportChatsJson() {
+    downloadChatsJson({ chats: chats.value, chatMeta: chatMeta.value, folders: folders.value })
+  }
+
+  // 导入计划由纯模块计算，Store 只负责写入状态、标脏和触发同步。
   function importChatsJson(data) {
-    if (!data || typeof data !== 'object' || !data.chats || typeof data.chats !== 'object') {
-      throw new Error('备份文件格式不正确（缺少 chats 字段）')
-    }
-    let imported = 0
-    let skipped = 0
-    const srcMeta = (data.chatMeta && typeof data.chatMeta === 'object') ? data.chatMeta : {}
-    Object.keys(data.chats).forEach(id => {
-      const msgs = data.chats[id]
-      if (!Array.isArray(msgs)) { skipped++; return }
-      const existing = chats.value[id]
-      const summary = chatSummaries.value[id]
-      // 已有同 ID 且有内容的会话（含未加载但摘要显示有消息的）不覆盖，避免导入旧备份丢失新消息
-      if (existing && existing.length > 0) { skipped++; return }
-      if (!existing && summary && (summary.count || 0) > 0) { skipped++; return }
-      chats.value[id] = msgs
-      if (srcMeta[id] && typeof srcMeta[id] === 'object') {
-        chatMeta.value[id] = { ...srcMeta[id] }
-      }
-      // 从删除列表移除，并声明显式恢复：防止服务端将导入的会话当作已删除而拒绝写入
-      const delIdx = deletedChatIds.value.indexOf(id)
-      if (delIdx >= 0) deletedChatIds.value.splice(delIdx, 1)
+    const plan = prepareChatImport(data, {
+      chats: chats.value,
+      chatSummaries: chatSummaries.value,
+      folders: folders.value,
+      normalizeFolders
+    })
+    plan.chatEntries.forEach(({ id, messages, meta }) => {
+      chats.value[id] = messages
+      if (meta) chatMeta.value[id] = { ...meta }
+      const deletedIndex = deletedChatIds.value.indexOf(id)
+      if (deletedIndex >= 0) deletedChatIds.value.splice(deletedIndex, 1)
       pendingRestoreIds.add(id)
       markChatDirty(id)
-      imported++
     })
-    // 合并备份中的文件夹定义：同名/同 id 冲突时以本地现有文件夹为准，仅补充缺失项
-    let foldersChanged = false
-    const backupFolders = normalizeFolders(data.folders)
-    if (backupFolders.length > 0) {
-      const localIds = new Set(folders.value.map(f => f.id))
-      const localNames = new Set(folders.value.map(f => f.name))
-      backupFolders.forEach(f => {
-        if (localIds.has(f.id) || localNames.has(f.name)) return
-        folders.value.push({ ...f, collapsed: false })
-        foldersChanged = true
-      })
-      if (foldersChanged) foldersDirty = true
+    if (plan.foldersToAdd.length) {
+      folders.value.push(...plan.foldersToAdd)
+      foldersDirty = true
     }
-    if (imported > 0 || foldersChanged) syncToServer()
-    return { imported, skipped }
+    if (plan.imported > 0 || plan.foldersToAdd.length > 0) syncToServer()
+    return { imported: plan.imported, skipped: plan.skipped }
   }
 
   function countValidChats() {
@@ -1066,125 +862,38 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   // ========== 回答版本历史 ==========
-  // assistant 消息版本结构：msg.versions = [{ versionId, content, reasoning_content,
-  // thinkingTime, modelName, time, status, usage }]；msg.currentVersionId 指向当前选中版本。
-  // 平铺字段（content/reasoning_content/...）始终保持为当前选中版本的内容，兼容现有渲染/搜索/导出；
-  // 旧数据无 versions 字段时读取视为单版本，无需迁移。
-
-  // 生成稳定的版本标识
-  function genVersionId() {
-    return 'v' + Date.now().toString(36) + Math.random().toString(36).slice(2, 9)
-  }
-
-  // 规范化 assistant 消息的版本结构：无 versions 时以平铺字段为初始版本（旧数据无损升级）
-  function ensureMsgVersions(msg) {
-    if (msg.role !== 'assistant') return null
-    if (!Array.isArray(msg.versions) || msg.versions.length === 0) {
-      msg.versions = [{
-        versionId: msg.currentVersionId || genVersionId(),
-        content: msg.content || '',
-        reasoning_content: msg.reasoning_content,
-        thinkingTime: msg.thinkingTime,
-        modelName: msg.modelName,
-        time: msg.time,
-        status: msg.status || (msg.interrupted ? 'stopped' : 'done'),
-        usage: (msg.promptTokens || msg.completionTokens) ? {
-          promptTokens: msg.promptTokens || 0,
-          completionTokens: msg.completionTokens || 0,
-          reasoningTokens: msg.reasoningTokens || 0,
-          cachedTokens: msg.cachedTokens || 0
-        } : undefined
-      }]
-      msg.currentVersionId = msg.versions[0].versionId
-    }
-    return msg.versions
-  }
-
-  // 把消息的平铺字段同步为指定版本内容（渲染/复制/朗读/导出/搜索统一读平铺字段）
-  function applyVersionToFlatFields(msg, version) {
-    msg.content = version.content
-    msg.reasoning_content = version.reasoning_content
-    msg.thinkingTime = version.thinkingTime
-    msg.modelName = version.modelName
-    msg.time = version.time
-    msg.status = version.status
-    msg.interrupted = (version.status && version.status !== 'done') || undefined
-    if (version.usage) {
-      msg.promptTokens = version.usage.promptTokens
-      msg.completionTokens = version.usage.completionTokens
-      msg.reasoningTokens = version.usage.reasoningTokens
-      msg.cachedTokens = version.usage.cachedTokens
-    }
-  }
+  // Store 保留同步副作用，版本结构与字段映射由纯业务模块维护。
 
   /**
-   * 为 assistant 消息追加一个新回答版本（重新生成用）：
-   * 旧版本完整保留；成功完成时新版本成为当前版本，失败/中断时保留部分结果但不改变当前选中版本。
-   * @param chatId 会话ID
-   * @param msgIdx 消息在会话中的绝对下标
-   * @param versionData 新版本数据 { content, reasoning_content, thinkingTime, modelName, time, status, usage }
-   * @param makeCurrent 是否设为当前版本（仅成功完成时 true）
-   * @returns 新版本 versionId
+   * 为 assistant 消息追加回答版本，并将变更加入同步队列。
    */
   function addMessageVersion(chatId, msgIdx, versionData, makeCurrent) {
-    const msgs = chats.value[chatId]
-    if (!msgs || !msgs[msgIdx] || msgs[msgIdx].role !== 'assistant') return null
-    const msg = msgs[msgIdx]
-    ensureMsgVersions(msg)
-    const versionId = genVersionId()
-    msg.versions.push({
-      versionId,
-      content: versionData.content || '',
-      reasoning_content: versionData.reasoning_content,
-      thinkingTime: versionData.thinkingTime,
-      modelName: versionData.modelName,
-      time: versionData.time,
-      status: versionData.status || 'done',
-      usage: versionData.usage
-    })
-    if (makeCurrent) {
-      msg.currentVersionId = versionId
-      applyVersionToFlatFields(msg, msg.versions[msg.versions.length - 1])
-    }
+    const message = chats.value[chatId]?.[msgIdx]
+    if (!message || message.role !== 'assistant') return null
+    const versionId = appendMessageVersion(message, versionData, makeCurrent)
+    if (!versionId) return null
     markChatDirty(chatId)
     syncToServer()
     return versionId
   }
 
   /**
-   * 切换 assistant 消息当前展示版本（仅查看，不产生新请求、不重复计费）。
-   * @returns true=切换成功
+   * 切换 assistant 消息当前展示版本，并将选择结果同步到服务端。
    */
   function selectMessageVersion(chatId, msgIdx, versionId) {
-    const msgs = chats.value[chatId]
-    if (!msgs || !msgs[msgIdx]) return false
-    const msg = msgs[msgIdx]
-    const versions = ensureMsgVersions(msg)
-    const target = versions.find(v => v.versionId === versionId)
-    if (!target || msg.currentVersionId === versionId) return false
-    msg.currentVersionId = versionId
-    applyVersionToFlatFields(msg, target)
+    const message = chats.value[chatId]?.[msgIdx]
+    if (!message || !selectVersion(message, versionId)) return false
     markChatDirty(chatId)
     syncToServer()
     return true
   }
 
   /**
-   * 获取消息的版本视图信息（UI 切换器用）：
-   * { list: [{versionId, time, modelName, status}], currentIndex, total }
+   * 获取消息版本切换器使用的轻量视图。
    */
   function getMessageVersions(chatId, msgIdx) {
-    const msgs = chats.value[chatId]
-    if (!msgs || !msgs[msgIdx]) return null
-    const msg = msgs[msgIdx]
-    if (msg.role !== 'assistant') return null
-    const versions = ensureMsgVersions(msg)
-    const currentIndex = versions.findIndex(v => v.versionId === msg.currentVersionId)
-    return {
-      list: versions.map(v => ({ versionId: v.versionId, time: v.time, modelName: v.modelName, status: v.status })),
-      currentIndex: currentIndex < 0 ? 0 : currentIndex,
-      total: versions.length
-    }
+    const message = chats.value[chatId]?.[msgIdx]
+    return message ? getMessageVersionView(message) : null
   }
 
   // 将多个会话批量移入同一文件夹并只同步一次
@@ -1215,23 +924,8 @@ export const useChatStore = defineStore('chat', () => {
   // 导出单个会话为 Markdown（未加载时先拉取正文）
   async function exportChatMarkdown(id) {
     await ensureChatLoaded(id)
-    const msgs = chats.value[id] || []
-    const title = chatTitle(id)
-    let md = '# ' + title + '\n\n'
-    msgs.forEach(m => {
-      const roleLabel = m.role === 'user' ? '👤 用户' : '🤖 助手'
-      md += '## ' + roleLabel + (m.time ? '  `' + m.time + '`' : '') + '\n\n'
-      md += (m.content || '') + '\n\n'
-    })
-    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    const safeTitle = title.replace(/[\\/:*?"<>|]/g, '_').substring(0, 40)
-    a.download = safeTitle + '.md'
-    a.click()
-    URL.revokeObjectURL(a.href)
+    downloadSingleChatMarkdown(chats.value[id] || [], chatTitle(id))
   }
-
   return {
     chats, chatSummaries, chatMeta, currentChatId, deletedChatIds, isChatHistoryLoaded, searchKeyword,
     folders, chatVersions, foldersVersion, syncConflicts,
@@ -1240,7 +934,7 @@ export const useChatStore = defineStore('chat', () => {
     ensureChatLoaded, ensureAllChatsLoaded, resolveSyncConflict, genMsgId,
     addMessageVersion, selectMessageVersion, getMessageVersions,
     newChat, switchChat, switchChatLazy, deleteChat, deleteChats, deleteAllChats, createBranch,
-    addMessage, truncateMessages, updateLastAssistantMessage, exportChats, exportChatsJson, importChatsJson, countValidChats, findEmptyChatId,
+    addMessage, editUserMessage, truncateMessages, updateLastAssistantMessage, exportChats, exportChatsJson, importChatsJson, countValidChats, findEmptyChatId,
     togglePin, renameChat, setAutoTitleIfEmpty, exportChatMarkdown, setChatPromptPreset, chatTitle,
     createFolder, renameFolder, deleteFolder, toggleFolderCollapsed, moveChatToFolder, moveChatsToFolder
   }

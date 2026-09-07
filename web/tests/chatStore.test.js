@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatStore } from '@/stores/chat'
-import { saveChatHistory, loadSingleChatHistory } from '@/api/chat'
+import { saveChatHistory, loadSingleChatHistory, loadChatSummaries } from '@/api/chat'
 
 vi.mock('@/api/chat', () => ({
   loadChatHistory: vi.fn(),
@@ -91,6 +91,29 @@ describe('多端同步：增量载荷、版本基准与冲突处理', () => {
   async function flushSync() {
     await vi.advanceTimersByTimeAsync(600)
   }
+
+  it('禁用本地存储时仍恢复服务端会话并正常保存新增消息', async () => {
+    const storageGetter = vi.spyOn(window, 'localStorage', 'get').mockImplementation(() => {
+      throw new DOMException('Storage disabled', 'SecurityError')
+    })
+    try {
+      loadChatSummaries.mockResolvedValue({
+        success: true, lastChatId: 'a', summaries: [{ id: 'a', count: 1, version: 5 }]
+      })
+      loadSingleChatHistory.mockResolvedValue({
+        success: true, messages: [{ role: 'user', content: '服务端消息' }], version: 5
+      })
+      await store.loadFromServer()
+      expect(store.currentChatId).toBe('a')
+      expect(store.chats.a).toHaveLength(1)
+      store.addMessage('a', { role: 'assistant', content: '新增回答' })
+      await flushSync()
+      expect(saveChatHistory).toHaveBeenCalledTimes(1)
+      expect(saveChatHistory.mock.calls[0][0].chats.a).toHaveLength(2)
+    } finally {
+      storageGetter.mockRestore()
+    }
+  })
 
   it('同步载荷仅包含变更会话，未变更的已加载会话不上传', async () => {
     // 模拟首屏加载后的状态：a/b 两个已加载会话，各有服务端版本

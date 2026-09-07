@@ -1,6 +1,7 @@
 package com.chatai.newbot.service;
 
 import com.chatai.newbot.model.ModelConfig;
+import com.chatai.newbot.model.ChatShare;
 import com.chatai.newbot.model.ProviderModel;
 import com.chatai.newbot.model.UsageLog;
 import com.chatai.newbot.model.User;
@@ -36,6 +37,7 @@ class SqliteStorageServiceTest {
 
     private static String originalUserDir;
     private static SqliteStorageService service;
+    private static JdbcTemplate jdbcTemplate;
 
     @BeforeAll
     static void setup() {
@@ -44,7 +46,8 @@ class SqliteStorageServiceTest {
         DriverManagerDataSource dataSource = new DriverManagerDataSource();
         dataSource.setDriverClassName("org.sqlite.JDBC");
         dataSource.setUrl("jdbc:sqlite:" + tempDir.resolve("test-chatai.db").toAbsolutePath());
-        service = new SqliteStorageService(new JdbcTemplate(dataSource));
+        jdbcTemplate = new JdbcTemplate(dataSource);
+        service = new SqliteStorageService(jdbcTemplate);
         service.init();
     }
 
@@ -73,6 +76,111 @@ class SqliteStorageServiceTest {
         assertNotNull(service.register(username, "pass1234", "127.0.0.1"));
         assertNull(service.register(username, "pass1234", "127.0.0.1"), "重复用户名应注册失败");
         assertNull(service.register("admin", "pass1234", "127.0.0.1"), "admin 用户名应被拒绝");
+    }
+
+    /** 删除用户时应在同一事务内清理会话摘要、资源与跨用户资源授权。 */
+    @Test
+    void deleteUser_完整清理会话摘要与资源授权() {
+        User owner = service.register(uniqueName("asset_owner"), "pass1234", "127.0.0.1");
+        User grantee = service.register(uniqueName("asset_grantee"), "pass1234", "127.0.0.2");
+        String chatId = uniqueName("context_chat");
+        String assetUrl = "/api/files/" + uniqueName("asset");
+        service.saveChatContextSummary(owner.getId(), chatId, 2, "包含隐私的摘要");
+        service.registerFileAsset(assetUrl, owner.getId(), "attachment");
+        service.grantFileAssetAccess(assetUrl, grantee.getId());
+
+        assertTrue(service.deleteUser(owner.getId()));
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_chat_context_summary WHERE user_id=?", Integer.class, owner.getId()));
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_file_asset WHERE owner_user_id=?", Integer.class, owner.getId()));
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_file_asset_grant WHERE url=?", Integer.class, assetUrl));
+    }
+
+    /** 即使通过非 Spring 兼容构造器使用，中途删除失败也必须回滚关联数据。 */
+    @Test
+    void deleteUser_后续SQL失败时回滚已删Token与摘要() {
+        User user = service.register(uniqueName("rollback"), "pass1234", "127.0.0.3");
+        String token = uniqueName("rollback_token");
+        service.insertToken(token, user.getId(), "127.0.0.3", "test", Long.MAX_VALUE);
+        service.saveChatContextSummary(user.getId(), "rollback-chat", 2, "仍应保留");
+        String trigger = "reject_user_delete";
+        jdbcTemplate.execute("CREATE TRIGGER " + trigger + " BEFORE DELETE ON t_user " +
+                "BEGIN SELECT RAISE(ABORT, 'test deletion failure'); END");
+        try {
+            assertThrows(org.springframework.dao.DataAccessException.class, () -> service.deleteUser(user.getId()));
+            assertNotNull(service.getUserById(user.getId()));
+            assertEquals(1, service.listTokensByUser(user.getId()).size());
+            assertEquals("仍应保留", service.getChatContextSummary(user.getId(), "rollback-chat", 2));
+        } finally {
+            jdbcTemplate.execute("DROP TRIGGER " + trigger);
+        }
+    }
+
+    /** 清空回收站只删除目标用户的已删会话摘要，不影响正常会话或其他用户。 */
+    @Test
+    void purgeChatSessions_清空回收站保留正常摘要并支持事务回滚() {
+        String userId = uniqueName("trash_owner");
+        String otherId = uniqueName("trash_other");
+        for (String owner : List.of(userId, otherId)) {
+            for (String chat : List.of("active", "trash")) {
+                service.upsertChatSession(owner, chat, "[]", "{}", chat, "", "", 0, "2026-09-07", 1);
+                service.saveChatContextSummary(owner, chat, 2, owner + chat);
+            }
+            service.softDeleteChatSessions(owner, List.of("trash"), "2026-09-07");
+        }
+        jdbcTemplate.execute("CREATE TRIGGER reject_trash_delete BEFORE DELETE ON t_chat_session " +
+                "BEGIN SELECT RAISE(ABORT, 'test deletion failure'); END");
+        try {
+            assertThrows(org.springframework.dao.DataAccessException.class,
+                    () -> service.purgeChatSessions(userId, null));
+            assertEquals(userId + "trash", service.getChatContextSummary(userId, "trash", 2));
+        } finally {
+            jdbcTemplate.execute("DROP TRIGGER reject_trash_delete");
+        }
+        assertEquals(1, service.purgeChatSessions(userId, List.of()));
+        assertNull(service.getChatContextSummary(userId, "trash", 2));
+        assertEquals(userId + "active", service.getChatContextSummary(userId, "active", 2));
+        assertEquals(otherId + "trash", service.getChatContextSummary(otherId, "trash", 2));
+        assertEquals(0, service.purgeChatSessions(userId, null));
+        assertEquals(userId + "active", service.getChatContextSummary(userId, "active", 2));
+    }
+
+    /** 验证分享仓储拆分后兼容层仍保持完整 CRUD 与访问次数语义。 */
+    @Test
+    void chatShareRepository_兼容层保持原有行为() {
+        ChatShare share = new ChatShare();
+        share.setChatId(uniqueName("chat"));
+        share.setUserId(uniqueName("user"));
+        share.setTitle("初始标题");
+        share.setSnapshotJson("{}");
+        share.setMaxViews(1);
+
+        ChatShare saved = service.addChatShare(share);
+        assertNotNull(saved.getId());
+        assertEquals("初始标题", service.getChatShareById(saved.getId()).getTitle());
+        assertEquals(1, service.getChatSharesByUser(saved.getUserId()).size());
+        assertEquals(saved.getId(), service.getChatShareByChat(saved.getUserId(), saved.getChatId()).getId());
+        assertTrue(service.claimChatShareAccess(saved.getId()));
+        assertFalse(service.claimChatShareAccess(saved.getId()));
+        assertTrue(service.updateChatShareSecurity(saved.getId(), "hash", "ENC:secret", 2, true));
+        ChatShare securityUpdated = service.getChatShareById(saved.getId());
+        assertEquals(0, securityUpdated.getAccessCount());
+        assertEquals(2, securityUpdated.getMaxViews());
+        assertEquals("hash", securityUpdated.getPasswordHash());
+        service.updateChatShareExpiry(saved.getId(), "2026-12-31 23:59:59");
+        assertEquals("2026-12-31 23:59:59", service.getChatShareById(saved.getId()).getExpiresAt());
+        saved.setTitle("更新标题");
+        saved.setSnapshotJson("{\"updated\":true}");
+        saved.setAccessCount(1);
+        service.updateChatShareDetails(saved);
+        ChatShare detailsUpdated = service.getChatShareById(saved.getId());
+        assertEquals("更新标题", detailsUpdated.getTitle());
+        assertEquals("{\"updated\":true}", detailsUpdated.getSnapshotJson());
+        assertEquals(0, detailsUpdated.getAccessCount());
+        assertTrue(service.deleteChatShare(saved.getId()));
+        assertNull(service.getChatShareById(saved.getId()));
     }
 
     /**

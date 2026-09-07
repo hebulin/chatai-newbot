@@ -75,7 +75,7 @@
             <span v-if="msg.modelName" class="msg-model-name">{{ msg.modelName }}</span>
             <span v-if="msg.completionTokens" class="msg-token-info">Token≈{{ fmtToken(msg.completionTokens) }}</span>
             <!-- 回答版本切换器：仅在存在多个版本时显示；点击数字展开版本列表（比较入口） -->
-            <span v-if="!msg.isError && versionInfoOf(idx)" class="msg-version-switcher">
+            <span v-if="versionInfoOf(idx)" class="msg-version-switcher">
               <button class="version-nav-btn" :disabled="versionInfoOf(idx).currentIndex <= 0"
                       @click="switchVersion(idx, -1)" :title="t('messages.prevVersion')" :aria-label="t('messages.prevVersion')">‹</button>
               <button class="version-indicator" @click="toggleVersionList(idx)"

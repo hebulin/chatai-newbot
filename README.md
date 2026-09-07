@@ -11,7 +11,7 @@
 - **联网搜索**：集成 Tavily 搜索，回答前先检索实时网络信息（后台可配置开关与测试）
 - **智能体/角色**：内置智能体 + 用户自定义提示词预设（多条保存、单条启用），可按会话绑定角色
 - **多模态与附件**：统一附件入口，图片（自动压缩，≤5MB）走多模态理解，文本文档（txt/md/csv/json/doc/docx/xls/xlsx 等，≤3MB）服务端解析为纯文本注入上下文，不依赖模型多模态能力
-- **消息级操作**：重新生成回答、编辑后重发、复制、清除上下文（分隔线后不再携带历史）
+- **消息级操作**：重新生成回答、编辑后重发（留在当前会话，Bot 回答追加分页版本，不自动创建分支）、复制、清除上下文（分隔线后不再携带历史）
 - **跨会话全文搜索**：在所有历史会话中搜索消息内容并定位跳转
 - **富内容渲染**：Markdown、代码高亮、Mermaid 图表、KaTeX 公式、表格（可下载 Excel/CSV）、图片灯箱
 - **会话管理**：新建/切换/重命名/删除，服务端按会话行级持久化，多端同步，AI 自动命名
@@ -78,8 +78,12 @@ chatai-newbot/
 │   │   ├── model/                        # User / ModelConfig / PromptPreset / ChatAttachment ...
 │   │   └── service/
 │   │       ├── StorageManager.java       # 存储门面（直连 SQLite）
-│   │       ├── SqliteStorageService.java # SQLite 存储实现（建表迁移 + 内存缓存）
+│   │       ├── SqliteStorageService.java # SQLite 兼容门面（委托领域仓储）
+│   │       ├── SqliteSchemaInitializer.java # 建表与老库迁移
+│   │       ├── *Repository.java         # 用户/模型/厂商/会话/设置/用量等领域持久化
 │   │       ├── UnifiedChatService.java   # 统一聊天服务（多协议适配 + 连通性测试）
+│   │       ├── StreamingChatClient.java  # OpenAI/Anthropic SSE、重试与终态结算
+│   │       ├── ChatContextAssembler.java # 系统提示词、附件文本与消息限制
 │   │       ├── ChatHistoryService.java   # 服务端会话持久化（按会话行级存储）
 │   │       ├── WebSearchService.java     # Tavily 联网搜索
 │   │       ├── DocumentParseService.java # 附件文档解析（POI + 文本类）
@@ -161,8 +165,20 @@ cd ..
 npm run test:e2e
 ```
 
-后端端到端测试使用独立的 `target/chatai-core-e2e.db`，前端端到端测试使用 API 替身，
+后端端到端测试使用独立的 `target/core-e2e-workdir/chatai-core-e2e.db`，前端端到端测试构建生产包并使用 API 替身，
 两者都不会改动开发环境的 `data/chatai.db`。CI 会自动安装 Chromium 并执行浏览器测试。
+
+### 前端加载与体积预算
+
+Markdown 按代码高亮、数学公式、Mermaid、表格和媒体增强分模块。Mermaid 核心在遇到图表时加载，
+各图表定义由 Mermaid 自带的动态加载器按种类加载；ELK 和思维导图保持独立动态块。
+Excel 导出仅在点击下载 Excel 后加载 XLSX，CSV 导出不加载 XLSX。加载失败会释放缓存，允许再次尝试。
+
+`web/build/bundleBudget.js` 在每次生产构建中限制主入口 JS（330 KiB / gzip 118 KiB）和聊天页面 JS
+（325 KiB / gzip 108 KiB）。预算针对对应块自身，不含 CSS；另递归检查全部静态 JS 依赖，
+禁止 Mermaid、ELK、思维导图和 XLSX 被间接提前加载。违反预算或找不到目标入口将使构建失败。
+Playwright 会验证普通流程图、ELK、思维导图及 Excel 的真实网络加载时机。
+构建仍可能提示 ELK/思维导图动态块较大，该提示不代表它们进入首屏。
 
 ### 首次启动自动完成
 
