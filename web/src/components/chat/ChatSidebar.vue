@@ -6,73 +6,202 @@
     <div class="sidebar-content">
       <div class="sidebar-header">
         <span class="sb-eyebrow">{{ t('sidebar.eyebrow') }}</span>
-        <button class="icon-btn close-sidebar-btn" @click="$emit('toggle')" :title="t('common.close')">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        <div class="sidebar-header-actions">
+          <button
+            ref="sidebarSearchTriggerRef"
+            class="sidebar-header-action"
+            :class="{ active: sidebarSearchOpen }"
+            :aria-expanded="sidebarSearchOpen"
+            aria-controls="sidebar-chat-search-panel"
+            @click="toggleSidebarSearch"
+            :title="t('sidebar.searchChats')"
+            :aria-label="t('sidebar.searchChats')"
+          >
+            <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.2" y2="16.2"/></svg>
+          </button>
+          <button class="icon-btn close-sidebar-btn" @click="$emit('toggle')" :title="t('common.close')" :aria-label="t('common.close')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="new-chat-row">
+        <button class="new-chat-btn" @click="$emit('new-chat')">
+          <span class="nc-plus">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </span>
+          <span class="nc-label">{{ t('sidebar.newChat') }}</span>
+          <span class="nc-shortcut">⌘N</span>
         </button>
       </div>
 
-      <button class="new-chat-btn" @click="$emit('new-chat')">
-        <span class="nc-plus">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        </span>
-        <span class="nc-label">{{ t('sidebar.newChat') }}</span>
-        <span class="nc-shortcut">⌘N</span>
-      </button>
-
-      <div class="chat-search-box">
-        <svg class="chat-search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input type="text" v-model="chatStore.searchKeyword" class="chat-search-input" :placeholder="t('sidebar.searchPlaceholder')" autocomplete="off" />
-        <button v-if="chatStore.searchKeyword" class="chat-search-clear" @click="chatStore.searchKeyword = ''" :aria-label="t('sidebar.clear')">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
-      </div>
-
-      <div class="chat-list" :class="{ 'is-scrolling': listScrolling }" @scroll.passive="onChatListScroll">
+      <div id="sidebar-chat-list" class="chat-list" :class="{ 'is-scrolling': listScrolling }" @scroll.passive="onChatListScroll">
         <!-- 加载骨架屏：会话历史未加载完成时显示 -->
         <div v-if="!chatStore.isChatHistoryLoaded" class="chat-list-skeleton">
           <div v-for="n in 5" :key="n" class="chat-skeleton-item"></div>
         </div>
-        <!-- 全文搜索结果（服务端检索消息内容） -->
-        <template v-if="chatStore.searchKeyword && searchResults.length">
-          <div class="chat-date-header">{{ t('sidebar.messageMatch') }} · {{ searchResults.length }}</div>
+        <div v-if="chatStore.isChatHistoryLoaded" class="chat-date-header chat-section-title">
+          <span>{{ t('sidebar.chats') }}</span>
+          <button class="section-title-action" :class="{ active: multiSelectMode }" @click="toggleMultiSelect" :title="t('sidebar.multiSelect')" :aria-label="t('sidebar.multiSelect')">
+            <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="5" height="5" rx="1"/><rect x="3" y="15" width="5" height="5" rx="1"/><path d="M12 6h9M12 17h9"/><path d="m4.5 6.5 1 1 2-2"/></svg>
+          </button>
+        </div>
+        <div v-if="multiSelectMode" class="multi-select-toolbar" aria-live="polite">
+          <span>已选 {{ selectedChatIds.length }} 项</span>
+          <button type="button" :disabled="!selectedChatIds.length" @click="bulkMove">移动</button>
+          <button type="button" class="danger" :disabled="!selectedChatIds.length" @click="bulkDelete">删除</button>
+          <button type="button" @click="toggleMultiSelect">完成</button>
+        </div>
+        <div v-if="chatStore.isChatHistoryLoaded" class="chat-date-header folder-section-title">
+          <span>{{ t('sidebar.folders') }}</span>
+          <button class="section-title-action" @click="onCreateFolder" :title="t('sidebar.newFolder')" :aria-label="t('sidebar.newFolder')">
+            <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="10" x2="12" y2="16"/><line x1="9" y1="13" x2="15" y2="13"/></svg>
+          </button>
+        </div>
+        <template v-for="(row, rIdx) in renderRows" :key="row.type + '-' + (row.id || rIdx)">
+          <!-- 日期分组标题 -->
+          <div v-if="row.type === 'dateHeader'" class="chat-date-header">{{ row.label }}</div>
+
+          <!-- 文件夹分组标题 -->
           <div
-            v-for="(r, i) in searchResults"
-            :key="'hit-' + i"
-            class="chat-item search-hit"
-            :class="{ active: r.chatId === chatStore.currentChatId }"
-            @click="$emit('switch-chat', r.chatId)"
+            v-else-if="row.type === 'folderHeader'"
+            class="chat-folder-header"
+            @click="chatStore.toggleFolderCollapsed(row.folder.id)"
           >
-            <div class="search-hit-body">
-              <span class="title">{{ r.chatTitle }}</span>
-              <span class="search-hit-snippet">{{ (r.role === 'user' ? t('sidebar.mePrefix') : t('sidebar.aiPrefix')) + r.snippet }}</span>
-            </div>
-          </div>
-        </template>
-        <template v-for="group in chatStore.sortedChatList.groupOrder" :key="group">
-          <div class="chat-date-header">{{ group }}</div>
-          <div
-            v-for="chat in chatStore.sortedChatList.groups[group]"
-            :key="chat.id"
-            class="chat-item"
-            :class="{ active: chat.id === chatStore.currentChatId }"
-            @click="$emit('switch-chat', chat.id)"
-          >
-            <svg v-if="chat.pinned" class="pin-marker" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M16 3l5 5-3 1-4 4-1 6-2-2-4 4-1-1 4-4-2-2 6-1 4-4z"/></svg>
-            <span class="title">{{ chat.title }}</span>
-            <button class="chat-more-btn" @click.stop="toggleChatMenu(chat.id, $event)" :title="t('sidebar.more')">
+            <svg class="folder-caret" :class="{ collapsed: row.folder.collapsed }" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+            <svg class="folder-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            <span class="folder-name">{{ row.folder.name }}</span>
+            <span class="folder-count">{{ row.count }}</span>
+            <button class="chat-more-btn folder-more-btn" @click.stop="toggleFolderMenu(row.folder.id)" :title="t('sidebar.more')" :aria-label="t('sidebar.more')">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
             </button>
-            <div class="chat-item-menu" v-if="openMenuId === chat.id" @click.stop>
-              <div class="chat-item-menu-item" @click="onTogglePin(chat.id)">{{ chat.pinned ? t('sidebar.unpin') : t('sidebar.pin') }}</div>
-              <div class="chat-item-menu-item" @click="onRename(chat)">{{ t('sidebar.rename') }}</div>
-              <div class="chat-item-menu-item" @click="onShare(chat.id)">{{ t('sidebar.share') }}</div>
-              <div class="chat-item-menu-item" @click="onExport(chat.id)">{{ t('sidebar.exportMarkdown') }}</div>
-              <div class="chat-item-menu-item chat-item-menu-item-danger" @click="onDelete(chat.id)">{{ t('sidebar.delete') }}</div>
+            <div class="chat-item-menu folder-menu" v-if="openFolderMenuId === row.folder.id" @click.stop>
+              <div class="chat-item-menu-item" @click="onRenameFolder(row.folder)">{{ t('sidebar.rename') }}</div>
+              <div class="chat-item-menu-item chat-item-menu-item-danger" @click="onDeleteFolder(row.folder)">{{ t('sidebar.deleteFolder') }}</div>
+            </div>
+          </div>
+
+          <!-- 会话项 -->
+          <div
+            v-else
+            class="chat-item"
+            :class="{ active: row.chat.id === chatStore.currentChatId, selected: selectedChatIds.includes(row.chat.id), 'in-folder': row.inFolder }"
+            role="button" tabindex="0"
+            @click="handleChatClick(row.chat.id)"
+            @keydown.enter.prevent="handleChatClick(row.chat.id)"
+          >
+            <input v-if="multiSelectMode" class="chat-select-checkbox" type="checkbox" :checked="selectedChatIds.includes(row.chat.id)" :aria-label="'选择会话 ' + row.chat.title" @click.stop="toggleChatSelection(row.chat.id)" />
+            <svg v-if="row.chat.pinned" class="pin-marker" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M16 3l5 5-3 1-4 4-1 6-2-2-4 4-1-1 4-4-2-2 6-1 4-4z"/></svg>
+            <span class="title">{{ row.chat.title }}</span>
+            <button v-if="!multiSelectMode" class="chat-more-btn" @click.stop="toggleChatMenu(row.chat.id)" :title="t('sidebar.more')" :aria-label="t('sidebar.more')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+            </button>
+            <div class="chat-item-menu" :class="{ 'is-move-menu': moveMenuId === row.chat.id }" v-if="openMenuId === row.chat.id" @click.stop>
+              <!-- 移动到文件夹的目标选择态 -->
+              <template v-if="moveMenuId === row.chat.id">
+                <div class="chat-item-menu-title">{{ t('sidebar.moveToFolder') }}</div>
+                <div class="chat-item-menu-item" v-for="f in chatStore.folders" :key="f.id" @click="moveToFolder(row.chat.id, f.id)">
+                  <span class="move-check">{{ currentFolderId(row.chat.id) === f.id ? '✓' : '' }}</span>
+                  <span class="move-name">{{ f.name }}</span>
+                </div>
+                <div class="chat-item-menu-empty" v-if="chatStore.folders.length === 0">{{ t('sidebar.noFolders') }}</div>
+                <div class="chat-item-menu-divider"></div>
+                <div class="chat-item-menu-item" @click="newFolderAndMove(row.chat.id)">{{ t('sidebar.newFolderInline') }}</div>
+                <div class="chat-item-menu-item chat-item-menu-item-muted" @click="backFromMoveMenu(row.chat.id)">{{ t('sidebar.back') }}</div>
+              </template>
+              <!-- 常规操作菜单 -->
+              <template v-else>
+                <div class="chat-item-menu-item" @click="onTogglePin(row.chat.id)">{{ row.chat.pinned ? t('sidebar.unpin') : t('sidebar.pin') }}</div>
+                <div class="chat-item-menu-item" @click="startMoveMenu(row.chat.id)">{{ t('sidebar.moveToFolder') }}</div>
+                <div class="chat-item-menu-item" v-if="currentFolderId(row.chat.id)" @click="moveToFolder(row.chat.id, null)">{{ t('sidebar.removeFromFolder') }}</div>
+                <div class="chat-item-menu-item" @click="onRename(row.chat)">{{ t('sidebar.rename') }}</div>
+                <div class="chat-item-menu-item" @click="onShare(row.chat.id)">{{ t('sidebar.share') }}</div>
+                <div class="chat-item-menu-item" @click="onExport(row.chat.id)">{{ t('sidebar.exportMarkdown') }}</div>
+                <div class="chat-item-menu-item chat-item-menu-item-danger" @click="onDelete(row.chat.id)">{{ t('sidebar.delete') }}</div>
+              </template>
             </div>
           </div>
         </template>
-        <div v-if="chatStore.isChatHistoryLoaded && chatStore.searchKeyword && !searching && chatStore.sortedChatList.total === 0 && searchResults.length === 0" class="chat-search-empty">
-          {{ t('sidebar.noMatch') }}
+      </div>
+
+      <!-- 搜索遮罩层：点击右上角放大镜后覆盖整个侧边栏，
+           左上角返回、下方搜索框与结果列表；点击结果后保持展开可连续跳转 -->
+      <div
+        v-if="sidebarSearchOpen"
+        id="sidebar-chat-search-panel"
+        class="sidebar-search-overlay"
+        @keydown.esc.stop.prevent="closeSidebarSearch()"
+      >
+        <div class="sidebar-search-topbar">
+          <button type="button" class="sidebar-search-back" @click="closeSidebarSearch()" :aria-label="t('sidebar.back')">
+            <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+            <span>{{ t('sidebar.back') }}</span>
+          </button>
+        </div>
+        <div class="sidebar-search-panel">
+          <label class="sidebar-search-label" for="sidebar-chat-search-input">{{ t('sidebar.searchInputLabel') }}</label>
+          <div class="sidebar-search-input-wrap">
+            <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.2" y2="16.2"/></svg>
+            <input
+              id="sidebar-chat-search-input"
+              ref="sidebarSearchInputRef"
+              v-model="sidebarSearchKeyword"
+              class="sidebar-search-input"
+              :placeholder="t('sidebar.searchPlaceholder')"
+              aria-describedby="sidebar-chat-search-status"
+              aria-controls="sidebar-chat-search-results"
+              autocomplete="off"
+              @keydown.enter.prevent="selectFirstSidebarSearchResult"
+            />
+            <button v-if="sidebarSearchKeyword" type="button" class="sidebar-search-clear" @click="clearSidebarSearch" :aria-label="t('sidebar.clear')">
+              <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <div id="sidebar-chat-search-status" class="sidebar-search-status" role="status" aria-live="polite">
+            <span v-if="searching">{{ t('sidebar.searching') }}</span>
+            <span v-else-if="sidebarSearchKeyword.trim()">{{ t('sidebar.searchResultCount', { count: searchResults.length }) }}</span>
+            <span v-else>{{ t('sidebar.searchHint') }}</span>
+          </div>
+          <!-- 搜索筛选：时间范围 / 文件夹 / 模型（均可清空） -->
+          <div class="sidebar-search-filters">
+            <input v-model="filterDateFrom" type="date" class="sidebar-search-filter-input" :aria-label="t('sidebar.filterDateFrom')" @change="onFilterChange" />
+            <input v-model="filterDateTo" type="date" class="sidebar-search-filter-input" :aria-label="t('sidebar.filterDateTo')" @change="onFilterChange" />
+            <select v-model="filterFolderId" class="sidebar-search-filter-input" :aria-label="t('sidebar.filterFolder')" @change="onFilterChange">
+              <option value="">{{ t('sidebar.filterFolderAll') }}</option>
+              <option v-for="f in chatStore.folders" :key="f.id" :value="f.id">{{ f.name }}</option>
+            </select>
+            <select v-model="filterModelName" class="sidebar-search-filter-input" :aria-label="t('sidebar.filterModel')" @change="onFilterChange">
+              <option value="">{{ t('sidebar.filterModelAll') }}</option>
+              <option v-for="m in allModelNames" :key="m" :value="m">{{ m }}</option>
+            </select>
+            <button v-if="hasActiveFilter" type="button" class="sidebar-search-filter-clear" @click="clearFilters">{{ t('sidebar.filterClear') }}</button>
+          </div>
+        </div>
+        <div id="sidebar-chat-search-results" class="sidebar-search-results-area">
+          <div v-if="sidebarSearchKeyword.trim()" class="sidebar-search-results" :aria-busy="searching">
+            <button
+              v-for="result in searchResults"
+              :key="result.resultType + '-' + result.chatId + '-' + (result.messageIndex ?? 'title')"
+              type="button"
+              class="sidebar-search-result"
+              @click="selectSidebarSearchResult(result)"
+            >
+              <span class="sidebar-search-result-head">
+                <strong>{{ result.chatTitle }}</strong>
+                <span class="sidebar-search-result-type">{{ result.resultType === 'title' ? t('sidebar.titleMatch') : t('sidebar.contentMatch') }}</span>
+              </span>
+              <span class="sidebar-search-result-snippet" :class="{ empty: !result.snippet }">
+                {{ result.snippet ? ((result.role === 'user' ? t('sidebar.mePrefix') : t('sidebar.aiPrefix')) + result.snippet) : t('sidebar.noMessagePreview') }}
+              </span>
+            </button>
+            <!-- 分页加载更多：不以固定上限截断旧结果 -->
+            <button v-if="searchHasMore && !searching" type="button" class="sidebar-search-load-more" @click="loadMoreResults">
+              {{ t('sidebar.loadMore') }}
+            </button>
+            <div v-if="!searching && searchResults.length === 0" class="sidebar-search-empty">
+              {{ t('sidebar.noMatch') }}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -81,7 +210,7 @@
           <div class="user-avatar-wrap">
             <img class="avatar-icon" :src="userAvatarSrc" style="width:14px;height:14px;border-radius:50%" />
           </div>
-          <span>{{ authStore.username || t('sidebar.user') }}</span>
+          <span>{{ userProfile.displayName || authStore.username || t('sidebar.user') }}</span>
           <span class="user-info-spacer"></span>
           <span class="user-info-more">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
@@ -102,7 +231,7 @@
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="3" y1="20" x2="21" y2="20"/></svg>
               <span>{{ t('sidebar.stats') }}</span>
             </div>
-            <div v-if="authStore.role === 'admin'" class="user-menu-item" @click="goAdmin">
+            <div v-if="authStore.role === 'admin'" class="user-menu-item" @click="goAdmin" @mouseenter="prefetchAdminEntry">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd"><path d="M12 8.4A3.6 3.6 0 1 0 12 15.6 3.6 3.6 0 1 0 12 8.4Z M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58Z"/></svg>
               <span>{{ t('sidebar.admin') }}</span>
             </div>
@@ -118,26 +247,37 @@
       </div>
     </div>
   </aside>
+
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessageBox } from 'element-plus'
 import { useChatStore } from '@/stores/chat'
+import { useModelsStore } from '@/stores/models'
 import { useAuthStore } from '@/stores/auth'
 import { useTheme } from '@/composables/useTheme'
 import { searchChatHistory } from '@/api/chat'
+import { getUserProfile } from '@/api/user'
 import { APP_VERSION } from '@/config/version'
 
 const router = useRouter()
 const { t } = useI18n()
 const chatStore = useChatStore()
+const modelsStore = useModelsStore()
 const authStore = useAuthStore()
 const { getTheme } = useTheme()
 
 const userMenuOpen = ref(false)
+const multiSelectMode = ref(false)
+const selectedChatIds = ref([])
+const userProfile = ref({ displayName: '', avatarType: 'default', avatarValue: '' })
+const sidebarSearchOpen = ref(false)
+const sidebarSearchKeyword = ref('')
+const sidebarSearchInputRef = ref(null)
+const sidebarSearchTriggerRef = ref(null)
 
 // 会话列表滚动态：滚动时临时显示滚动条，停止后自动隐藏
 const listScrolling = ref(false)
@@ -149,16 +289,181 @@ function onChatListScroll() {
   scrollHideTimer = setTimeout(() => { listScrolling.value = false }, 800)
 }
 
-// 会话项操作菜单（置顶/重命名/分享/导出/删除）
+// 将会话列表（文件夹分组 + 日期分组）平铺为统一的渲染行序列，
+// 避免会话项模板在文件夹区与日期区重复定义
+const renderRows = computed(() => {
+  const rows = []
+  const list = chatStore.sortedChatList
+  list.folderGroups.forEach(fg => {
+    rows.push({ type: 'folderHeader', id: fg.folder.id, folder: fg.folder, count: fg.chats.length })
+    if (!fg.folder.collapsed) {
+      fg.chats.forEach(c => rows.push({ type: 'chat', id: c.id, chat: c, inFolder: true }))
+    }
+  })
+  list.groupOrder.forEach(label => {
+    rows.push({ type: 'dateHeader', label })
+    ;(list.groups[label] || []).forEach(c => rows.push({ type: 'chat', id: c.id, chat: c, inFolder: false }))
+  })
+  return rows
+})
+
+// 会话项操作菜单（置顶/移动文件夹/重命名/分享/导出/删除）
 const openMenuId = ref(null)
+// 处于"移动到文件夹"目标选择态的会话 id
+const moveMenuId = ref(null)
+// 文件夹标题行操作菜单（重命名/删除）
+const openFolderMenuId = ref(null)
 
 function toggleChatMenu(id) {
+  moveMenuId.value = null
+  openFolderMenuId.value = null
   openMenuId.value = openMenuId.value === id ? null : id
 }
 
 function onTogglePin(id) {
   chatStore.togglePin(id)
   openMenuId.value = null
+}
+
+// 当前会话所属文件夹 id（无则 null）
+function currentFolderId(chatId) {
+  return (chatStore.chatMeta[chatId] || {}).folderId || null
+}
+
+// 进入"移动到文件夹"目标选择态
+function startMoveMenu(chatId) {
+  moveMenuId.value = chatId
+}
+
+// 从目标选择态返回常规菜单
+function backFromMoveMenu(chatId) {
+  moveMenuId.value = null
+  if (openMenuId.value !== chatId) openMenuId.value = chatId
+}
+
+// 执行移动（folderId 为 null 表示移出文件夹），完成后收起菜单
+function moveToFolder(chatId, folderId) {
+  chatStore.moveChatToFolder(chatId, folderId)
+  openMenuId.value = null
+  moveMenuId.value = null
+}
+
+// 在移动菜单内新建文件夹并立即把该会话移入
+async function newFolderAndMove(chatId) {
+  const folderId = await promptCreateFolder()
+  if (!folderId) return
+  chatStore.moveChatToFolder(chatId, folderId)
+  openMenuId.value = null
+  moveMenuId.value = null
+}
+
+// 弹窗输入名称创建文件夹，返回新文件夹 id（取消/重名复用返回对应结果）
+async function promptCreateFolder(defaultName) {
+  try {
+    const { value } = await ElMessageBox.prompt(t('sidebar.newFolderPrompt'), t('sidebar.newFolder'), {
+      confirmButtonText: t('common.confirm'),
+      cancelButtonText: t('common.cancel'),
+      inputValue: defaultName || '',
+      inputValidator: (v) => {
+        const name = (v || '').trim()
+        if (!name) return t('sidebar.folderNameRequired')
+        if (name.length > 20) return t('sidebar.folderNameMaxLen')
+        return true
+      }
+    })
+    return chatStore.createFolder(value)
+  } catch {
+    return null
+  }
+}
+
+// 文件夹分组标题右侧的新建入口
+async function onCreateFolder() {
+  await promptCreateFolder()
+}
+
+// 进入或退出会话多选模式，退出时清空选择
+function toggleMultiSelect() {
+  multiSelectMode.value = !multiSelectMode.value
+  selectedChatIds.value = []
+  openMenuId.value = null
+}
+
+// 切换单个会话的选中状态
+function toggleChatSelection(chatId) {
+  selectedChatIds.value = selectedChatIds.value.includes(chatId)
+    ? selectedChatIds.value.filter(id => id !== chatId)
+    : [...selectedChatIds.value, chatId]
+}
+
+// 多选态点击会话只切换勾选，普通态仍切换会话
+function handleChatClick(chatId) {
+  if (multiSelectMode.value) toggleChatSelection(chatId)
+  else emit('switch-chat', chatId)
+}
+
+// 批量移动到已有或新建文件夹
+async function bulkMove() {
+  if (!selectedChatIds.value.length) return
+  const folderId = await promptCreateFolder()
+  if (!folderId) return
+  chatStore.moveChatsToFolder(selectedChatIds.value, folderId)
+  selectedChatIds.value = []
+}
+
+// 二次确认后批量删除选中会话
+async function bulkDelete() {
+  if (!selectedChatIds.value.length) return
+  try {
+    await ElMessageBox.confirm(`确定删除选中的 ${selectedChatIds.value.length} 个会话吗？`, '批量删除会话', {
+      confirmButtonText: t('common.delete'), cancelButtonText: t('common.cancel'), type: 'warning'
+    })
+    chatStore.deleteChats(selectedChatIds.value)
+    selectedChatIds.value = []
+  } catch { /* 取消 */ }
+}
+
+// 文件夹标题行菜单开关
+function toggleFolderMenu(folderId) {
+  openMenuId.value = null
+  moveMenuId.value = null
+  openFolderMenuId.value = openFolderMenuId.value === folderId ? null : folderId
+}
+
+// 重命名文件夹
+async function onRenameFolder(folder) {
+  openFolderMenuId.value = null
+  try {
+    const { value } = await ElMessageBox.prompt(t('sidebar.renameFolderPrompt'), t('sidebar.rename'), {
+      confirmButtonText: t('common.confirm'),
+      cancelButtonText: t('common.cancel'),
+      inputValue: folder.name,
+      inputValidator: (v) => {
+        const name = (v || '').trim()
+        if (!name) return t('sidebar.folderNameRequired')
+        if (name.length > 20) return t('sidebar.folderNameMaxLen')
+        return true
+      }
+    })
+    chatStore.renameFolder(folder.id, value)
+  } catch { /* 取消 */ }
+}
+
+// 删除文件夹（仅解除分组，会话保留）
+async function onDeleteFolder(folder) {
+  openFolderMenuId.value = null
+  try {
+    await ElMessageBox.confirm(
+      t('sidebar.deleteFolderConfirm', { name: folder.name }),
+      t('sidebar.deleteFolder'),
+      {
+        confirmButtonText: t('common.delete'),
+        cancelButtonText: t('common.cancel'),
+        type: 'warning'
+      }
+    )
+    chatStore.deleteFolder(folder.id)
+  } catch { /* 取消 */ }
 }
 
 async function onRename(chat) {
@@ -190,40 +495,192 @@ function onDelete(id) {
   emit('delete-chat', id)
 }
 
-// 跨会话全文搜索：关键字变化后 300ms 防抖调用服务端检索
+// 跨会话搜索：关键字变化后 300ms 防抖调用服务端检索标题与消息内容；
+// 支持分页（加载更多）与筛选（时间范围/文件夹/模型），请求序号防止过期响应覆盖新结果
 const searchResults = ref([])
 const searching = ref(false)
+const searchHasMore = ref(false)
+const SEARCH_PAGE_SIZE = 20
 let searchTimer = null
-watch(() => chatStore.searchKeyword, (kw) => {
+let searchRequestSeq = 0
+// 搜索筛选条件（时间范围/文件夹/模型）
+const filterDateFrom = ref('')
+const filterDateTo = ref('')
+const filterFolderId = ref('')
+const filterModelName = ref('')
+
+// 当前有激活的筛选条件（决定"清空筛选"按钮显隐）
+const hasActiveFilter = computed(() =>
+  !!(filterDateFrom.value || filterDateTo.value || filterFolderId.value || filterModelName.value))
+
+// 模型筛选下拉选项：从已加载的模型列表提取显示名（去重）
+const allModelNames = computed(() => {
+  const names = new Set()
+  ;(modelsStore.models || []).forEach(m => {
+    if (m && m.displayName) names.add(m.displayName)
+  })
+  return [...names].sort()
+})
+
+// 组装搜索筛选参数（日期转毫秒时间戳，含整天边界）
+function buildSearchOptions(offset) {
+  const options = { offset, limit: SEARCH_PAGE_SIZE }
+  if (filterDateFrom.value) {
+    options.timeFrom = new Date(filterDateFrom.value + 'T00:00:00').getTime()
+  }
+  if (filterDateTo.value) {
+    options.timeTo = new Date(filterDateTo.value + 'T23:59:59.999').getTime()
+  }
+  if (filterFolderId.value) options.folderId = filterFolderId.value
+  if (filterModelName.value) options.modelName = filterModelName.value
+  return options
+}
+
+// 执行搜索：append=false 替换结果（新关键字/筛选变化），true 追加（加载更多）
+async function performSearch(append) {
+  const q = sidebarSearchKeyword.value.trim()
+  if (!q) return
+  const requestSeq = ++searchRequestSeq
+  const offset = append ? searchResults.value.length : 0
+  searching.value = true
+  try {
+    const res = await searchChatHistory(q, buildSearchOptions(offset))
+    // 只保留当前关键字与筛选条件下的结果（避免慢请求覆盖新输入）
+    if (requestSeq !== searchRequestSeq) return
+    const data = res?.success ? (res.data || []) : []
+    searchResults.value = append ? [...searchResults.value, ...data] : data
+    searchHasMore.value = !!res?.hasMore
+  } catch {
+    if (requestSeq === searchRequestSeq && !append) {
+      searchResults.value = []
+      searchHasMore.value = false
+    }
+  } finally {
+    if (requestSeq === searchRequestSeq) searching.value = false
+  }
+}
+
+// 加载更多结果（稳定分页）
+function loadMoreResults() {
+  performSearch(true)
+}
+
+// 筛选条件变化：重新从第一页搜索
+function onFilterChange() {
+  searchResults.value = []
+  searchHasMore.value = false
+  if (sidebarSearchKeyword.value.trim()) {
+    if (searchTimer) clearTimeout(searchTimer)
+    searchTimer = setTimeout(() => performSearch(false), 300)
+  }
+}
+
+// 清空全部筛选条件并重新搜索
+function clearFilters() {
+  filterDateFrom.value = ''
+  filterDateTo.value = ''
+  filterFolderId.value = ''
+  filterModelName.value = ''
+  onFilterChange()
+}
+
+watch(sidebarSearchKeyword, (kw) => {
   if (searchTimer) clearTimeout(searchTimer)
+  searchRequestSeq++
   const q = (kw || '').trim()
   if (!q) {
     searchResults.value = []
+    searchHasMore.value = false
     searching.value = false
     return
   }
   searching.value = true
-  searchTimer = setTimeout(async () => {
-    try {
-      const res = await searchChatHistory(q)
-      // 只保留当前关键字的结果（避免慢请求覆盖新输入）
-      if (q === chatStore.searchKeyword.trim()) {
-        searchResults.value = res?.success ? (res.data || []) : []
-      }
-    } catch {
-      searchResults.value = []
-    } finally {
-      searching.value = false
-    }
-  }, 300)
+  searchResults.value = []
+  searchHasMore.value = false
+  searchTimer = setTimeout(() => performSearch(false), 300)
 })
 
+// 打开侧边栏搜索区域并聚焦输入框；供搜索图标与 Ctrl/Cmd+K 快捷键共用
+function openSidebarSearch() {
+  sidebarSearchOpen.value = true
+  nextTick(() => sidebarSearchInputRef.value?.focus())
+}
+
+// 在搜索图标点击时切换侧边栏搜索区域的展开状态
+function toggleSidebarSearch() {
+  if (sidebarSearchOpen.value) closeSidebarSearch()
+  else openSidebarSearch()
+}
+
+// 关闭侧边栏搜索区域、取消陈旧请求，并按需把焦点还给搜索图标
+function closeSidebarSearch(restoreFocus = true) {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchRequestSeq++
+  sidebarSearchOpen.value = false
+  sidebarSearchKeyword.value = ''
+  searchResults.value = []
+  searchHasMore.value = false
+  searching.value = false
+  filterDateFrom.value = ''
+  filterDateTo.value = ''
+  filterFolderId.value = ''
+  filterModelName.value = ''
+  if (restoreFocus) nextTick(() => sidebarSearchTriggerRef.value?.focus())
+}
+
+// 清空当前关键字与结果，并保持输入焦点便于继续搜索
+function clearSidebarSearch() {
+  sidebarSearchKeyword.value = ''
+  nextTick(() => sidebarSearchInputRef.value?.focus())
+}
+
+// 选择搜索结果后保持搜索区域展开（关键字与结果列表保留，可继续点击其他结果），
+// 并把会话与消息下标交给聊天页执行精确跳转
+function selectSidebarSearchResult(result) {
+  const payload = { ...result, keyword: sidebarSearchKeyword.value.trim() }
+  emit('search-result-select', payload)
+}
+
+// 在输入框按 Enter 时打开当前排序下的第一条搜索结果
+function selectFirstSidebarSearchResult() {
+  if (searchResults.value.length) selectSidebarSearchResult(searchResults.value[0])
+}
+
 const userAvatarSrc = computed(() => {
+  if (userProfile.value.avatarType === 'svg' && userProfile.value.avatarValue) {
+    return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(userProfile.value.avatarValue)
+  }
   return getTheme() === 'dark' ? '/icons/user_ss.svg' : '/icons/user.svg'
 })
 
+// 加载侧边栏用户显示名与头像
+async function loadUserProfile() {
+  try {
+    const res = await getUserProfile()
+    if (res?.success) userProfile.value = { ...userProfile.value, ...(res.data || {}) }
+  } catch (e) { /* 侧边栏回退用户名与默认头像 */ }
+}
+
+// 接收个人设置保存后的即时资料更新
+function onUserProfileUpdated(event) {
+  userProfile.value = { ...userProfile.value, ...(event.detail || {}) }
+}
+
 function toggleUserMenu() {
   userMenuOpen.value = !userMenuOpen.value
+  // 菜单展开即预热后台入口 chunk，缩短点击"管理后台"后的加载等待
+  if (userMenuOpen.value) prefetchAdminEntry()
+}
+
+// 预加载后台管理入口 chunk（布局 + 默认首屏"快速接入"页）：
+// 路由懒加载的 chunk 若等点击后才下载/解析会阻塞主线程造成卡顿，
+// 在打开菜单/悬停入口的间隙提前拉取，点击时即可秒开（import 结果有缓存，flag 防重复触发）
+let adminPrefetched = false
+function prefetchAdminEntry() {
+  if (adminPrefetched || authStore.role !== 'admin') return
+  adminPrefetched = true
+  import('@/layout/AdminLayout.vue')
+  import('@/views/admin/QuickStart.vue')
 }
 
 function goAdmin() {
@@ -237,19 +694,28 @@ function closeMenuOnOutside(e) {
   }
   if (openMenuId.value !== null) {
     openMenuId.value = null
+    moveMenuId.value = null
+  }
+  if (openFolderMenuId.value !== null) {
+    openFolderMenuId.value = null
   }
 }
 
 onMounted(() => {
   document.addEventListener('click', closeMenuOnOutside)
+  window.addEventListener('user-profile-updated', onUserProfileUpdated)
+  loadUserProfile()
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', closeMenuOnOutside)
+  window.removeEventListener('user-profile-updated', onUserProfileUpdated)
   if (scrollHideTimer) clearTimeout(scrollHideTimer)
+  if (searchTimer) clearTimeout(searchTimer)
 })
 
-const emit = defineEmits(['toggle', 'new-chat', 'switch-chat', 'delete-chat', 'open-settings', 'open-about', 'open-stats', 'logout', 'share-chat'])
+const emit = defineEmits(['toggle', 'new-chat', 'switch-chat', 'search-result-select', 'delete-chat', 'open-settings', 'open-about', 'open-stats', 'logout', 'share-chat'])
+defineExpose({ openSidebarSearch })
 </script>
 
 <style scoped>
@@ -262,6 +728,30 @@ const emit = defineEmits(['toggle', 'new-chat', 'switch-chat', 'delete-chat', 'o
 .chat-item {
   position: relative;
 }
+.chat-item.selected { background: color-mix(in srgb, var(--primary,#6366f1) 12%, transparent); }
+.chat-select-checkbox { width:15px; height:15px; flex:0 0 auto; accent-color:var(--primary,#6366f1); }
+.sidebar-header-actions { display:flex; align-items:center; gap:4px; }
+.sidebar-header-action {
+  display:inline-flex;
+  width:24px;
+  height:24px;
+  align-items:center;
+  justify-content:center;
+  padding:0;
+  border:0;
+  border-radius:6px;
+  background:transparent;
+  color:var(--ink-3,#999);
+  cursor:pointer;
+  transition:background .15s,color .15s;
+}
+.sidebar-header-action:hover,
+.sidebar-header-action.active { background:var(--primary-soft,#eef3ff); color:var(--primary,#4a7dff); }
+.multi-select-toolbar { display:flex; align-items:center; gap:6px; padding:8px 10px; margin:0 0 4px; border:1px solid var(--border,#333); border-radius:6px; color:var(--ink-2,#ccc); font-size:11px; }
+.multi-select-toolbar span { margin-right:auto; }
+.multi-select-toolbar button { border:0; background:transparent; color:var(--primary,#6366f1); cursor:pointer; font-size:11px; }
+.multi-select-toolbar button.danger { color:#ef4444; }
+.multi-select-toolbar button:disabled { opacity:.4; cursor:not-allowed; }
 .chat-more-btn {
   background: none;
   border: none;
@@ -308,24 +798,250 @@ const emit = defineEmits(['toggle', 'new-chat', 'switch-chat', 'delete-chat', 'o
   color: #e5484d;
 }
 
-/* 全文搜索命中项：标题 + 匹配片段两行展示 */
-.search-hit {
-  height: auto;
-  padding-top: 6px;
-  padding-bottom: 6px;
-}
-.search-hit-body {
-  min-width: 0;
-  flex: 1;
+/* 新建会话按钮行 */
+.new-chat-row {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: stretch;
+  margin-bottom: 16px;
 }
-.search-hit-snippet {
-  font-size: 11px;
-  color: var(--ink-3, #999);
-  white-space: nowrap;
+.new-chat-row .new-chat-btn {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+/* 会话与文件夹一级分组标题保持相同层级，操作入口固定在右侧 */
+.chat-section-title,
+.folder-section-title { display:flex; align-items:center; justify-content:space-between; }
+.section-title-action {
+  display:inline-flex;
+  width:22px;
+  height:22px;
+  align-items:center;
+  justify-content:center;
+  padding:0;
+  border:0;
+  border-radius:5px;
+  background:transparent;
+  color:var(--primary,#4a7dff);
+  cursor:pointer;
+  transition:background .15s;
+}
+.section-title-action:hover,
+.section-title-action.active { background:var(--primary-soft,#eef3ff); }
+
+/* 文件夹分组标题行 */
+.chat-folder-header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 10px;
+  margin-top: 4px;
+  border-radius: var(--radius, 10px);
+  cursor: pointer;
+  color: var(--ink-2, #666);
+  transition: background .15s, color .15s;
+  user-select: none;
+}
+.chat-folder-header:hover {
+  background: var(--primary-soft, #eef3ff);
+  color: var(--fg, #333);
+}
+.folder-caret {
+  flex-shrink: 0;
+  transition: transform .15s;
+}
+.folder-caret.collapsed {
+  transform: rotate(-90deg);
+}
+.folder-icon {
+  flex-shrink: 0;
+  color: var(--primary, #4a7dff);
+}
+.folder-name {
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 500;
 }
+.folder-count {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-family: var(--mono, monospace);
+  color: var(--ink-3, #999);
+  background: var(--surface-2, #f5f5f5);
+  border-radius: 8px;
+  padding: 1px 6px;
+  min-width: 16px;
+  text-align: center;
+}
+.chat-folder-header .folder-more-btn {
+  opacity: 0;
+}
+.chat-folder-header:hover .folder-more-btn {
+  opacity: 1;
+}
+/* 文件夹内的会话项轻微缩进，体现归属层级 */
+.chat-item.in-folder {
+  padding-left: 26px;
+}
+
+/* 文件夹标题行菜单：复用 chat-item-menu 样式，定位到标题行下方 */
+.chat-item-menu.folder-menu {
+  right: 4px;
+  min-width: 110px;
+}
+
+/* 移动到文件夹目标选择态 */
+.chat-item-menu-title {
+  padding: 6px 10px 4px;
+  font-size: 11px;
+  color: var(--ink-3, #999);
+  user-select: none;
+}
+.chat-item-menu-empty {
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--ink-3, #999);
+  user-select: none;
+}
+.chat-item-menu-divider {
+  height: 1px;
+  background: var(--line-1, #eee);
+  margin: 4px 6px;
+}
+.chat-item-menu-item-muted {
+  color: var(--ink-3, #999);
+}
+.chat-item-menu-item .move-check {
+  display: inline-block;
+  width: 14px;
+  color: var(--primary, #4a7dff);
+  font-size: 12px;
+}
+.chat-item-menu-item .move-name {
+  vertical-align: middle;
+}
+/* 目标选择态下列表可能较长，限制高度允许滚动 */
+.chat-item-menu.is-move-menu {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+/* 侧边栏搜索遮罩层：覆盖整个侧边栏内容区（.sidebar-content 为相对定位容器），
+   左上角返回按钮 + 下方搜索框 + 可滚动的结果列表 */
+.sidebar-search-overlay {
+  position:absolute;
+  inset:0;
+  z-index:50;
+  display:flex;
+  flex-direction:column;
+  padding:16px 18px 18px;
+  background:var(--surface,#fff);
+  animation:sidebarSearchIn .18s ease;
+}
+@keyframes sidebarSearchIn { from { opacity:0; } to { opacity:1; } }
+.sidebar-search-topbar { flex:0 0 auto; display:flex; align-items:center; margin-bottom:10px; }
+.sidebar-search-back {
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  padding:5px 10px 5px 7px;
+  border:0;
+  border-radius:6px;
+  background:transparent;
+  color:var(--ink-2,#555);
+  font:inherit;
+  font-size:12.5px;
+  cursor:pointer;
+  transition:background .15s,color .15s;
+}
+.sidebar-search-back:hover { background:var(--primary-soft,#eef3ff); color:var(--primary,#4a7dff); }
+.sidebar-search-back:focus-visible { outline:2px solid var(--primary,#4a7dff); outline-offset:1px; }
+.sidebar-search-panel { flex:0 0 auto; }
+.sidebar-search-results-area { flex:1 1 auto; min-height:0; overflow-y:auto; }
+.sidebar-search-label {
+  position:absolute;
+  width:1px;
+  height:1px;
+  padding:0;
+  margin:-1px;
+  overflow:hidden;
+  clip:rect(0,0,0,0);
+  white-space:nowrap;
+  border:0;
+}
+.sidebar-search-input-wrap {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  min-height:34px;
+  padding:6px 9px;
+  border:1px solid var(--border,#ddd);
+  border-radius:8px;
+  background:var(--surface-2,#f7f7f7);
+  color:var(--ink-3,#999);
+}
+.sidebar-search-input-wrap:focus-within { border-color:var(--primary,#4a7dff); box-shadow:0 0 0 2px var(--primary-soft,#eef3ff); }
+.sidebar-search-input { min-width:0; flex:1; border:0; outline:0; background:transparent; color:var(--ink-1,#222); font:inherit; font-size:12.5px; }
+.sidebar-search-input::placeholder { color:var(--ink-4,#aaa); }
+.sidebar-search-clear { display:inline-flex; width:24px; height:24px; align-items:center; justify-content:center; padding:0; border:0; border-radius:6px; background:transparent; color:var(--ink-3,#999); cursor:pointer; }
+.sidebar-search-clear:hover { background:var(--primary-soft,#eef3ff); color:var(--primary,#4a7dff); }
+.sidebar-search-clear:focus-visible { outline:2px solid var(--primary,#4a7dff); outline-offset:1px; }
+.sidebar-search-status { min-height:19px; padding:6px 2px 0; color:var(--ink-3,#999); font-size:10.5px; }
+.sidebar-search-results { display:flex; flex-direction:column; gap:4px; padding-bottom:8px; }
+.sidebar-search-result {
+  display:flex;
+  width:100%;
+  flex-direction:column;
+  gap:4px;
+  padding:9px 10px;
+  border:1px solid transparent;
+  border-radius:8px;
+  background:transparent;
+  color:var(--ink-1,#222);
+  text-align:left;
+  cursor:pointer;
+}
+.sidebar-search-result:hover,
+.sidebar-search-result:focus-visible { border-color:var(--border,#ddd); background:var(--surface-2,#f7f7f7); outline:none; }
+.sidebar-search-result:focus-visible { box-shadow:0 0 0 2px var(--primary-soft,#eef3ff); }
+.sidebar-search-result-head { display:flex; min-width:0; align-items:center; justify-content:space-between; gap:8px; }
+.sidebar-search-result-head strong { overflow:hidden; font-size:12.5px; text-overflow:ellipsis; white-space:nowrap; }
+.sidebar-search-result-type { flex:0 0 auto; color:var(--primary,#4a7dff); font-size:9.5px; }
+.sidebar-search-result-snippet {
+  display:-webkit-box;
+  overflow:hidden;
+  color:var(--ink-3,#999);
+  font-size:11px;
+  line-height:1.45;
+  -webkit-box-orient:vertical;
+  -webkit-line-clamp:2;
+}
+.sidebar-search-result-snippet.empty { font-style:italic; }
+.sidebar-search-empty { padding:32px 10px; color:var(--ink-3,#999); font-size:12px; text-align:center; }
+
+/* 搜索筛选行（时间范围/文件夹/模型）与加载更多按钮 */
+.sidebar-search-filters { display:flex; flex-wrap:wrap; gap:6px; padding-top:8px; }
+.sidebar-search-filter-input {
+  flex:1 1 30%; min-width:0; padding:5px 8px; border-radius:7px;
+  border:1px solid var(--border,#e2e2e2); background:var(--bg-2,#fff);
+  color:var(--ink-1,#222); font-size:11.5px; outline:none;
+}
+.sidebar-search-filter-input:focus { border-color:var(--primary,#4a7dff); }
+.sidebar-search-filter-clear {
+  flex:0 0 auto; border:0; border-radius:7px; padding:5px 10px;
+  background:var(--surface-2,#f2f2f2); color:var(--ink-3,#888); font-size:11.5px; cursor:pointer;
+}
+.sidebar-search-filter-clear:hover { color:var(--ink-1,#222); }
+.sidebar-search-load-more {
+  margin:6px 0 2px; padding:7px 0; width:100%; border:1px dashed var(--border,#ddd);
+  border-radius:8px; background:transparent; color:var(--primary,#4a7dff);
+  font-size:12px; cursor:pointer;
+}
+.sidebar-search-load-more:hover { background:var(--primary-soft,#eef3ff); }
 </style>

@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
-    <div class="modal-overlay" @click="$emit('close')">
-      <div class="modal-container settings-modal-container" @click.stop>
+    <div class="modal-overlay" @click="requestClose">
+      <div ref="modalContainer" class="modal-container settings-modal-container" role="dialog" aria-modal="true" :aria-label="t('settings.title')" tabindex="-1" @click.stop @keydown.esc="requestClose" @keydown.tab="trapModalFocus">
         <!-- Autofill trap: prevent browser from filling username into sidebar search -->
         <div style="display:none" aria-hidden="true">
           <input type="text" autocomplete="username" tabindex="-1" />
@@ -9,11 +9,19 @@
         </div>
         <div class="modal-header">
           <span class="modal-title">{{ t('settings.title') }}</span>
-          <button class="modal-close" @click="$emit('close')">✕</button>
+          <button class="modal-close" type="button" :aria-label="t('common.close')" @click="requestClose">✕</button>
         </div>
         <div class="settings-modal">
           <!-- 导航：el-tabs 仅作菜单栏（内容区隐藏），桌面端左侧竖排、窄屏顶部横排可滑动 -->
           <el-tabs v-model="tab" :tab-position="isMobile ? 'top' : 'left'" class="settings-tabs-nav" @tab-change="onTabChange">
+            <el-tab-pane name="profile">
+              <template #label>
+                <span class="settings-tab-label">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+                  <span>{{ t('settings.tabProfile') }}</span>
+                </span>
+              </template>
+            </el-tab-pane>
             <el-tab-pane name="general">
               <template #label>
                 <span class="settings-tab-label">
@@ -27,6 +35,14 @@
                 <span class="settings-tab-label">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
                   <span>{{ t('settings.tabPassword') }}</span>
+                </span>
+              </template>
+            </el-tab-pane>
+            <el-tab-pane name="twoFactor">
+              <template #label>
+                <span class="settings-tab-label">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+                  <span>{{ t('settings.tabTwoFactor') }}</span>
                 </span>
               </template>
             </el-tab-pane>
@@ -63,16 +79,47 @@
               </template>
             </el-tab-pane>
           </el-tabs>
-          <div class="settings-content">
-            <!-- 通用：界面语言切换（用户端中英双语，管理后台保持中文） -->
+          <div ref="settingsContent" class="settings-content">
+            <div v-if="tab === 'profile'" class="settings-panel">
+              <h3 class="settings-panel-title">{{ t('settings.tabProfile') }}</h3>
+              <div class="profile-avatar-row">
+                <div class="profile-avatar-preview" :aria-label="t('settings.profileAvatarPreview')">
+                  <img v-if="profileAvatarSrc" :src="profileAvatarSrc" :alt="t('settings.profileAvatarPreview')" />
+                  <span v-else>{{ (profileForm.displayName || profileForm.username || 'U').slice(0, 1).toUpperCase() }}</span>
+                </div>
+                <div class="settings-form-group profile-avatar-control">
+                  <label for="profile-avatar-type">{{ t('settings.profileAvatarType') }}</label>
+                  <select id="profile-avatar-type" v-model="profileForm.avatarType" class="settings-input">
+                    <option value="default">{{ t('settings.profileAvatarDefault') }}</option>
+                    <option value="svg">{{ t('settings.profileAvatarSvg') }}</option>
+                  </select>
+                </div>
+              </div>
+              <div v-if="profileForm.avatarType === 'svg'" class="settings-form-group">
+                <label for="profile-avatar-svg">{{ t('settings.profileAvatarSvgLabel') }}</label>
+                <textarea id="profile-avatar-svg" v-model="profileForm.avatarValue" class="settings-input settings-textarea" rows="6" maxlength="20000" :placeholder="t('settings.profileAvatarSvgPlaceholder')"></textarea>
+                <div class="settings-form-note">{{ t('settings.profileAvatarSvgNote') }}</div>
+              </div>
+              <div class="profile-form-grid">
+                <div class="settings-form-group"><label for="profile-display-name">{{ t('settings.profileDisplayName') }}</label><input id="profile-display-name" v-model="profileForm.displayName" class="settings-input" maxlength="80" /></div>
+                <div class="settings-form-group"><label for="profile-email">{{ t('settings.profileEmail') }}</label><input id="profile-email" v-model="profileForm.email" type="email" class="settings-input" maxlength="160" /></div>
+                <div class="settings-form-group"><label for="profile-phone">{{ t('settings.profilePhone') }}</label><input id="profile-phone" v-model="profileForm.phone" type="tel" class="settings-input" maxlength="40" /></div>
+              </div>
+              <div class="settings-form-group"><label for="profile-bio">{{ t('settings.profileBio') }}</label><textarea id="profile-bio" v-model="profileForm.bio" class="settings-input settings-textarea" rows="4" maxlength="500"></textarea></div>
+              <div class="settings-form-actions">
+                <button type="button" class="settings-btn settings-btn-primary" :disabled="profileSaving" @click="submitProfile">{{ profileSaving ? t('settings.profileSaving') : t('settings.profileSave') }}</button>
+              </div>
+            </div>
+
+            <!-- 通用：全站界面语言切换（含后台管理） -->
             <div v-if="tab === 'general'" class="settings-panel">
               <h3 class="settings-panel-title">{{ t('settings.tabGeneral') }}</h3>
               <div class="settings-form-group">
                 <label>{{ t('settings.language') }}</label>
-                <select v-model="uiLocale" class="settings-select" @change="setLocale(uiLocale)">
-                  <option value="zh">中文</option>
-                  <option value="en">English</option>
-                </select>
+                <el-select v-model="uiLocale" class="settings-el-select" popper-class="settings-select-popper" @change="setLocale">
+                  <el-option value="zh" label="中文" />
+                  <el-option value="en" label="English" />
+                </el-select>
               </div>
               <div class="settings-form-note">{{ t('settings.languageNote') }}</div>
             </div>
@@ -97,6 +144,101 @@
                 <button class="settings-btn settings-btn-primary" @click="submitChangePassword">{{ t('settings.submit') }}</button>
               </div>
               <div class="settings-form-note">{{ t('settings.pwdNote') }}</div>
+            </div>
+
+            <!-- 双重验证：密码复核、扫码绑定、一次性恢复码与关闭流程 -->
+            <div v-if="tab === 'twoFactor'" class="settings-panel" aria-labelledby="two-factor-settings-title">
+              <h3 id="two-factor-settings-title" class="settings-panel-title">{{ t('settings.tabTwoFactor') }}</h3>
+              <div v-if="twoFactorLoading" class="session-empty" aria-live="polite">{{ t('common.loading') }}</div>
+              <template v-else-if="recoveryCodes.length">
+                <div class="security-status enabled">
+                  <span class="security-status-dot"></span>
+                  <div>
+                    <strong>{{ t('settings.twoFactorEnabled') }}</strong>
+                    <p>{{ t('settings.recoveryCodesOneTime') }}</p>
+                  </div>
+                </div>
+                <div class="recovery-code-grid" aria-label="20 recovery codes">
+                  <code v-for="code in recoveryCodes" :key="code">{{ code }}</code>
+                </div>
+                <div class="settings-form-actions recovery-actions">
+                  <button type="button" class="settings-btn settings-btn-ghost" @click="copyRecoveryCodes">{{ t('settings.copyRecoveryCodes') }}</button>
+                  <button type="button" class="settings-btn settings-btn-ghost" @click="downloadRecoveryCodes">{{ t('settings.downloadRecoveryCodes') }}</button>
+                </div>
+                <label class="recovery-confirm">
+                  <input v-model="recoveryCodesSaved" type="checkbox" />
+                  <span>{{ t('settings.recoveryCodesSavedConfirm') }}</span>
+                </label>
+                <button type="button" class="settings-btn settings-btn-primary" :disabled="!recoveryCodesSaved" @click="finishRecoveryCodes">{{ t('settings.finishTwoFactorSetup') }}</button>
+              </template>
+              <template v-else-if="twoFactorSetup.setupToken">
+                <p class="settings-form-note two-factor-intro">{{ t('settings.scanQrHelp') }}</p>
+                <div class="qr-setup-layout">
+                  <div class="qr-frame">
+                    <img v-if="twoFactorQr" :src="twoFactorQr" :alt="t('settings.qrAlt')" />
+                  </div>
+                  <div class="manual-secret">
+                    <span>{{ t('settings.manualSecret') }}</span>
+                    <code>{{ twoFactorSetup.secret }}</code>
+                  </div>
+                </div>
+                <div class="settings-form-group">
+                  <label for="two-factor-setup-code">{{ t('settings.authenticatorCode') }}</label>
+                  <input id="two-factor-setup-code" ref="setupCodeInput" v-model="twoFactorSetupCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" class="settings-input otp-input" placeholder="000000" :aria-invalid="!!twoFactorTip" aria-describedby="two-factor-setup-tip" @input="normalizeSetupCode" />
+                  <div id="two-factor-setup-tip" class="settings-form-tip" :class="{ error: twoFactorTipError }" aria-live="polite">{{ twoFactorTip }}</div>
+                </div>
+                <div class="settings-form-actions inline-actions">
+                  <button type="button" class="settings-btn settings-btn-primary" :disabled="twoFactorActionLoading" @click="confirmEnableTwoFactor">{{ t('settings.enableTwoFactor') }}</button>
+                  <button type="button" class="settings-btn settings-btn-ghost" @click="cancelTwoFactorSetup">{{ t('common.cancel') }}</button>
+                </div>
+              </template>
+              <template v-else-if="twoFactorStatus.enabled">
+                <div class="security-status enabled">
+                  <span class="security-status-dot"></span>
+                  <div>
+                    <strong>{{ t('settings.twoFactorEnabled') }}</strong>
+                    <p>{{ t('settings.recoveryCodesRemaining', { n: twoFactorStatus.recoveryCodesRemaining }) }}</p>
+                  </div>
+                </div>
+                <div class="security-section">
+                  <h4>{{ t('settings.regenerateRecoveryCodes') }}</h4>
+                  <p>{{ t('settings.regenerateHelp') }}</p>
+                  <div class="settings-form-group">
+                    <label for="two-factor-regenerate-password">{{ t('settings.oldPwd') }}</label>
+                    <input id="two-factor-regenerate-password" v-model="regenerateForm.password" type="password" autocomplete="current-password" class="settings-input" />
+                  </div>
+                  <div class="settings-form-group">
+                    <label for="two-factor-regenerate-code">{{ t('settings.authenticatorCode') }}</label>
+                    <input id="two-factor-regenerate-code" v-model="regenerateForm.code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" class="settings-input otp-input" placeholder="000000" @input="regenerateForm.code = regenerateForm.code.replace(/\D/g, '').slice(0, 6)" />
+                  </div>
+                  <button type="button" class="settings-btn settings-btn-ghost" :disabled="twoFactorActionLoading" @click="handleRegenerateRecoveryCodes">{{ t('settings.regenerate') }}</button>
+                </div>
+                <div class="security-section danger-zone">
+                  <h4>{{ t('settings.disableTwoFactor') }}</h4>
+                  <p>{{ t('settings.disableTwoFactorHelp') }}</p>
+                  <div class="settings-form-group">
+                    <label for="two-factor-disable-password">{{ t('settings.oldPwd') }}</label>
+                    <input id="two-factor-disable-password" v-model="disableTwoFactorPassword" type="password" autocomplete="current-password" class="settings-input" />
+                  </div>
+                  <button type="button" class="settings-btn settings-btn-danger" :disabled="twoFactorActionLoading" @click="handleDisableTwoFactor">{{ t('settings.disableTwoFactor') }}</button>
+                </div>
+                <div class="settings-form-tip" :class="{ error: twoFactorTipError }" aria-live="polite">{{ twoFactorTip }}</div>
+              </template>
+              <template v-else>
+                <div class="security-status">
+                  <span class="security-status-dot"></span>
+                  <div>
+                    <strong>{{ t('settings.twoFactorDisabled') }}</strong>
+                    <p>{{ t('settings.twoFactorIntro') }}</p>
+                  </div>
+                </div>
+                <div class="settings-form-group">
+                  <label for="two-factor-current-password">{{ t('settings.oldPwd') }}</label>
+                  <input id="two-factor-current-password" v-model="setupPassword" type="password" autocomplete="current-password" class="settings-input" :aria-invalid="!!twoFactorTip" aria-describedby="two-factor-status-tip" />
+                  <div id="two-factor-status-tip" class="settings-form-tip" :class="{ error: twoFactorTipError }" aria-live="polite">{{ twoFactorTip }}</div>
+                </div>
+                <button type="button" class="settings-btn settings-btn-primary" :disabled="twoFactorActionLoading" @click="startTwoFactorSetup">{{ t('settings.startTwoFactorSetup') }}</button>
+              </template>
             </div>
 
             <!-- 提示词 -->
@@ -154,12 +296,13 @@
             <div v-if="tab === 'shareManage'" class="settings-panel">
               <h3 class="settings-panel-title">{{ t('settings.tabShares') }}</h3>
               <div class="share-toolbar">
-                <select v-model="shareFilterStatus" class="settings-select">
-                  <option value="">{{ t('settings.allStatus') }}</option>
-                  <option value="valid">{{ t('settings.statusValid') }}</option>
-                  <option value="expired">{{ t('settings.statusExpired') }}</option>
-                  <option value="orphaned">{{ t('settings.statusOrphaned') }}</option>
-                </select>
+                <el-select v-model="shareFilterStatus" class="settings-el-select" popper-class="settings-select-popper">
+                  <el-option value="" :label="t('settings.allStatus')" />
+                  <el-option value="valid" :label="t('settings.statusValid')" />
+                  <el-option value="expired" :label="t('settings.statusExpired')" />
+                  <el-option value="exhausted" :label="t('settings.statusExhausted')" />
+                  <el-option value="orphaned" :label="t('settings.statusOrphaned')" />
+                </el-select>
                 <button class="settings-btn settings-btn-ghost" :disabled="invalidShares.length === 0" @click="handleClearInvalidShares">{{ t('settings.clearInvalid', { n: invalidShares.length }) }}</button>
                 <button class="settings-btn settings-btn-danger" :disabled="selectedShareIds.length === 0" @click="handleDeleteSelectedShares">{{ t('settings.deleteSelected', { n: selectedShareIds.length }) }}</button>
               </div>
@@ -175,10 +318,13 @@
                     <div class="share-meta">
                       <span>{{ t('settings.createdAt', { date: s.createdAt || t('common.unknown') }) }}</span>
                       <span>{{ t('settings.expiresAt', { date: s.expiresAt || t('settings.permanent') }) }}</span>
+                      <span>{{ t('settings.shareViews', { used: s.accessCount ?? 0, total: s.maxViews > 0 ? s.maxViews : t('settings.unlimited') }) }}</span>
+                      <span v-if="s.passwordProtected">{{ t('settings.sharePassword') }}: {{ s.password || t('settings.sharePasswordNotViewable') }}</span>
                     </div>
                     <div class="share-link">{{ shareUrl(s) }}</div>
                   </div>
                   <div class="share-actions">
+                    <button class="share-action-btn" :title="t('settings.editShare')" @click="openShareEdit(s)">{{ t('common.edit') }}</button>
                     <button class="share-action-btn" :title="t('settings.copyLink')" @click="copyShareLink(s)">{{ t('common.copy') }}</button>
                     <button class="share-action-btn" :title="t('settings.openLink')" @click="openShareLink(s)">{{ t('common.open') }}</button>
                     <button class="share-action-btn danger" :title="t('settings.deleteShare')" @click="handleDeleteShare(s)">{{ t('common.delete') }}</button>
@@ -198,11 +344,11 @@
                     <div class="data-mgmt-title">{{ t('settings.exportAll') }}</div>
                     <div class="data-mgmt-desc">{{ t('settings.exportAllDesc', { n: chatStore.countValidChats() }) }}</div>
                   </div>
-                  <select v-model="exportFormat" class="settings-select">
-                    <option value="txt">{{ t('settings.fmtTxt') }}</option>
-                    <option value="md">{{ t('settings.fmtMd') }}</option>
-                    <option value="json">{{ t('settings.fmtJson') }}</option>
-                  </select>
+                  <el-select v-model="exportFormat" class="settings-el-select" popper-class="settings-select-popper">
+                    <el-option value="txt" :label="t('settings.fmtTxt')" />
+                    <el-option value="md" :label="t('settings.fmtMd')" />
+                    <el-option value="json" :label="t('settings.fmtJson')" />
+                  </el-select>
                   <button class="settings-btn settings-btn-primary" @click="confirmExport">{{ t('settings.export') }}</button>
                 </div>
                 <div class="data-mgmt-row">
@@ -212,6 +358,13 @@
                   </div>
                   <button class="settings-btn settings-btn-primary" @click="importFileRef && importFileRef.click()">{{ t('settings.chooseFile') }}</button>
                   <input ref="importFileRef" type="file" accept=".json,application/json" style="display:none" @change="handleImportJson" />
+                </div>
+                <div class="data-mgmt-row">
+                  <div class="data-mgmt-info">
+                    <div class="data-mgmt-title">{{ t('trash.title') }}</div>
+                    <div class="data-mgmt-desc">{{ t('trash.entryDesc') }}</div>
+                  </div>
+                  <button class="settings-btn settings-btn-primary" @click="showRecycleBin = true">{{ t('trash.open') }}</button>
                 </div>
                 <div class="data-mgmt-row data-mgmt-row-danger">
                   <div class="data-mgmt-info">
@@ -227,27 +380,55 @@
         </div>
       </div>
     </div>
+    <ShareSettingsModal
+      v-if="shareEditVisible"
+      :share="shareEditTarget"
+      @close="shareEditVisible = false"
+      @saved="onShareEditSaved"
+    />
+    <RecycleBinModal
+      v-if="showRecycleBin"
+      @close="showRecycleBin = false"
+      @changed="onTrashChanged"
+    />
   </Teleport>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
+import QRCode from 'qrcode'
 import { useI18n } from 'vue-i18n'
 import { setLocale, getLocale } from '@/i18n'
-import { changePassword, getSessions, kickSession } from '@/api/auth'
-import { getPromptPresets, savePromptPresets } from '@/api/user'
+import {
+  changePassword, getSessions, kickSession, getTwoFactorStatus, setupTwoFactor,
+  enableTwoFactor, disableTwoFactor, regenerateRecoveryCodes
+} from '@/api/auth'
+import { getPromptPresets, savePromptPresets, getUserProfile, saveUserProfile } from '@/api/user'
 import { getMyShares, deleteShare, batchDeleteMyShares } from '@/api/share'
+import ShareSettingsModal from './ShareSettingsModal.vue'
+import RecycleBinModal from './RecycleBinModal.vue'
 import { useChatStore } from '@/stores/chat'
-import { useAuthStore } from '@/stores/auth'
 
 const emit = defineEmits(['close', 'logout'])
 const { t } = useI18n()
 const chatStore = useChatStore()
-const authStore = useAuthStore()
+const modalContainer = ref(null)
+const settingsContent = ref(null)
 
 // 默认展示"通用"页（个人设置弹窗打开后默认进入通用设置，而非修改密码）
-const tab = ref('general')
+const tab = ref('profile')
+const profileSaving = ref(false)
+// 回收站弹窗显隐
+const showRecycleBin = ref(false)
+
+// 回收站恢复/删除后刷新侧边栏会话列表（静默拉取服务端最新摘要）
+function onTrashChanged() {
+  chatStore.refreshFromServer()
+}
+const profileForm = ref({ username: '', displayName: '', email: '', phone: '', bio: '', avatarType: 'default', avatarValue: '' })
+const profileAvatarSrc = computed(() => profileForm.value.avatarType === 'svg' && profileForm.value.avatarValue.trim()
+  ? 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(profileForm.value.avatarValue.trim()) : '')
 
 // 通用：界面语言下拉（切换即时生效并持久化，见 @/i18n 的 setLocale）
 const uiLocale = ref(getLocale())
@@ -256,14 +437,45 @@ const uiLocale = ref(getLocale())
 const mobileQuery = window.matchMedia('(max-width: 480px)')
 const isMobile = ref(mobileQuery.matches)
 const onMobileChange = e => { isMobile.value = e.matches }
-onMounted(() => mobileQuery.addEventListener('change', onMobileChange))
+onMounted(() => {
+  mobileQuery.addEventListener('change', onMobileChange)
+  loadProfile()
+  nextTick(() => modalContainer.value?.focus())
+})
 onBeforeUnmount(() => mobileQuery.removeEventListener('change', onMobileChange))
 
-// 切换 Tab 时按需加载对应数据
-function onTabChange(name) {
+// 切换 Tab 时先重置内容滚动位置，再按需加载对应数据
+async function onTabChange(name) {
+  await nextTick()
+  if (settingsContent.value) settingsContent.value.scrollTop = 0
   if (name === 'systemPrompt') loadPresets()
+  else if (name === 'profile') loadProfile()
   else if (name === 'loginDevices') loadSessions()
   else if (name === 'shareManage') loadShares()
+  else if (name === 'twoFactor') loadTwoFactorStatus()
+}
+
+// 加载当前用户资料
+async function loadProfile() {
+  try {
+    const res = await getUserProfile()
+    if (res?.success) profileForm.value = { ...profileForm.value, ...(res.data || {}) }
+  } catch (e) { /* 请求层统一提示 */ }
+}
+
+// 保存个人资料并通知侧边栏即时刷新头像与显示名
+async function submitProfile() {
+  profileSaving.value = true
+  try {
+    const res = await saveUserProfile(profileForm.value)
+    if (res?.success) {
+      profileForm.value = { ...profileForm.value, ...(res.data || {}) }
+      window.dispatchEvent(new CustomEvent('user-profile-updated', { detail: res.data || {} }))
+      ElMessage.success(res.message || t('settings.profileSaved'))
+    } else ElMessage.error(res?.message || t('common.error'))
+  } finally {
+    profileSaving.value = false
+  }
 }
 
 // 修改密码
@@ -280,6 +492,22 @@ const promptTipError = ref(false)
 const sessions = ref([])
 const sessionsLoading = ref(false)
 
+// 双重验证状态与分步表单
+const twoFactorLoading = ref(false)
+const twoFactorActionLoading = ref(false)
+const twoFactorStatus = ref({ enabled: false, recoveryCodesRemaining: 0 })
+const setupPassword = ref('')
+const twoFactorSetup = ref({ setupToken: '', secret: '', provisioningUri: '' })
+const twoFactorQr = ref('')
+const twoFactorSetupCode = ref('')
+const setupCodeInput = ref(null)
+const recoveryCodes = ref([])
+const recoveryCodesSaved = ref(false)
+const disableTwoFactorPassword = ref('')
+const regenerateForm = ref({ password: '', code: '' })
+const twoFactorTip = ref('')
+const twoFactorTipError = ref(false)
+
 // 分享管理
 const shares = ref([])
 const sharesLoading = ref(false)
@@ -288,6 +516,241 @@ const selectedShareIds = ref([])
 
 // 导出格式（txt/md/json）
 const exportFormat = ref('txt')
+
+// 读取 2FA 状态；接口只返回开关与剩余恢复码数量，不返回敏感凭据
+async function loadTwoFactorStatus() {
+  twoFactorLoading.value = true
+  twoFactorTip.value = ''
+  try {
+    const data = await getTwoFactorStatus()
+    if (data?.success) {
+      twoFactorStatus.value = {
+        enabled: !!data.enabled,
+        recoveryCodesRemaining: Number(data.recoveryCodesRemaining || 0)
+      }
+    } else {
+      twoFactorTip.value = data?.message || t('settings.requestFailed')
+      twoFactorTipError.value = true
+    }
+  } catch (e) {
+    twoFactorTip.value = t('settings.requestFailed')
+    twoFactorTipError.value = true
+  } finally {
+    twoFactorLoading.value = false
+  }
+}
+
+// 验证当前密码并在浏览器本地生成扫码二维码
+async function startTwoFactorSetup() {
+  twoFactorTip.value = ''
+  twoFactorTipError.value = false
+  if (!setupPassword.value) {
+    twoFactorTip.value = t('settings.enterCurrentPassword')
+    twoFactorTipError.value = true
+    return
+  }
+  twoFactorActionLoading.value = true
+  try {
+    const data = await setupTwoFactor({ password: setupPassword.value })
+    if (!data?.success) {
+      twoFactorTip.value = data?.message || t('settings.requestFailed')
+      twoFactorTipError.value = true
+      return
+    }
+    twoFactorSetup.value = {
+      setupToken: data.setupToken,
+      secret: data.secret,
+      provisioningUri: data.provisioningUri
+    }
+    twoFactorQr.value = await QRCode.toDataURL(data.provisioningUri, {
+      width: 220,
+      margin: 1,
+      errorCorrectionLevel: 'M',
+      color: { dark: '#111111', light: '#ffffff' }
+    })
+    setupPassword.value = ''
+    await nextTick()
+    setupCodeInput.value?.focus()
+  } catch (e) {
+    twoFactorTip.value = t('settings.requestFailed')
+    twoFactorTipError.value = true
+  } finally {
+    twoFactorActionLoading.value = false
+  }
+}
+
+// TOTP 输入仅保留六位数字
+function normalizeSetupCode() {
+  twoFactorSetupCode.value = twoFactorSetupCode.value.replace(/\D/g, '').slice(0, 6)
+  twoFactorTip.value = ''
+}
+
+// 提交身份验证器中的首次验证码并正式启用 2FA
+async function confirmEnableTwoFactor() {
+  if (!/^\d{6}$/.test(twoFactorSetupCode.value)) {
+    twoFactorTip.value = t('settings.enterSixDigitCode')
+    twoFactorTipError.value = true
+    return
+  }
+  twoFactorActionLoading.value = true
+  try {
+    const data = await enableTwoFactor({
+      setupToken: twoFactorSetup.value.setupToken,
+      code: twoFactorSetupCode.value
+    })
+    if (!data?.success) {
+      twoFactorTip.value = data?.message || t('settings.requestFailed')
+      twoFactorTipError.value = true
+      return
+    }
+    recoveryCodes.value = data.recoveryCodes || []
+    recoveryCodesSaved.value = false
+    twoFactorStatus.value = { enabled: true, recoveryCodesRemaining: recoveryCodes.value.length }
+    cancelTwoFactorSetup(false)
+    ElMessage.success(t('settings.twoFactorEnabled'))
+  } catch (e) {
+    twoFactorTip.value = t('settings.requestFailed')
+    twoFactorTipError.value = true
+  } finally {
+    twoFactorActionLoading.value = false
+  }
+}
+
+// 清除仍在内存中的扫码绑定数据；服务端挑战会在短期 TTL 后自动失效
+function cancelTwoFactorSetup(clearTip = true) {
+  twoFactorSetup.value = { setupToken: '', secret: '', provisioningUri: '' }
+  twoFactorQr.value = ''
+  twoFactorSetupCode.value = ''
+  if (clearTip) twoFactorTip.value = ''
+}
+
+// 复制全部恢复码，失败时给出明确提示
+async function copyRecoveryCodes() {
+  try {
+    await navigator.clipboard.writeText(recoveryCodes.value.join('\n'))
+    ElMessage.success(t('settings.recoveryCodesCopied'))
+  } catch (e) {
+    ElMessage.error(t('settings.copyRecoveryCodesFailed'))
+  }
+}
+
+// 将恢复码下载为本地文本文件，便于离线保管
+function downloadRecoveryCodes() {
+  const content = `${t('settings.recoveryCodesFileTitle')}\n\n${recoveryCodes.value.join('\n')}\n`
+  const url = URL.createObjectURL(new Blob([content], { type: 'text/plain;charset=utf-8' }))
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = 'chatai-recovery-codes.txt'
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
+
+// 用户确认已保存后隐藏仅展示一次的恢复码明文
+function finishRecoveryCodes() {
+  if (!recoveryCodesSaved.value) return
+  recoveryCodes.value = []
+  recoveryCodesSaved.value = false
+  loadTwoFactorStatus()
+}
+
+// 二次确认并验证当前密码后关闭 2FA
+async function handleDisableTwoFactor() {
+  if (!disableTwoFactorPassword.value) {
+    twoFactorTip.value = t('settings.enterCurrentPassword')
+    twoFactorTipError.value = true
+    return
+  }
+  try {
+    await ElMessageBox.confirm(t('settings.disableTwoFactorConfirm'), t('settings.disableTwoFactor'), {
+      confirmButtonText: t('settings.disableTwoFactor'),
+      cancelButtonText: t('common.cancel'),
+      type: 'warning'
+    })
+  } catch (e) {
+    return
+  }
+  twoFactorActionLoading.value = true
+  try {
+    const data = await disableTwoFactor({ password: disableTwoFactorPassword.value })
+    if (!data?.success) {
+      twoFactorTip.value = data?.message || t('settings.opFailed')
+      twoFactorTipError.value = true
+      return
+    }
+    disableTwoFactorPassword.value = ''
+    twoFactorStatus.value = { enabled: false, recoveryCodesRemaining: 0 }
+    twoFactorTip.value = ''
+    ElMessage.success(t('settings.twoFactorDisabled'))
+  } catch (e) {
+    twoFactorTip.value = t('settings.requestFailed')
+    twoFactorTipError.value = true
+  } finally {
+    twoFactorActionLoading.value = false
+  }
+}
+
+// 验证密码和当前 TOTP 后替换全部恢复码
+async function handleRegenerateRecoveryCodes() {
+  const { password, code } = regenerateForm.value
+  if (!password || !/^\d{6}$/.test(code)) {
+    twoFactorTip.value = t('settings.regenerateIncomplete')
+    twoFactorTipError.value = true
+    return
+  }
+  twoFactorActionLoading.value = true
+  try {
+    const data = await regenerateRecoveryCodes({ password, code })
+    if (!data?.success) {
+      twoFactorTip.value = data?.message || t('settings.opFailed')
+      twoFactorTipError.value = true
+      return
+    }
+    regenerateForm.value = { password: '', code: '' }
+    recoveryCodes.value = data.recoveryCodes || []
+    recoveryCodesSaved.value = false
+    twoFactorTip.value = ''
+  } catch (e) {
+    twoFactorTip.value = t('settings.requestFailed')
+    twoFactorTipError.value = true
+  } finally {
+    twoFactorActionLoading.value = false
+  }
+}
+
+// 关闭设置窗口前保护尚未确认保存的恢复码，避免用户误丢失
+async function requestClose() {
+  if (recoveryCodes.value.length && !recoveryCodesSaved.value) {
+    try {
+      await ElMessageBox.confirm(t('settings.unsavedRecoveryCodesConfirm'), t('settings.unsavedRecoveryCodesTitle'), {
+        confirmButtonText: t('settings.closeAnyway'),
+        cancelButtonText: t('settings.continueSaving'),
+        type: 'warning'
+      })
+    } catch (e) {
+      return
+    }
+  }
+  emit('close')
+}
+
+// 将 Tab 焦点限制在设置对话框内，避免键盘用户误操作背后的聊天页面
+function trapModalFocus(event) {
+  const root = modalContainer.value
+  if (!root) return
+  const focusable = [...root.querySelectorAll(
+    'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  )].filter(element => element.offsetParent !== null)
+  if (!focusable.length) return
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
+}
 
 async function submitChangePassword() {
   pwdTip.value = ''
@@ -499,11 +962,11 @@ function confirmKick(s) {
 
 // 分享状态展示名随语言切换，改为函数式取字典
 function shareStatusText(s) {
-  const map = { valid: t('settings.statusValid'), expired: t('settings.statusExpired'), orphaned: t('settings.statusOrphaned') }
+  const map = { valid: t('settings.statusValid'), expired: t('settings.statusExpired'), exhausted: t('settings.statusExhausted'), orphaned: t('settings.statusOrphaned') }
   return map[s] || s
 }
 
-// 失效分享 = 已过期 + 源会话已删
+// 失效分享 = 已过期 + 次数已用完 + 源会话已删
 const invalidShares = computed(() => shares.value.filter(s => s.status !== 'valid'))
 
 const filteredShares = computed(() =>
@@ -539,6 +1002,19 @@ function openShareLink(s) {
   window.open(shareUrl(s), '_blank')
 }
 
+// 打开分享安全设置编辑弹窗
+const shareEditVisible = ref(false)
+const shareEditTarget = ref(null)
+function openShareEdit(s) {
+  shareEditTarget.value = s
+  shareEditVisible.value = true
+}
+
+// 编辑保存成功后刷新分享列表
+async function onShareEditSaved() {
+  await loadShares()
+}
+
 // 单条删除（撤销分享）
 async function handleDeleteShare(s) {
   try {
@@ -563,7 +1039,7 @@ async function handleDeleteSelectedShares() {
   } catch { /* cancelled */ }
 }
 
-// 一键清除失效（已过期 + 源会话已删）
+// 一键清除失效（已过期 + 次数已用完 + 源会话已删）
 async function handleClearInvalidShares() {
   const rows = invalidShares.value
   if (rows.length === 0) return
@@ -603,13 +1079,20 @@ async function doBatchDeleteShares(ids) {
   border-radius: 12px;
   width: 90%;
   max-width: 720px;
-  max-height: 80vh;
+  height: min(680px, 80vh);
+  max-height: none;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
+@supports (height: 100dvh) {
+  .modal-container {
+    height: min(680px, 80dvh);
+  }
+}
 .modal-header {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: space-between;
   padding: 16px 20px;
@@ -630,6 +1113,7 @@ async function doBatchDeleteShares(ids) {
 .settings-modal {
   display: flex;
   flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 /* === 导航 Tab（el-tabs 仅作菜单栏，内容区由 .settings-content 承担） === */
@@ -674,8 +1158,12 @@ async function doBatchDeleteShares(ids) {
 }
 .settings-content {
   flex: 1;
+  min-width: 0;
+  min-height: 0;
   padding: 20px;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 .settings-panel-title {
   font-size: 15px;
@@ -731,19 +1219,38 @@ async function doBatchDeleteShares(ids) {
   opacity: 0.4;
   cursor: not-allowed;
 }
-.settings-select {
-  padding: 8px 10px;
-  border: 1px solid var(--border, #333);
-  border-radius: 6px;
-  background: var(--paper, #252536);
-  color: var(--ink, #eee);
-  font-size: 13px;
-  outline: none;
-  cursor: pointer;
+/* === el-select 下拉（通用/分享管理/数据管理共用）：触发器主题适配，浮层见 chat.css 的 .settings-select-popper === */
+.settings-el-select {
+  width: 150px;
   flex-shrink: 0;
 }
-.settings-select:focus {
-  border-color: var(--primary, #6366f1);
+/* EP 用 box-shadow 模拟边框，默认/hover/focus 三态需合并写并加 !important */
+.settings-el-select :deep(.el-select__wrapper),
+.settings-el-select :deep(.el-select__wrapper:hover),
+.settings-el-select :deep(.el-select__wrapper.is-focused) {
+  background: var(--paper, #252536) !important;
+  box-shadow: 0 0 0 1px var(--border, #333) inset !important;
+  border-radius: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  cursor: pointer;
+}
+.settings-el-select :deep(.el-select__wrapper:hover) {
+  box-shadow: 0 0 0 1px var(--ink-4, #666) inset !important;
+}
+.settings-el-select :deep(.el-select__wrapper.is-focused) {
+  box-shadow: 0 0 0 1px var(--primary, #6366f1) inset !important;
+}
+.settings-el-select :deep(.el-select__selected-item) {
+  color: var(--ink, #eee);
+  font-size: 13px;
+}
+.settings-el-select :deep(.el-select__placeholder) {
+  color: var(--ink-3, #999);
+  font-size: 13px;
+}
+.settings-el-select :deep(.el-select__suffix) {
+  color: var(--ink-3, #999);
 }
 .settings-btn-primary {
   background: var(--primary, #6366f1);
@@ -757,6 +1264,138 @@ async function doBatchDeleteShares(ids) {
   margin-top: 16px;
   font-size: 11px;
   color: var(--ink-4, #666);
+}
+
+.profile-avatar-row { display:flex; align-items:center; gap:16px; margin-bottom:16px; }
+.profile-avatar-preview { width:64px; height:64px; display:flex; align-items:center; justify-content:center; flex:0 0 auto; overflow:hidden; border:1px solid var(--border,#333); border-radius:50%; background:var(--paper,#252536); color:var(--ink,#eee); font-size:22px; }
+.profile-avatar-preview img { width:100%; height:100%; object-fit:cover; }
+.profile-avatar-control { flex:1; margin-bottom:0; }
+.profile-form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 14px; }
+
+/* === 双重验证：状态、扫码和恢复码 === */
+.security-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border, #333);
+  border-radius: 8px;
+}
+.security-status-dot {
+  width: 9px;
+  height: 9px;
+  margin-top: 5px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--ink-4, #777);
+}
+.security-status.enabled {
+  border-color: color-mix(in srgb, #22c55e 52%, var(--border, #333));
+}
+.security-status.enabled .security-status-dot {
+  background: #22c55e;
+}
+.security-status strong,
+.security-section h4 {
+  color: var(--ink, #eee);
+  font-size: 13px;
+}
+.security-status p,
+.security-section p {
+  margin: 4px 0 0;
+  color: var(--ink-3, #999);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.two-factor-intro {
+  margin: 0 0 14px;
+}
+.qr-setup-layout {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+.qr-frame {
+  width: 170px;
+  height: 170px;
+  padding: 8px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: #fff;
+}
+.qr-frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.manual-secret {
+  min-width: 0;
+  color: var(--ink-3, #999);
+  font-size: 11px;
+}
+.manual-secret code {
+  display: block;
+  margin-top: 8px;
+  color: var(--ink, #eee);
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.otp-input {
+  max-width: 220px;
+  letter-spacing: 0.14em;
+  font-variant-numeric: tabular-nums;
+}
+.inline-actions,
+.recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.recovery-code-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 12px;
+  padding: 14px;
+  border: 1px solid var(--border, #333);
+  border-radius: 8px;
+  background: var(--paper, #252536);
+}
+.recovery-code-grid code {
+  color: var(--ink, #eee);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  user-select: all;
+}
+.recovery-confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 16px 0;
+  color: var(--ink-2, #ccc);
+  font-size: 12px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.recovery-confirm input {
+  margin-top: 2px;
+  accent-color: var(--primary, #6366f1);
+}
+.security-section {
+  padding: 16px 0;
+  border-top: 1px solid var(--border, #333);
+}
+.security-section h4 {
+  margin: 0;
+}
+.security-section p {
+  margin-bottom: 12px;
+}
+.danger-zone {
+  margin-top: 4px;
 }
 .data-mgmt-rows {
   display: flex;
@@ -1049,7 +1688,13 @@ async function doBatchDeleteShares(ids) {
 @media (max-width: 480px) {
   .modal-container {
     width: 96%;
-    max-height: 90vh;
+    height: 90vh;
+    max-height: none;
+  }
+  @supports (height: 100dvh) {
+    .modal-container {
+      height: 90dvh;
+    }
   }
   .settings-modal {
     flex-direction: column;
@@ -1086,5 +1731,13 @@ async function doBatchDeleteShares(ids) {
     width: 100%;
     justify-content: flex-end;
   }
+  .qr-setup-layout {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .recovery-code-grid {
+    grid-template-columns: 1fr;
+  }
+  .profile-form-grid { grid-template-columns:1fr; }
 }
 </style>

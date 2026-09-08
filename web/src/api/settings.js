@@ -35,6 +35,16 @@ export function setSecuritySettings(payload) {
   return request.put('/admin/settings/security', payload)
 }
 
+// 获取跨重启累计请求、聊天流和当前 JVM 内存诊断指标
+export function getObservability() {
+  return request.get('/admin/observability')
+}
+
+// 获取最近若干小时的持久化运行指标时间序列
+export function getObservabilityHistory(hours = 24) {
+  return request.get('/admin/observability/history', { params: { hours } })
+}
+
 // 获取联网搜索设置（Key 仅返回掩码）
 export function getWebSearchSettings() {
   return request.get('/admin/settings/websearch')
@@ -48,6 +58,16 @@ export function setWebSearchSettings(payload) {
 // Tavily 连通性测试（apiKey 可空，空时用已保存的 Key）
 export function testWebSearch(apiKey) {
   return request.post('/admin/settings/websearch/test', { apiKey }, { timeout: 30000 })
+}
+
+// 获取模型健康检查设置（总开关与检查间隔运行值）
+export function getHealthCheckSettings() {
+  return request.get('/admin/settings/health-check')
+}
+
+// 保存模型健康检查总开关与检查间隔（payload: { enabled, intervalMinutes }，1 分钟内生效）
+export function setHealthCheckSettings(payload) {
+  return request.put('/admin/settings/health-check', payload)
 }
 
 // 获取全部公告列表（含历史公告，admin）

@@ -1,6 +1,7 @@
 package com.chatai.newbot.config;
 
 import com.chatai.newbot.model.User;
+import com.chatai.newbot.service.BackupService;
 import com.chatai.newbot.service.StorageManager;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
@@ -12,13 +13,23 @@ import jakarta.servlet.http.HttpServletResponse;
 public class AuthInterceptor implements HandlerInterceptor {
 
     private final StorageManager storageService;
+    private final BackupService backupService;
 
-    public AuthInterceptor(StorageManager storageService) {
+    public AuthInterceptor(StorageManager storageService, BackupService backupService) {
         this.storageService = storageService;
+        this.backupService = backupService;
     }
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
+        // 恢复维护状态：除备份管理接口本身外一律拒绝，防止恢复期间写入数据
+        if (backupService.isRestoring()
+                && !request.getRequestURI().startsWith("/api/admin/backups")) {
+            response.setStatus(503);
+            response.setContentType("application/json;charset=UTF-8");
+            response.getWriter().write("{\"error\":\"系统正在恢复数据，请稍后重试\"}");
+            return false;
+        }
         String token = request.getHeader("Authorization");
         if (token != null && token.startsWith("Bearer ")) {
             token = token.substring(7);

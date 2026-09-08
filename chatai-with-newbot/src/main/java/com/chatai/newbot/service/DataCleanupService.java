@@ -84,7 +84,7 @@ public class DataCleanupService {
 
     /**
      * 每天 04:30 清理会话历史中已无引用的孤儿上传文件（图片与附件解析文本）。
-     * 引用收集覆盖 SQLite 按会话行与旧整文档备份，
+     * 引用收集覆盖：正常会话、回收站会话、旧整文档备份与有效分享快照，
      * 对原始 JSON 文本正则提取，任一来源读取失败则放弃本次清理，宁可漏删不可误删。
      */
     @Scheduled(cron = "0 30 4 * * ?")
@@ -106,6 +106,40 @@ public class DataCleanupService {
     }
 
     /**
+     * 每天 04:40 清理回收站中超过保留期限的会话（彻底删除，不可恢复）。
+     * 保留天数由 t_setting 的 trash_retention_days 控制（默认 30 天，0=永久保留）
+     */
+    @Scheduled(cron = "0 40 4 * * ?")
+    public void cleanupExpiredTrash() {
+        int retentionDays = getTrashRetentionDays();
+        if (retentionDays <= 0) {
+            return;
+        }
+        String cutoff = LocalDate.now().minusDays(retentionDays)
+                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+        try {
+            int purged = sqliteStorage.purgeTrashBefore(cutoff + " 00:00:00");
+            if (purged > 0) {
+                log.info("回收站过期会话清理完成: 保留{}天, 彻底删除{}个会话", retentionDays, purged);
+            }
+        } catch (Exception e) {
+            log.warn("清理回收站过期会话失败", e);
+        }
+    }
+
+    /**
+     * 读取回收站保留天数配置（t_setting: trash_retention_days，缺省 30，0=永久保留）
+     */
+    private int getTrashRetentionDays() {
+        try {
+            String val = storageManager.getSetting("trash_retention_days");
+            return (val == null || val.isEmpty()) ? 30 : Math.max(0, Integer.parseInt(val));
+        } catch (Exception e) {
+            return 30;
+        }
+    }
+
+    /**
      * 读取 usage_logs 保留天数配置（t_setting: usage_log_retention_days，缺省 120，0=不清理）
      */
     private int getRetentionDays() {
@@ -118,13 +152,17 @@ public class DataCleanupService {
     }
 
     /**
-     * 汇总全部会话历史中的上传文件引用，键为 "img/{yyyyMM}/{file}" 或 "doc/{yyyyMM}/{file}"
+     * 汇总全部上传文件引用，键为 "img/{yyyyMM}/{file}" 或 "doc/{yyyyMM}/{file}"
+     * 来源：会话行（含回收站）、旧整文档备份、分享快照——防止源会话已删但分享仍有效的资源被误删
      * @throws Exception 任一数据源读取失败时抛出（调用方放弃本次清理）
      */
     private Set<String> collectUploadReferences() throws Exception {
         Set<String> refs = new HashSet<>();
         for (String payload : sqliteStorage.listAllChatPayloads()) {
             extractRefs(payload, refs);
+        }
+        for (String snapshot : sqliteStorage.listAllShareSnapshots()) {
+            extractRefs(snapshot, refs);
         }
         return refs;
     }

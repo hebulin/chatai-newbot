@@ -73,6 +73,22 @@
           <div class="upload-image-btn" :title="t('input.clearContext')" @click="emit('clear-context')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m13 11 9-9"/><path d="M14.6 12.6c.8.8.9 2.1.2 3L10 22l-8-8 6.4-4.8c.9-.7 2.2-.6 3 .2Z"/><path d="m6.8 10.4 6.8 6.8"/><path d="m5 17 1.4-1.4"/></svg>
           </div>
+          <!-- 语音输入：浏览器支持 SpeechRecognition 时显示，聆听中再次点击停止 -->
+          <button
+            v-if="voiceSupported"
+            type="button"
+            class="upload-image-btn"
+            :class="{ 'voice-listening': voiceListening }"
+            :title="voiceListening ? t('input.voiceStop') : t('input.voiceInput')"
+            :aria-label="voiceListening ? t('input.voiceStop') : t('input.voiceInput')"
+            :aria-pressed="voiceListening"
+            @click="toggleVoiceInput"
+          >
+            <span v-if="voiceListening" class="voice-meter" :style="{ '--voice-level': voiceLevel }" aria-hidden="true">
+              <span v-for="i in 5" :key="i" class="voice-meter-bar"></span>
+            </span>
+            <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+          </button>
           <input type="file" ref="attachInputRef" :accept="ATTACH_ACCEPT" multiple style="display:none" @change="handleAttachUpload">
           <div class="model-select-area">
             <img v-if="currentIconIsImg" :src="currentIcon" class="model-area-icon" />
@@ -146,7 +162,7 @@ const props = defineProps({
   supportsMultimodal: { type: Boolean, default: false }
 })
 
-const emit = defineEmits(['send', 'stop', 'clear-context'])
+const emit = defineEmits(['send', 'stop', 'clear-context', 'thinking-change'])
 
 const { t } = useI18n()
 
@@ -157,6 +173,10 @@ const { getTheme } = useTheme()
 const inputText = ref('')
 const deepThinking = ref(false)
 const webSearch = ref(false)
+
+// 深度思考开关变更时实时同步给父组件：重新生成/编辑重发/继续生成等不经过 send 的流程
+// 直接读取父组件的 isDeepThinking，若仅在发送时同步会导致这些流程沿用上次发送的旧开关状态
+watch(deepThinking, (v) => emit('thinking-change', v))
 const pendingImages = ref([])
 const pendingFiles = ref([]) // 待发送附件文档：{ name, url, chars, uploading }
 const pasteWarning = ref('')
@@ -236,6 +256,142 @@ function selectRolePreset(presetId) {
   }
 }
 
+// ===== 语音输入（Web Speech API）=====
+// 点击麦克风开始聆听，识别结果实时回填到输入框（识别前的已有文本保留，识别内容追加其后）；
+// 再次点击或识别结束自动停止。不支持的浏览器（如 Firefox）隐藏按钮
+const SpeechRecognitionCtor = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition)
+const voiceSupported = !!SpeechRecognitionCtor
+const voiceListening = ref(false)
+const voiceLevel = ref(0)
+let recognizer = null
+let recognitionSeq = 0
+let voiceStream = null
+let voiceAudioContext = null
+let voiceAnalyser = null
+let voiceMeterFrame = 0
+let voiceMeterSeq = 0
+
+// 停止音量采样并释放额外获取的麦克风流与 AudioContext
+function stopVoiceMeter() {
+  voiceMeterSeq++
+  if (voiceMeterFrame) cancelAnimationFrame(voiceMeterFrame)
+  voiceMeterFrame = 0
+  voiceLevel.value = 0
+  voiceAnalyser?.disconnect()
+  voiceAnalyser = null
+  voiceStream?.getTracks().forEach(track => track.stop())
+  voiceStream = null
+  if (voiceAudioContext) voiceAudioContext.close().catch(() => {})
+  voiceAudioContext = null
+}
+
+// 读取真实麦克风音量驱动五段音量条；无声时归零保持平静，失败时安静降级
+async function startVoiceMeter() {
+  stopVoiceMeter()
+  const mySeq = voiceMeterSeq
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext
+  if (!navigator.mediaDevices?.getUserMedia || !AudioContextCtor) return
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    if (!voiceListening.value || mySeq !== voiceMeterSeq) {
+      stream.getTracks().forEach(track => track.stop())
+      return
+    }
+    voiceStream = stream
+    voiceAudioContext = new AudioContextCtor()
+    if (voiceAudioContext.state === 'suspended') await voiceAudioContext.resume()
+    const source = voiceAudioContext.createMediaStreamSource(stream)
+    voiceAnalyser = voiceAudioContext.createAnalyser()
+    voiceAnalyser.fftSize = 256
+    voiceAnalyser.smoothingTimeConstant = 0.72
+    source.connect(voiceAnalyser)
+    const samples = new Uint8Array(voiceAnalyser.fftSize)
+
+    // 每帧计算时域信号 RMS，过滤环境底噪后映射为 0~1 的视觉强度
+    const sampleLevel = () => {
+      if (!voiceListening.value || mySeq !== voiceMeterSeq || !voiceAnalyser) return
+      voiceAnalyser.getByteTimeDomainData(samples)
+      let sum = 0
+      for (let i = 0; i < samples.length; i++) {
+        const normalized = (samples[i] - 128) / 128
+        sum += normalized * normalized
+      }
+      const rms = Math.sqrt(sum / samples.length)
+      const normalizedLevel = Math.min(1, Math.max(0, (rms - 0.018) / 0.12))
+      voiceLevel.value = normalizedLevel < 0.06 ? 0 : Math.round(normalizedLevel * 100) / 100
+      voiceMeterFrame = requestAnimationFrame(sampleLevel)
+    }
+    sampleLevel()
+  } catch (e) {
+    if (mySeq === voiceMeterSeq) stopVoiceMeter()
+  }
+}
+
+// 立即结束当前语音输入，并让旧识别器的异步回调失效
+function stopVoiceInput() {
+  recognitionSeq++
+  const activeRecognizer = recognizer
+  recognizer = null
+  voiceListening.value = false
+  stopVoiceMeter()
+  try { activeRecognizer?.stop() } catch (e) { /* ignore */ }
+}
+
+// 切换语音输入状态：开始时启动识别与真实音量采样，再次点击立即停止
+function toggleVoiceInput() {
+  if (!voiceSupported) return
+  if (voiceListening.value) {
+    stopVoiceInput()
+    return
+  }
+  const mySeq = ++recognitionSeq
+  const nextRecognizer = new SpeechRecognitionCtor()
+  recognizer = nextRecognizer
+  nextRecognizer.lang = 'zh-CN'
+  nextRecognizer.interimResults = true
+  nextRecognizer.continuous = true
+  // 记录开始识别时的已有文本，识别结果在此基础上追加
+  const baseText = inputText.value
+  nextRecognizer.onresult = (e) => {
+    if (mySeq !== recognitionSeq) return
+    let finalText = ''
+    let interimText = ''
+    for (let i = 0; i < e.results.length; i++) {
+      if (e.results[i].isFinal) finalText += e.results[i][0].transcript
+      else interimText += e.results[i][0].transcript
+    }
+    inputText.value = baseText + finalText + interimText
+    nextTick(autoResize)
+  }
+  nextRecognizer.onend = () => {
+    if (mySeq !== recognitionSeq) return
+    recognizer = null
+    voiceListening.value = false
+    stopVoiceMeter()
+  }
+  nextRecognizer.onerror = () => {
+    if (mySeq !== recognitionSeq) return
+    recognizer = null
+    voiceListening.value = false
+    stopVoiceMeter()
+  }
+  try {
+    nextRecognizer.start()
+    voiceListening.value = true
+    startVoiceMeter()
+  } catch (e) {
+    recognizer = null
+    voiceListening.value = false
+    stopVoiceMeter()
+  }
+}
+
+onBeforeUnmount(() => {
+  // 组件卸载时停止识别，释放麦克风
+  if (recognizer || voiceListening.value) stopVoiceInput()
+  else stopVoiceMeter()
+})
+
 // ===== 模型级联选择器 =====
 const cascaderValue = ref([])
 const cascaderProps = {
@@ -292,23 +448,25 @@ const currentIcon = computed(() => {
 })
 const currentIconIsImg = computed(() => currentIcon.value.startsWith('/'))
 
-// 根据模型名长度动态计算输入框宽度，避免长名称被截断
-// 用 canvas measureText 按真实字体精确测量文本宽度，替代按字符估算：
-// 估算值系统性偏大时，多出的宽度会在 flex 布局里堆积为名称与箭头之间的空隙
-// 后缀预留 22px：下拉箭头图标(14px) + 与名称间距(2px) + wrapper 右 padding(6px) = 22px，
-// 与实际占用完全一致，配合下面 el-input__inner min-width:0 可正常收缩
+// 根据模型名长度动态计算输入框宽度，避免失焦后名称被省略号截断。
+// 固定区域包含 wrapper 左右 padding(12px)、名称与箭头间距(2px)、箭头(14px)，
+// 再增加 1px 抗字体栅格化取整误差；父容器空间不足时仍由 max-width:100% 正常收缩。
+const MODEL_TRIGGER_FIXED_WIDTH = 29
 let measureCtx = null
+
+/** 按模型触发器的实际字体测量文本宽度。 */
 function measureTextWidth(text, font) {
   if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d')
   measureCtx.font = font
   return measureCtx.measureText(text).width
 }
+
 const modelInputWidth = computed(() => {
   const name = String(modelsStore.currentModelName || t('input.selectModel'))
-  // 字体需与触发器实际渲染一致：桌面级联 12px、窄屏下拉 11px（chat.css 移动端媒体查询）
+  // 字号及字体回退顺序与 chat.css 的触发器样式保持一致。
   const fontSize = isMobile.value ? 11 : 12
-  const textW = measureTextWidth(name, `${fontSize}px "Helvetica Neue", Helvetica, "PingFang SC", "Microsoft YaHei", Arial, sans-serif`)
-  return Math.min(Math.max(Math.ceil(textW) + 22, 72), 300) + 'px'
+  const textW = measureTextWidth(name, `${fontSize}px -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif`)
+  return Math.min(Math.max(Math.ceil(textW) + MODEL_TRIGGER_FIXED_WIDTH, 72), 300) + 'px'
 })
 
 // 同步当前选中模型到 cascader 显示

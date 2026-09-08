@@ -35,6 +35,12 @@ public class FileStorageService {
     private static final Pattern SAFE_NAME = Pattern.compile("^[a-zA-Z0-9._-]+$");
 
     private Path uploadDir;
+    private final StorageManager storageManager;
+
+    /** 注入上传资源所有权存储，用于模型调用前校验读取边界。 */
+    public FileStorageService(StorageManager storageManager) {
+        this.storageManager = storageManager;
+    }
 
     /**
      * 初始化：确保上传根目录存在
@@ -167,9 +173,13 @@ public class FileStorageService {
      * @param image 图片引用（URL 或 data URL）
      * @return base64 data URL；本地文件不存在时返回 null
      */
-    public String toDataUrl(String image) {
+    public String toDataUrl(String image, String userId) {
         if (image == null || !image.startsWith(IMG_URL_PREFIX)) {
             return image;
+        }
+        if (!storageManager.canAccessFileAsset(image, userId, false)) {
+            log.warn("拒绝跨用户读取图片资源: userId={}, url={}", userId, image);
+            return null;
         }
         String rest = image.substring(IMG_URL_PREFIX.length());
         int slash = rest.indexOf('/');
@@ -205,8 +215,12 @@ public class FileStorageService {
      * @param url 引用 URL（/api/files/doc/{yyyyMM}/{filename}）
      * @return 解析文本；引用非法或文件不存在返回 null
      */
-    public String readDocumentText(String url) {
+    public String readDocumentText(String url, String userId) {
         if (url == null || !url.startsWith(DOC_URL_PREFIX)) {
+            return null;
+        }
+        if (!storageManager.canAccessFileAsset(url, userId, false)) {
+            log.warn("拒绝跨用户读取文档资源: userId={}, url={}", userId, url);
             return null;
         }
         String rest = url.substring(DOC_URL_PREFIX.length());

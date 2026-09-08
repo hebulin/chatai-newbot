@@ -1,5 +1,5 @@
 <template>
-  <div class="login-page" :class="{ 'form-view': showForm }">
+  <div class="login-page" :class="{ 'form-view': showForm }" :inert="twoFactorRequired" :aria-hidden="twoFactorRequired ? 'true' : undefined">
     <div class="paper-grain" aria-hidden="true"></div>
     <div class="ambient" aria-hidden="true"></div>
 
@@ -93,36 +93,37 @@
               <!-- 登录表单 -->
               <form class="atelier-form" :class="{ 'form-pane-active': !isRegister }" @submit.prevent="handleLogin" autocomplete="off">
                 <div class="field">
-                  <label class="field-label"><span class="field-num">01</span><span class="field-name">{{ t('login.username') }}</span></label>
+                  <label class="field-label" for="login-username"><span class="field-num">01</span><span class="field-name">{{ t('login.username') }}</span></label>
                   <div class="field-input-wrap">
-                    <input type="text" v-model="loginForm.username" placeholder="your.name" autocomplete="username" class="field-input" @blur="validateField('loginUsername')" @input="errors.loginUsername = ''">
+                    <input id="login-username" type="text" v-model="loginForm.username" placeholder="your.name" autocomplete="username" class="field-input" :aria-invalid="!!errors.loginUsername" aria-describedby="login-username-error" @blur="validateField('loginUsername')" @input="errors.loginUsername = ''">
                     <span class="field-bar"></span>
                   </div>
-                  <span class="field-error" v-if="errors.loginUsername">{{ errors.loginUsername }}</span>
+                  <span id="login-username-error" class="field-error" v-if="errors.loginUsername">{{ errors.loginUsername }}</span>
                 </div>
                 <div class="field">
-                  <label class="field-label"><span class="field-num">02</span><span class="field-name">{{ t('login.password') }}</span></label>
+                  <label class="field-label" for="login-password"><span class="field-num">02</span><span class="field-name">{{ t('login.password') }}</span></label>
                   <div class="field-input-wrap">
-                    <input :type="showPassword ? 'text' : 'password'" v-model="loginForm.password" placeholder="••••••••" autocomplete="current-password" class="field-input" @blur="validateField('loginPassword')" @input="errors.loginPassword = ''">
-                    <button type="button" class="field-eye" :class="{ on: showPassword }" @click="showPassword = !showPassword" tabindex="-1">
-                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+                    <input id="login-password" :type="showPassword ? 'text' : 'password'" v-model="loginForm.password" placeholder="••••••••" autocomplete="current-password" class="field-input" :aria-invalid="!!errors.loginPassword" aria-describedby="login-password-error" @blur="validateField('loginPassword')" @input="errors.loginPassword = ''">
+                    <button type="button" class="field-eye" :class="{ on: showPassword }" @click="showPassword = !showPassword" :aria-label="t('login.togglePassword')">
+                      <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
                     </button>
                     <span class="field-bar"></span>
                   </div>
-                  <span class="field-error" v-if="errors.loginPassword">{{ errors.loginPassword }}</span>
+                  <span id="login-password-error" class="field-error" v-if="errors.loginPassword">{{ errors.loginPassword }}</span>
                 </div>
                 <div class="form-row">
-                  <label class="check-rail" :class="{ on: rememberMe }" @click.prevent="rememberMe = !rememberMe" @keydown="onCheckKeydown" role="checkbox" tabindex="0" aria-checked="rememberMe">
+                  <label class="check-rail" :class="{ on: rememberMe }" @click.prevent="rememberMe = !rememberMe" @keydown="onCheckKeydown" role="checkbox" tabindex="0" :aria-checked="rememberMe">
                     <span class="check-box"><span class="check-tick"></span></span>
                     <span class="check-label">{{ t('login.rememberMe') }}</span>
                   </label>
-                  <a href="javascript:;" class="link-quiet" @click="isRegister = true">{{ t('login.createAccountLink') }}</a>
+                  <button v-if="registerConfig.enabled" type="button" class="link-quiet link-button" @click="openRegister">{{ t('login.createAccountLink') }}</button>
+                  <span v-else class="link-quiet">注册已关闭</span>
                 </div>
-                <button class="submit-cta" type="submit" :disabled="loginLoading">
+                <button ref="loginSubmitButton" class="submit-cta" type="submit" :disabled="loginLoading" aria-haspopup="dialog">
                   <span class="cta-text" v-if="!loginLoading">{{ t('login.enterCta') }}</span>
                   <span class="cta-text" v-else>{{ t('login.loggingIn') }}</span>
                   <span class="cta-arrow" v-if="!loginLoading">
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                    <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
                   </span>
                 </button>
               </form>
@@ -130,28 +131,43 @@
               <!-- 注册表单 -->
               <form class="atelier-form" :class="{ 'form-pane-active': isRegister }" @submit.prevent="handleRegister" autocomplete="off">
                 <div class="field">
-                  <label class="field-label"><span class="field-num">01</span><span class="field-name">{{ t('login.username') }}</span></label>
+                  <label class="field-label" for="reg-username"><span class="field-num">01</span><span class="field-name">{{ t('login.username') }}</span></label>
                   <div class="field-input-wrap">
-                    <input type="text" v-model="regForm.username" :placeholder="t('login.regUsernamePlaceholder')" autocomplete="username" class="field-input" @blur="validateField('regUsername')" @input="errors.regUsername = ''">
+                    <input id="reg-username" type="text" v-model="regForm.username" :placeholder="t('login.regUsernamePlaceholder')" autocomplete="username" class="field-input" @blur="validateField('regUsername')" @input="errors.regUsername = ''">
                     <span class="field-bar"></span>
                   </div>
                   <span class="field-error" v-if="errors.regUsername">{{ errors.regUsername }}</span>
                 </div>
                 <div class="field">
-                  <label class="field-label"><span class="field-num">02</span><span class="field-name">{{ t('login.password') }}</span></label>
+                  <label class="field-label" for="reg-password"><span class="field-num">02</span><span class="field-name">{{ t('login.password') }}</span></label>
                   <div class="field-input-wrap">
-                    <input type="password" v-model="regForm.password" :placeholder="t('login.regPasswordPlaceholder')" autocomplete="new-password" class="field-input" @blur="validateField('regPassword')" @input="errors.regPassword = ''">
+                    <input id="reg-password" type="password" v-model="regForm.password" :placeholder="t('login.regPasswordPlaceholder')" autocomplete="new-password" class="field-input" @blur="validateField('regPassword')" @input="errors.regPassword = ''">
                     <span class="field-bar"></span>
                   </div>
                   <span class="field-error" v-if="errors.regPassword">{{ errors.regPassword }}</span>
                 </div>
                 <div class="field">
-                  <label class="field-label"><span class="field-num">03</span><span class="field-name">{{ t('login.confirm') }}</span></label>
+                  <label class="field-label" for="reg-password-confirm"><span class="field-num">03</span><span class="field-name">{{ t('login.confirm') }}</span></label>
                   <div class="field-input-wrap">
-                    <input type="password" v-model="regForm.password2" :placeholder="t('login.regPassword2Placeholder')" autocomplete="new-password" class="field-input" @blur="validateField('regPassword2')" @input="errors.regPassword2 = ''">
+                    <input id="reg-password-confirm" type="password" v-model="regForm.password2" :placeholder="t('login.regPassword2Placeholder')" autocomplete="new-password" class="field-input" @blur="validateField('regPassword2')" @input="errors.regPassword2 = ''">
                     <span class="field-bar"></span>
                   </div>
                   <span class="field-error" v-if="errors.regPassword2">{{ errors.regPassword2 }}</span>
+                </div>
+                <div v-if="registerConfig.inviteRequired" class="field">
+                  <label class="field-label" for="reg-invite"><span class="field-num">04</span><span class="field-name">邀请码</span></label>
+                  <div class="field-input-wrap">
+                    <input id="reg-invite" type="text" v-model="regForm.inviteCode" autocomplete="off" class="field-input" placeholder="请输入管理员提供的邀请码">
+                    <span class="field-bar"></span>
+                  </div>
+                </div>
+                <div v-if="registerConfig.captchaEnabled" class="field">
+                  <label class="field-label" for="reg-captcha"><span class="field-num">05</span><span class="field-name">验证码：{{ registerConfig.captcha?.question }}</span></label>
+                  <div class="field-input-wrap captcha-input-wrap">
+                    <input id="reg-captcha" type="text" inputmode="numeric" v-model="regForm.captchaAnswer" autocomplete="off" class="field-input" placeholder="请输入计算结果">
+                    <button type="button" class="link-quiet link-button captcha-refresh" @click="loadRegisterConfig">刷新</button>
+                    <span class="field-bar"></span>
+                  </div>
                 </div>
                 <button class="submit-cta" type="submit" :disabled="regLoading">
                   <span class="cta-text" v-if="!regLoading">{{ t('login.createCta') }}</span>
@@ -178,6 +194,43 @@
         </article>
       </div>
     </main>
+
+    <Teleport to="body">
+      <div v-if="twoFactorRequired" class="two-factor-overlay">
+        <section ref="twoFactorModal" class="two-factor-modal" role="dialog" aria-modal="true" aria-labelledby="two-factor-title" aria-describedby="two-factor-help" :aria-busy="loginLoading" tabindex="-1" @keydown.esc="closeTwoFactorModal" @keydown.tab="trapTwoFactorFocus">
+          <header class="two-factor-modal-head">
+            <div>
+              <span class="two-factor-kicker">{{ t('login.twoFactorEyebrow') }}</span>
+              <h2 id="two-factor-title">{{ t('login.twoFactorTitle') }}</h2>
+            </div>
+            <button type="button" class="two-factor-close" :disabled="loginLoading" :aria-label="t('common.close')" @click="closeTwoFactorModal">
+              <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+            </button>
+          </header>
+          <p id="two-factor-help" class="two-factor-help">{{ t('login.twoFactorHelp', { username: twoFactorUsername }) }}</p>
+          <form class="two-factor-form" @submit.prevent="handleTwoFactorLogin">
+            <div class="two-factor-methods" role="group" :aria-label="t('login.twoFactorMethod')">
+              <button type="button" class="method-button" :class="{ active: twoFactorMethod === 'totp' }" :aria-pressed="twoFactorMethod === 'totp'" @click="setTwoFactorMethod('totp')">{{ t('login.authenticatorCode') }}</button>
+              <button type="button" class="method-button" :class="{ active: twoFactorMethod === 'recovery' }" :aria-pressed="twoFactorMethod === 'recovery'" @click="setTwoFactorMethod('recovery')">{{ t('login.recoveryCode') }}</button>
+            </div>
+            <div class="field two-factor-code-field">
+              <label class="field-label" for="two-factor-code"><span class="field-num">03</span><span class="field-name">{{ twoFactorMethod === 'totp' ? t('login.authenticatorCode') : t('login.recoveryCode') }}</span></label>
+              <div class="field-input-wrap">
+                <input id="two-factor-code" ref="twoFactorInput" type="text" v-model="twoFactorCode" :inputmode="twoFactorMethod === 'totp' ? 'numeric' : 'text'" autocomplete="one-time-code" class="field-input code-input" :maxlength="twoFactorMethod === 'totp' ? 6 : 24" :placeholder="twoFactorMethod === 'totp' ? '000000' : 'XXXX-XXXX-XXXX-XXXX'" :aria-invalid="!!twoFactorError" aria-describedby="two-factor-error" @input="normalizeTwoFactorInput">
+                <span class="field-bar"></span>
+              </div>
+              <span id="two-factor-error" class="field-error two-factor-error" aria-live="polite">{{ twoFactorError }}</span>
+            </div>
+            <div class="two-factor-actions">
+              <button type="button" class="two-factor-secondary" :disabled="loginLoading" @click="closeTwoFactorModal">{{ t('common.cancel') }}</button>
+              <button type="submit" class="two-factor-primary" :disabled="loginLoading">
+                {{ loginLoading ? t('login.verifying') : t('login.verifyCta') }}
+              </button>
+            </div>
+          </form>
+        </section>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -187,7 +240,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
-import { login, register, getMe } from '@/api/auth'
+import { login, register, getMe, verifyTwoFactorLogin, getRegisterConfig } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
 import { useTheme } from '@/composables/useTheme'
 import { APP_VERSION } from '@/config/version'
@@ -203,9 +256,19 @@ const showPassword = ref(false)
 const rememberMe = ref(false)
 const loginLoading = ref(false)
 const regLoading = ref(false)
+const twoFactorRequired = ref(false)
+const twoFactorChallenge = ref('')
+const twoFactorUsername = ref('')
+const twoFactorMethod = ref('totp')
+const twoFactorCode = ref('')
+const twoFactorError = ref('')
+const twoFactorInput = ref(null)
+const twoFactorModal = ref(null)
+const loginSubmitButton = ref(null)
 
 const loginForm = ref({ username: '', password: '' })
-const regForm = ref({ username: '', password: '', password2: '' })
+const regForm = ref({ username: '', password: '', password2: '', inviteCode: '', captchaAnswer: '' })
+const registerConfig = ref({ enabled: true, inviteRequired: false, captchaEnabled: false, captcha: null })
 
 // 字段级实时校验错误信息
 const errors = ref({ loginUsername: '', loginPassword: '', regUsername: '', regPassword: '', regPassword2: '' })
@@ -224,6 +287,7 @@ const currentDate = computed(() => {
 
 // 已登录自动跳转（token 存于 HttpOnly Cookie，以 username 本地标记预判，再请求后端确认）
 onMounted(async () => {
+  await loadRegisterConfig()
   if (safeGet('username')) {
     try {
       const data = await getMe()
@@ -249,6 +313,25 @@ onMounted(async () => {
   document.addEventListener('focusin', onFocusIn)
   document.addEventListener('focusout', scheduleViewportResync)
 })
+
+// 刷新公开注册配置及一次性验证码挑战
+async function loadRegisterConfig() {
+  try {
+    const res = await getRegisterConfig()
+    if (res?.success) registerConfig.value = res.data || registerConfig.value
+  } catch (e) { /* 登录页仍可正常登录 */ }
+}
+
+// 进入注册表单前重新获取挑战，避免使用过期验证码
+async function openRegister() {
+  await loadRegisterConfig()
+  if (!registerConfig.value.enabled) {
+    ElMessage.info('系统当前已关闭注册')
+    return
+  }
+  regForm.value.captchaAnswer = ''
+  isRegister.value = true
+}
 
 onUnmounted(() => {
   if (window.visualViewport) {
@@ -357,7 +440,7 @@ function validateField(field) {
   } else if (field === 'regPassword') {
     const v = regForm.value.password
     if (!v) e.regPassword = t('login.errPasswordRequired')
-    else if (v.length < 4) e.regPassword = t('login.errPasswordLen')
+    else if (v.length < 8 || !/[A-Za-z]/.test(v) || !/\d/.test(v)) e.regPassword = '密码至少 8 位，且需同时包含字母和数字'
     else e.regPassword = ''
   } else if (field === 'regPassword2') {
     const v = regForm.value.password2
@@ -382,24 +465,24 @@ function validateRegister() {
   return !errors.value.regUsername && !errors.value.regPassword && !errors.value.regPassword2
 }
 
+// 提交账号密码；启用 2FA 时仅打开验证弹窗，不提前写入登录态
 async function handleLogin() {
   if (!validateLogin()) return
   loginLoading.value = true
   try {
     const data = await login({ username: loginForm.value.username, password: loginForm.value.password })
+    if (data.success && data.requiresTwoFactor) {
+      twoFactorRequired.value = true
+      twoFactorChallenge.value = data.challengeToken || ''
+      twoFactorUsername.value = data.username || loginForm.value.username
+      loginForm.value.password = ''
+      loginLoading.value = false
+      await nextTick()
+      twoFactorInput.value?.focus()
+      return
+    }
     if (data.success) {
-      // 记住我
-      if (rememberMe.value) {
-        safeSet('rememberMe', '1')
-        safeSet('rememberedUsername', data.username || loginForm.value.username)
-      } else {
-        safeRemove('rememberMe')
-        safeRemove('rememberedUsername')
-      }
-      authStore.setAuth(data)
-      // 跳转期间（含 ChatView 懒加载 chunk）保持 loading，防止重复点击；
-      // 导航完成后本组件卸载，若被守卫中断则复位按钮可重试
-      router.push('/').finally(() => { loginLoading.value = false })
+      finishLogin(data)
       return
     }
     ElMessage.error(data.message || t('login.loginFailed'))
@@ -409,11 +492,128 @@ async function handleLogin() {
   loginLoading.value = false
 }
 
+// 完成二次验证登录，并仅在正式签发会话后保存“记住我”状态
+async function handleTwoFactorLogin() {
+  const normalized = twoFactorCode.value.trim()
+  const valid = twoFactorMethod.value === 'totp'
+    ? /^\d{6}$/.test(normalized)
+    : /^[A-Z2-7]{4}(?:-[A-Z2-7]{4}){3}$/.test(normalized.toUpperCase())
+  if (!valid) {
+    twoFactorError.value = twoFactorMethod.value === 'totp'
+      ? t('login.invalidAuthenticatorCode')
+      : t('login.invalidRecoveryCode')
+    return
+  }
+  loginLoading.value = true
+  twoFactorError.value = ''
+  try {
+    const data = await verifyTwoFactorLogin({
+      challengeToken: twoFactorChallenge.value,
+      method: twoFactorMethod.value,
+      code: normalized
+    })
+    if (data.success) {
+      finishLogin(data)
+      return
+    }
+    twoFactorError.value = data.message || t('login.twoFactorFailed')
+    if (data.challengeExpired) {
+      const message = twoFactorError.value
+      resetTwoFactor()
+      ElMessage.error(message)
+    }
+  } catch (e) {
+    twoFactorError.value = t('login.networkError')
+  }
+  loginLoading.value = false
+}
+
+// 统一写入登录态并导航，确保普通登录和 2FA 登录行为一致
+function finishLogin(data) {
+  if (rememberMe.value) {
+    safeSet('rememberMe', '1')
+    safeSet('rememberedUsername', data.username || twoFactorUsername.value || loginForm.value.username)
+  } else {
+    safeRemove('rememberMe')
+    safeRemove('rememberedUsername')
+  }
+  authStore.setAuth(data)
+  router.push('/').finally(() => { loginLoading.value = false })
+}
+
+// 切换 TOTP/恢复码方式并清空上一个方式的输入和错误
+async function setTwoFactorMethod(method) {
+  twoFactorMethod.value = method
+  twoFactorCode.value = ''
+  twoFactorError.value = ''
+  await nextTick()
+  twoFactorInput.value?.focus()
+}
+
+// 按当前验证方式规范化输入，TOTP 仅保留数字，恢复码自动大写并分组
+function normalizeTwoFactorInput() {
+  twoFactorError.value = ''
+  if (twoFactorMethod.value === 'totp') {
+    twoFactorCode.value = twoFactorCode.value.replace(/\D/g, '').slice(0, 6)
+    return
+  }
+  const raw = twoFactorCode.value.toUpperCase().replace(/[^A-Z2-7]/g, '').slice(0, 16)
+  twoFactorCode.value = raw.match(/.{1,4}/g)?.join('-') || ''
+}
+
+// 放弃当前短期挑战并关闭弹窗，随后把焦点还给触发登录的按钮
+async function resetTwoFactor() {
+  twoFactorRequired.value = false
+  twoFactorChallenge.value = ''
+  twoFactorCode.value = ''
+  twoFactorError.value = ''
+  twoFactorMethod.value = 'totp'
+  loginLoading.value = false
+  await nextTick()
+  loginSubmitButton.value?.focus()
+}
+
+// 验证请求进行中时禁止误关闭；空闲时支持关闭按钮、取消按钮和 Esc
+function closeTwoFactorModal() {
+  if (loginLoading.value) return
+  resetTwoFactor()
+}
+
+// 将 Tab 焦点限制在 2FA 弹窗中，避免键盘焦点进入被遮罩的登录表单
+function trapTwoFactorFocus(event) {
+  const root = twoFactorModal.value
+  if (!root) return
+  const focusable = [...root.querySelectorAll(
+    'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  )].filter(element => element.offsetParent !== null)
+  if (!focusable.length) {
+    event.preventDefault()
+    root.focus()
+    return
+  }
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (event.shiftKey && (document.activeElement === first || document.activeElement === root)) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === root)) {
+    event.preventDefault()
+    first.focus()
+  }
+}
+
+// 提交注册表单并在注册成功后写入登录态
 async function handleRegister() {
   if (!validateRegister()) return
   regLoading.value = true
   try {
-    const data = await register({ username: regForm.value.username, password: regForm.value.password })
+    const data = await register({
+      username: regForm.value.username,
+      password: regForm.value.password,
+      inviteCode: regForm.value.inviteCode,
+      captchaId: registerConfig.value.captcha?.challengeId || '',
+      captchaAnswer: regForm.value.captchaAnswer
+    })
     if (data.success) {
       authStore.setAuth(data)
       // 同 handleLogin：跳转完成前保持 loading，防止重复提交
@@ -421,6 +621,10 @@ async function handleRegister() {
       return
     }
     ElMessage.error(data.message || t('login.registerFailed'))
+    if (registerConfig.value.captchaEnabled) {
+      regForm.value.captchaAnswer = ''
+      await loadRegisterConfig()
+    }
   } catch (e) {
     ElMessage.error(t('login.networkError'))
   }
@@ -437,10 +641,179 @@ async function handleRegister() {
   color: #ef4444;
   letter-spacing: 0.02em;
 }
+.captcha-input-wrap { display: flex; align-items: center; }
+.captcha-refresh { flex: 0 0 auto; margin-left: 10px; }
 /* 复选框键盘聚焦可见 */
 .check-rail:focus-visible {
   outline: 2px solid var(--primary, #6366f1);
   outline-offset: 3px;
   border-radius: 4px;
+}
+
+/* 双重验证弹窗保持登录页原有的编辑式视觉，并与背景表单形成明确层级 */
+.two-factor-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.64);
+}
+.two-factor-modal {
+  width: min(440px, 100%);
+  max-height: min(680px, calc(100dvh - 40px));
+  overflow-y: auto;
+  padding: 26px;
+  border: 1px solid var(--border, #333);
+  border-radius: var(--radius-large, 12px);
+  background: var(--surface, #1d1d1c);
+  color: var(--foreground, #eff1f4);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+}
+.two-factor-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+.two-factor-kicker {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--primary, #4285f4);
+  font-family: var(--mono, monospace);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.two-factor-modal h2 {
+  margin: 0;
+  color: var(--foreground, #eff1f4);
+  font-size: 22px;
+  line-height: 1.25;
+}
+.two-factor-close {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-small, 6px);
+  color: var(--secondary-text, #949494);
+  cursor: pointer;
+}
+.two-factor-close:hover {
+  background: var(--elevated, #2e2e2e);
+  color: var(--foreground, #eff1f4);
+}
+.two-factor-close:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.two-factor-help {
+  margin: 14px 0 22px;
+  color: var(--secondary-text, #949494);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.two-factor-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.two-factor-methods {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.method-button {
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--border, #333);
+  border-radius: var(--radius-small, 6px);
+  background: transparent;
+  color: var(--secondary-text, #949494);
+  font-size: 12px;
+  cursor: pointer;
+}
+.method-button.active {
+  border-color: var(--primary, #4285f4);
+  color: var(--foreground, #eff1f4);
+  background: color-mix(in srgb, var(--primary, #4285f4) 12%, transparent);
+}
+.method-button:focus-visible,
+.link-button:focus-visible {
+  outline: 2px solid var(--primary, #6366f1);
+  outline-offset: 3px;
+}
+.code-input {
+  letter-spacing: 0.14em;
+  font-variant-numeric: tabular-nums;
+}
+.two-factor-code-field {
+  min-height: 92px;
+}
+.two-factor-error {
+  min-height: 17px;
+}
+.two-factor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 2px;
+}
+.two-factor-secondary,
+.two-factor-primary {
+  min-width: 104px;
+  min-height: 42px;
+  padding: 0 16px;
+  border-radius: var(--radius-small, 6px);
+  font-size: 12px;
+  cursor: pointer;
+}
+.two-factor-secondary {
+  border: 1px solid var(--border, #333);
+  color: var(--secondary-text, #949494);
+}
+.two-factor-primary {
+  background: var(--primary, #4285f4);
+  color: #fff;
+  font-weight: 600;
+}
+.two-factor-primary:hover {
+  background: var(--primary-hover, #66a3ff);
+}
+.two-factor-secondary:disabled,
+.two-factor-primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+@media (max-width: 480px) {
+  .two-factor-overlay {
+    align-items: flex-end;
+    padding: 10px;
+  }
+  .two-factor-modal {
+    width: 100%;
+    max-height: calc(100dvh - 20px);
+    padding: 22px 18px;
+  }
+  .two-factor-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .two-factor-secondary,
+  .two-factor-primary {
+    min-width: 0;
+  }
 }
 </style>

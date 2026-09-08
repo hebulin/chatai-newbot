@@ -7,6 +7,8 @@ import lombok.Data;
  */
 @Data
 public class UsageLog {
+    /** 一次模型调用的唯一请求 ID，用于并发流结束时精确更新对应记录 */
+    private String requestId;
     private String userId;
     private String username;
     private String modelId;

@@ -1,6 +1,8 @@
 package com.chatai.newbot.service;
 
 import com.chatai.newbot.model.ModelConfig;
+import com.chatai.newbot.model.ChatShare;
+import com.chatai.newbot.model.ProviderModel;
 import com.chatai.newbot.model.UsageLog;
 import com.chatai.newbot.model.User;
 import org.junit.jupiter.api.AfterAll;
@@ -15,6 +17,8 @@ import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -33,6 +37,7 @@ class SqliteStorageServiceTest {
 
     private static String originalUserDir;
     private static SqliteStorageService service;
+    private static JdbcTemplate jdbcTemplate;
 
     @BeforeAll
     static void setup() {
@@ -41,7 +46,8 @@ class SqliteStorageServiceTest {
         DriverManagerDataSource dataSource = new DriverManagerDataSource();
         dataSource.setDriverClassName("org.sqlite.JDBC");
         dataSource.setUrl("jdbc:sqlite:" + tempDir.resolve("test-chatai.db").toAbsolutePath());
-        service = new SqliteStorageService(new JdbcTemplate(dataSource));
+        jdbcTemplate = new JdbcTemplate(dataSource);
+        service = new SqliteStorageService(jdbcTemplate);
         service.init();
     }
 
@@ -72,6 +78,137 @@ class SqliteStorageServiceTest {
         assertNull(service.register("admin", "pass1234", "127.0.0.1"), "admin 用户名应被拒绝");
     }
 
+    /** 删除用户时应在同一事务内清理会话摘要、资源与跨用户资源授权。 */
+    @Test
+    void deleteUser_完整清理会话摘要与资源授权() {
+        User owner = service.register(uniqueName("asset_owner"), "pass1234", "127.0.0.1");
+        User grantee = service.register(uniqueName("asset_grantee"), "pass1234", "127.0.0.2");
+        String chatId = uniqueName("context_chat");
+        String assetUrl = "/api/files/" + uniqueName("asset");
+        service.saveChatContextSummary(owner.getId(), chatId, 2, "包含隐私的摘要");
+        service.registerFileAsset(assetUrl, owner.getId(), "attachment");
+        service.grantFileAssetAccess(assetUrl, grantee.getId());
+
+        assertTrue(service.deleteUser(owner.getId()));
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_chat_context_summary WHERE user_id=?", Integer.class, owner.getId()));
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_file_asset WHERE owner_user_id=?", Integer.class, owner.getId()));
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_file_asset_grant WHERE url=?", Integer.class, assetUrl));
+    }
+
+    /** 即使通过非 Spring 兼容构造器使用，中途删除失败也必须回滚关联数据。 */
+    @Test
+    void deleteUser_后续SQL失败时回滚已删Token与摘要() {
+        User user = service.register(uniqueName("rollback"), "pass1234", "127.0.0.3");
+        String token = uniqueName("rollback_token");
+        service.insertToken(token, user.getId(), "127.0.0.3", "test", Long.MAX_VALUE);
+        service.saveChatContextSummary(user.getId(), "rollback-chat", 2, "仍应保留");
+        String trigger = "reject_user_delete";
+        jdbcTemplate.execute("CREATE TRIGGER " + trigger + " BEFORE DELETE ON t_user " +
+                "BEGIN SELECT RAISE(ABORT, 'test deletion failure'); END");
+        try {
+            assertThrows(org.springframework.dao.DataAccessException.class, () -> service.deleteUser(user.getId()));
+            assertNotNull(service.getUserById(user.getId()));
+            assertEquals(1, service.listTokensByUser(user.getId()).size());
+            assertEquals("仍应保留", service.getChatContextSummary(user.getId(), "rollback-chat", 2));
+        } finally {
+            jdbcTemplate.execute("DROP TRIGGER " + trigger);
+        }
+    }
+
+    /** 清空回收站只删除目标用户的已删会话摘要，不影响正常会话或其他用户。 */
+    @Test
+    void purgeChatSessions_清空回收站保留正常摘要并支持事务回滚() {
+        String userId = uniqueName("trash_owner");
+        String otherId = uniqueName("trash_other");
+        for (String owner : List.of(userId, otherId)) {
+            for (String chat : List.of("active", "trash")) {
+                service.upsertChatSession(owner, chat, "[]", "{}", chat, "", "", 0, "2026-09-07", 1);
+                service.saveChatContextSummary(owner, chat, 2, owner + chat);
+            }
+            service.softDeleteChatSessions(owner, List.of("trash"), "2026-09-07");
+        }
+        jdbcTemplate.execute("CREATE TRIGGER reject_trash_delete BEFORE DELETE ON t_chat_session " +
+                "BEGIN SELECT RAISE(ABORT, 'test deletion failure'); END");
+        try {
+            assertThrows(org.springframework.dao.DataAccessException.class,
+                    () -> service.purgeChatSessions(userId, null));
+            assertEquals(userId + "trash", service.getChatContextSummary(userId, "trash", 2));
+        } finally {
+            jdbcTemplate.execute("DROP TRIGGER reject_trash_delete");
+        }
+        assertEquals(1, service.purgeChatSessions(userId, List.of()));
+        assertNull(service.getChatContextSummary(userId, "trash", 2));
+        assertEquals(userId + "active", service.getChatContextSummary(userId, "active", 2));
+        assertEquals(otherId + "trash", service.getChatContextSummary(otherId, "trash", 2));
+        assertEquals(0, service.purgeChatSessions(userId, null));
+        assertEquals(userId + "active", service.getChatContextSummary(userId, "active", 2));
+    }
+
+    /** 验证分享仓储拆分后兼容层仍保持完整 CRUD 与访问次数语义。 */
+    @Test
+    void chatShareRepository_兼容层保持原有行为() {
+        ChatShare share = new ChatShare();
+        share.setChatId(uniqueName("chat"));
+        share.setUserId(uniqueName("user"));
+        share.setTitle("初始标题");
+        share.setSnapshotJson("{}");
+        share.setMaxViews(1);
+
+        ChatShare saved = service.addChatShare(share);
+        assertNotNull(saved.getId());
+        assertEquals("初始标题", service.getChatShareById(saved.getId()).getTitle());
+        assertEquals(1, service.getChatSharesByUser(saved.getUserId()).size());
+        assertEquals(saved.getId(), service.getChatShareByChat(saved.getUserId(), saved.getChatId()).getId());
+        assertTrue(service.claimChatShareAccess(saved.getId()));
+        assertFalse(service.claimChatShareAccess(saved.getId()));
+        assertTrue(service.updateChatShareSecurity(saved.getId(), "hash", "ENC:secret", 2, true));
+        ChatShare securityUpdated = service.getChatShareById(saved.getId());
+        assertEquals(0, securityUpdated.getAccessCount());
+        assertEquals(2, securityUpdated.getMaxViews());
+        assertEquals("hash", securityUpdated.getPasswordHash());
+        service.updateChatShareExpiry(saved.getId(), "2026-12-31 23:59:59");
+        assertEquals("2026-12-31 23:59:59", service.getChatShareById(saved.getId()).getExpiresAt());
+        saved.setTitle("更新标题");
+        saved.setSnapshotJson("{\"updated\":true}");
+        saved.setAccessCount(1);
+        service.updateChatShareDetails(saved);
+        ChatShare detailsUpdated = service.getChatShareById(saved.getId());
+        assertEquals("更新标题", detailsUpdated.getTitle());
+        assertEquals("{\"updated\":true}", detailsUpdated.getSnapshotJson());
+        assertEquals(0, detailsUpdated.getAccessCount());
+        assertTrue(service.deleteChatShare(saved.getId()));
+        assertNull(service.getChatShareById(saved.getId()));
+    }
+
+    /**
+     * 双重验证凭据应可启用、阻止 TOTP 时间步重放、一次性消费恢复码并完整清除。
+     */
+    @Test
+    void twoFactor_凭据生命周期与一次性语义() {
+        User user = service.register(uniqueName("two_factor"), "pass1234", "127.0.0.1");
+        assertNotNull(user);
+        assertTrue(service.enableTwoFactor(user.getId(), "ENC:test-secret", List.of("hash-a", "hash-b")));
+
+        User enabled = service.getUserById(user.getId());
+        assertTrue(enabled.isTwoFactorEnabled());
+        assertEquals(2, enabled.getRecoveryCodeHashes().size());
+        assertTrue(service.claimTwoFactorStep(user.getId(), 100L));
+        assertFalse(service.claimTwoFactorStep(user.getId(), 100L), "同一时间步必须拒绝重放");
+        assertTrue(service.consumeRecoveryCode(user.getId(), "hash-a"));
+        assertFalse(service.consumeRecoveryCode(user.getId(), "hash-a"), "恢复码必须只能使用一次");
+        assertTrue(service.replaceRecoveryCodes(user.getId(), List.of("hash-new")));
+        assertEquals(List.of("hash-new"), service.getUserById(user.getId()).getRecoveryCodeHashes());
+
+        assertTrue(service.disableTwoFactor(user.getId()));
+        User disabled = service.getUserById(user.getId());
+        assertFalse(disabled.isTwoFactorEnabled());
+        assertTrue(disabled.getRecoveryCodeHashes().isEmpty());
+        assertNull(disabled.getTwoFactorSecret());
+    }
+
     @Test
     void modelConfigCrud_缓存一致性() {
         ModelConfig config = new ModelConfig();
@@ -100,10 +237,78 @@ class SqliteStorageServiceTest {
         service.updateModelConfig(saved);
         assertEquals("测试模型-改", service.getModelConfigById(saved.getId()).getDisplayName());
 
+        // 健康检查开关：新增未显式设置时默认参与（NULL -> true），显式关闭后持久化生效
+        assertEquals(Boolean.TRUE, service.getModelConfigById(saved.getId()).getHealthCheckEnabled());
+        saved.setHealthCheckEnabled(false);
+        service.updateModelConfig(saved);
+        assertEquals(Boolean.FALSE, service.getModelConfigById(saved.getId()).getHealthCheckEnabled());
+
         // 删除后缓存同步失效
         assertTrue(service.deleteModelConfig(saved.getId()));
         assertNull(service.getModelConfigById(saved.getId()), "删除后按 ID 应查不到");
         assertNull(service.getModelConfigById("not-exist-id"));
+    }
+
+    /** 新自定义厂商必须获得唯一 ID、默认图标，并在后续模型中复用完整厂商配置。 */
+    @Test
+    void customProvider_唯一标识与配置自动复用() {
+        ModelConfig first = new ModelConfig();
+        first.setProviderId("custom");
+        first.setProviderName("厂商" + uniqueName("alpha"));
+        first.setModelId("model-a");
+        first.setDisplayName("模型 A");
+        first.setApiUrl("https://example.test/v1");
+        first.setApiKey("sk-a");
+        first.setEnabled(true);
+        service.addModelConfig(first);
+
+        ModelConfig otherProvider = new ModelConfig();
+        otherProvider.setProviderId("custom");
+        otherProvider.setProviderName("厂商" + uniqueName("beta"));
+        otherProvider.setModelId("model-b");
+        otherProvider.setDisplayName("模型 B");
+        otherProvider.setApiUrl("https://other.test/v1");
+        otherProvider.setApiKey("sk-b");
+        otherProvider.setEnabled(true);
+        service.addModelConfig(otherProvider);
+
+        assertNotEquals(first.getProviderId(), otherProvider.getProviderId());
+        assertTrue(first.getProviderId().startsWith("custom-"));
+        assertFalse(first.getProviderIcon().isBlank());
+
+        ModelConfig reused = new ModelConfig();
+        reused.setProviderId(first.getProviderId());
+        reused.setModelId("model-a-2");
+        reused.setDisplayName("模型 A2");
+        reused.setApiKey("sk-new");
+        reused.setEnabled(true);
+        service.addModelConfig(reused);
+        assertEquals(first.getProviderName(), reused.getProviderName());
+        assertEquals(first.getProviderIcon(), reused.getProviderIcon());
+        assertEquals(first.getApiUrl(), reused.getApiUrl());
+
+        ProviderModel catalogModel = new ProviderModel();
+        catalogModel.setId("catalog-only-model");
+        catalogModel.setName("目录模型");
+        service.saveProviderModels(first.getProviderId(), List.of(catalogModel));
+        Map<String, Object> providerRow = service.listCustomProviders().stream()
+                .filter(row -> first.getProviderId().equals(row.get("id")))
+                .findFirst().orElseThrow();
+        assertEquals(1, ((Number) providerRow.get("modelCount")).intValue(),
+                "厂商模型数必须按支持目录统计，不能按已接入配置数统计");
+        assertEquals(1, ((List<?>) providerRow.get("models")).size());
+    }
+
+    /** 分享复制授权应允许被授权用户读取，同时查询参数不能绕过所有权校验。 */
+    @Test
+    void fileAsset_所有权与复制授权边界() {
+        String url = "/api/files/img/asset-test.png";
+        service.registerFileAsset(url, "owner-user", "image");
+        assertTrue(service.canAccessFileAsset(url, "owner-user", false));
+        assertFalse(service.canAccessFileAsset(url + "?shareId=guess", "other-user", false));
+
+        service.grantFileAssetAccess(url, "other-user");
+        assertTrue(service.canAccessFileAsset(url + "?shareId=valid", "other-user", false));
     }
 
     @Test
@@ -193,5 +398,163 @@ class SqliteStorageServiceTest {
         assertNotNull(admin);
         assertFalse(service.deleteUser(admin.getId()), "内置 admin 应受保护不可删除");
         assertFalse(service.deleteUser("not-exist-user"), "不存在用户删除应返回 false");
+    }
+
+    /** 跨会话搜索应同时命中标题和消息正文，并返回可直接跳转的消息绝对下标。 */
+    @Test
+    void chatSearch_标题与消息内容均可定位() {
+        String userId = uniqueName("chat_search");
+        String messages = "[{\"role\":\"user\",\"content\":\"项目背景\"},"
+                + "{\"role\":\"assistant\",\"content\":\"Needle response\",\"time\":\"08:00\"}]";
+        service.upsertChatSession(userId, "chat-search", messages, "{}",
+                "Release Planning", "项目背景", "08:00", 2,
+                "2026-08-25 08:00:00", System.currentTimeMillis());
+        ChatHistoryService historyService = new ChatHistoryService(service);
+
+        Map<String, Object> titleResults = historyService.searchChatHistory(userId, "release", 50, 0, null, null, null, null);
+        List<Map<String, Object>> titleList = results(titleResults);
+        assertEquals(1, titleList.size());
+        assertEquals("title", titleList.get(0).get("resultType"));
+        assertEquals("chat-search", titleList.get(0).get("chatId"));
+        assertEquals("项目背景", titleList.get(0).get("snippet"));
+
+        Map<String, Object> messageResults = historyService.searchChatHistory(userId, "NEEDLE", 50, 0, null, null, null, null);
+        List<Map<String, Object>> messageList = results(messageResults);
+        assertEquals(1, messageList.size());
+        assertEquals("message", messageList.get(0).get("resultType"));
+        assertEquals(1, ((Number) messageList.get(0).get("messageIndex")).intValue());
+    }
+
+    /** 搜索结果列表提取辅助 */
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> results(Map<String, Object> searchResult) {
+        return (List<Map<String, Object>>) searchResult.get("results");
+    }
+
+    /** 搜索特殊字符 % 与 _ 按字面量匹配，不产生通配符误命中 */
+    @Test
+    void chatSearch_百分号与下划线按字面量匹配() {
+        String userId = uniqueName("chat_search_special");
+        String messages = "[{\"role\":\"user\",\"content\":\"完成度 100% 达成\"}]";
+        service.upsertChatSession(userId, "chat-pct", messages, "{}",
+                "普通标题", "完成度", "08:00", 1, "2026-08-25 08:00:00", System.currentTimeMillis());
+        // 另一条不含 % 的会话：若 % 被当通配符会误命中
+        service.upsertChatSession(userId, "chat-no-pct",
+                "[{\"role\":\"user\",\"content\":\"完成度百分百达成\"}]", "{}",
+                "普通标题", "完成度", "08:01", 1, "2026-08-25 08:01:00", System.currentTimeMillis());
+        ChatHistoryService historyService = new ChatHistoryService(service);
+
+        List<Map<String, Object>> list = results(historyService.searchChatHistory(userId, "100%", 50, 0, null, null, null, null));
+        assertEquals(1, list.size(), "百分号应按字面量匹配，不误命中其他会话");
+        assertEquals("chat-pct", list.get(0).get("chatId"));
+
+        // 下划线同理
+        service.upsertChatSession(userId, "chat-underscore",
+                "[{\"role\":\"user\",\"content\":\"变量 user_name 的含义\"}]", "{}",
+                "普通标题", "变量", "08:02", 1, "2026-08-25 08:02:00", System.currentTimeMillis());
+        List<Map<String, Object>> underscore = results(historyService.searchChatHistory(userId, "user_name", 50, 0, null, null, null, null));
+        assertEquals(1, underscore.size());
+        assertEquals("chat-underscore", underscore.get(0).get("chatId"));
+    }
+
+    /** 搜索分页：结果超过一页时无重复无遗漏，hasMore 标记正确 */
+    @Test
+    void chatSearch_分页无重复遗漏() {
+        String userId = uniqueName("chat_search_page");
+        ChatHistoryService historyService = new ChatHistoryService(service);
+        // 造 25 个含共同关键字的会话（每会话 1 条命中消息）
+        for (int i = 0; i < 25; i++) {
+            service.upsertChatSession(userId, "page-" + i,
+                    "[{\"role\":\"user\",\"content\":\"分页关键字 needle" + i + "\"}]", "{}",
+                    "分页会话" + i, "分页", "08:00", 1, "2026-08-25 08:00:00",
+                    System.currentTimeMillis() + i);
+        }
+        // 第一页 10 条
+        Map<String, Object> page1 = historyService.searchChatHistory(userId, "needle", 10, 0, null, null, null, null);
+        assertEquals(10, results(page1).size());
+        assertTrue((Boolean) page1.get("hasMore"), "还有更多结果时 hasMore 应为 true");
+        // 第二页 10 条
+        Map<String, Object> page2 = historyService.searchChatHistory(userId, "needle", 10, 10, null, null, null, null);
+        assertEquals(10, results(page2).size());
+        assertTrue((Boolean) page2.get("hasMore"));
+        // 第三页 5 条且无更多
+        Map<String, Object> page3 = historyService.searchChatHistory(userId, "needle", 10, 20, null, null, null, null);
+        assertEquals(5, results(page3).size());
+        assertFalse((Boolean) page3.get("hasMore"), "最后一页 hasMore 应为 false");
+        // 三页合并无重复
+        java.util.Set<String> allIds = new java.util.HashSet<>();
+        results(page1).forEach(r -> allIds.add((String) r.get("chatId")));
+        results(page2).forEach(r -> allIds.add((String) r.get("chatId")));
+        results(page3).forEach(r -> allIds.add((String) r.get("chatId")));
+        assertEquals(25, allIds.size(), "分页结果应无重复无遗漏");
+    }
+
+    /** 跨用户搜索隔离：用户 A 的会话不会被用户 B 搜到 */
+    @Test
+    void chatSearch_跨用户不可见() {
+        String userA = uniqueName("chat_search_a");
+        String userB = uniqueName("chat_search_b");
+        ChatHistoryService historyService = new ChatHistoryService(service);
+        service.upsertChatSession(userA, "a-chat",
+                "[{\"role\":\"user\",\"content\":\"隔离关键字隔离\"}]", "{}",
+                "A的会话", "隔离", "08:00", 1, "2026-08-25 08:00:00", System.currentTimeMillis());
+        List<Map<String, Object>> resultB = results(historyService.searchChatHistory(userB, "隔离关键字", 50, 0, null, null, null, null));
+        assertTrue(resultB.isEmpty(), "用户 B 不应搜到用户 A 的会话");
+        List<Map<String, Object>> resultA = results(historyService.searchChatHistory(userA, "隔离关键字", 50, 0, null, null, null, null));
+        assertEquals(1, resultA.size());
+    }
+
+    /** 搜索筛选：时间范围与文件夹归属过滤 */
+    @Test
+    void chatSearch_时间与文件夹筛选() {
+        String userId = uniqueName("chat_search_filter");
+        ChatHistoryService historyService = new ChatHistoryService(service);
+        long base = 1700000000000L;
+        service.upsertChatSession(userId, "old-chat",
+                "[{\"role\":\"user\",\"content\":\"筛选关键字\"}]", "{}",
+                "旧会话", "筛选", "08:00", 1, "2026-08-25 08:00:00", base);
+        service.upsertChatSession(userId, "new-chat",
+                "[{\"role\":\"user\",\"content\":\"筛选关键字\"}]", "{\"folderId\":\"f-work\"}",
+                "新会话", "筛选", "08:00", 1, "2026-08-25 08:00:00", base + 100000);
+
+        // 时间范围：仅命中新会话
+        List<Map<String, Object>> timeFiltered = results(historyService.searchChatHistory(
+                userId, "筛选关键字", 50, 0, base + 50000, null, null, null));
+        assertEquals(1, timeFiltered.size());
+        assertEquals("new-chat", timeFiltered.get(0).get("chatId"));
+
+        // 文件夹筛选：仅命中 f-work 下的会话
+        List<Map<String, Object>> folderFiltered = results(historyService.searchChatHistory(
+                userId, "筛选关键字", 50, 0, null, null, "f-work", null));
+        assertEquals(1, folderFiltered.size());
+        assertEquals("new-chat", folderFiltered.get(0).get("chatId"));
+
+        // 不存在的文件夹：无结果
+        List<Map<String, Object>> noFolder = results(historyService.searchChatHistory(
+                userId, "筛选关键字", 50, 0, null, null, "f-nonexist", null));
+        assertTrue(noFolder.isEmpty());
+    }
+
+    /** 超过原 200 候选上限时较早会话仍可找到（分页扫描不受固定候选上限截断） */
+    @Test
+    void chatSearch_超过原候选上限仍能命中最早会话() {
+        String userId = uniqueName("chat_search_deep");
+        ChatHistoryService historyService = new ChatHistoryService(service);
+        long base = 1700000000000L;
+        // 最早的会话包含唯一关键字，随后 250 个较新会话包含共同关键字
+        service.upsertChatSession(userId, "oldest-chat",
+                "[{\"role\":\"user\",\"content\":\"远古关键字 needle-oldest\"}]", "{}",
+                "最早会话", "远古", "08:00", 1, "2026-08-25 08:00:00", base);
+        for (int i = 0; i < 250; i++) {
+            service.upsertChatSession(userId, "newer-" + i,
+                    "[{\"role\":\"user\",\"content\":\"普通内容 needle-oldest " + i + "\"}]", "{}",
+                    "较新会话" + i, "较新", "08:00", 1, "2026-08-25 08:00:00", base + 1000 + i);
+        }
+        // 关键字同时命中 251 个会话：最早会话按更新时间排最后，旧实现候选上限 200 会漏掉
+        List<Map<String, Object>> result = results(historyService.searchChatHistory(
+                userId, "needle-oldest", 300, 0, null, null, null, null));
+        assertEquals(251, result.size(), "全部 251 个命中会话都应返回，不受固定候选上限截断");
+        assertTrue(result.stream().anyMatch(r -> "oldest-chat".equals(r.get("chatId"))),
+                "最早（最旧）的会话必须可被搜到");
     }
 }

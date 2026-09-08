@@ -19,8 +19,8 @@ import {
 } from '@element-plus/icons-vue'
 import App from './App.vue'
 import router from './router'
-// 用户端中英双语（管理后台保持中文），locale 持久化在 localStorage
-import i18n from './i18n'
+// 全站中英双语，locale 持久化在 localStorage；后台模板复用中文源文案映射函数。
+import i18n, { adminText } from './i18n'
 import './styles/variables.css'
 import './theme/admin-theme.css'
 
@@ -35,6 +35,8 @@ for (const [key, component] of Object.entries(icons)) {
 app.use(createPinia())
 app.use(router)
 app.use(i18n)
+// 后台模板统一调用 $adminText，切换 locale 后随响应式渲染自动刷新。
+app.config.globalProperties.$adminText = adminText
 // v-loading 指令非模板组件，按需插件无法自动注册，需显式安装
 app.use(ElLoading)
 

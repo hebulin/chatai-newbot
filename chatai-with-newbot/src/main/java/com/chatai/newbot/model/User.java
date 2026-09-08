@@ -15,6 +15,22 @@ public class User {
     private String lastLoginAt;
     private String lastLoginIp;
     private String lastLoginBrowser;
+    /** 用户显示名称；为空时前端回退为 username */
+    private String displayName;
+    /** 用户常用联系邮箱 */
+    private String email;
+    /** 用户常用联系电话 */
+    private String phone;
+    /** 用户所属部门 */
+    private String department;
+    /** 用户职位/职务 */
+    private String jobTitle;
+    /** 用户个人简介 */
+    private String bio;
+    /** 头像类型：default 或 svg */
+    private String avatarType;
+    /** 经过服务端清理的 SVG 源码；前端仅通过 img data URL 展示 */
+    private String avatarValue;
     private List<String> allowedModelIds = new ArrayList<>(); // 特别授权的模型ID列表
     /** 用户自定义全局提示词（System Prompt）。旧版单条提示词字段，已被 promptPresets 取代，仅用于历史数据兼容/迁移 */
     private String systemPrompt;
@@ -26,6 +42,18 @@ public class User {
     private String dailyLimitType;
     /** 单用户每日限额数值（与 dailyLimitType 配套使用，<=0 视为不限制） */
     private int dailyLimitValue;
+    /** 是否已启用双重验证；属于安全配置，不直接序列化给通用用户接口 */
+    @JsonIgnore
+    private boolean twoFactorEnabled;
+    /** TOTP 共享密钥的 AES-GCM 密文；任何接口都不得返回此字段 */
+    @JsonIgnore
+    private String twoFactorSecret;
+    /** 尚未使用的恢复码 SHA-256 摘要列表；任何接口都不得返回此字段 */
+    @JsonIgnore
+    private List<String> recoveryCodeHashes = new ArrayList<>();
+    /** 最近一次成功使用的 TOTP 时间步，用于阻止同一验证码重放 */
+    @JsonIgnore
+    private long twoFactorLastUsedStep = -1L;
 
     @JsonIgnore
     public boolean isAdmin() {

@@ -8,16 +8,23 @@
         </span>
         <span class="nav-brand-text">
           <span class="nav-brand-name">Atelier</span>
-          <span class="nav-brand-sub">管理后台 · ADMIN</span>
+          <span class="nav-brand-sub">{{ $adminText('管理后台') }} · ADMIN</span>
         </span>
       </div>
       <div class="nav-actions">
-        <button class="theme-toggle-btn" @click="handleToggleTheme" title="切换主题" aria-label="主题">
+        <button
+          class="language-toggle-btn"
+          type="button"
+          @click="handleToggleLocale"
+          :title="$adminText(currentLocale === 'en' ? '切换为中文' : '切换为英文')"
+          :aria-label="$adminText(currentLocale === 'en' ? '切换为中文' : '切换为英文')"
+        >{{ currentLocale === 'en' ? '中' : 'EN' }}</button>
+        <button class="theme-toggle-btn" @click="handleToggleTheme" :title="$adminText('切换主题')" :aria-label="$adminText('主题')">
           <span class="toggle-track"><span class="toggle-knob"></span></span>
         </button>
         <el-button text @click="goChat">
           <el-icon><Back /></el-icon>
-          <span>返回聊天</span>
+          <span>{{ $adminText('返回聊天') }}</span>
         </el-button>
       </div>
     </nav>
@@ -25,42 +32,57 @@
     <!-- Tab 导航 -->
     <div class="admin-tabs-wrapper">
       <el-tabs v-model="activeTab" @tab-change="onTabChange" class="admin-tabs">
-        <el-tab-pane label="快速接入" name="quick-start" />
-        <el-tab-pane label="模型管理" name="models" />
-        <el-tab-pane label="厂商管理" name="providers" />
-        <el-tab-pane label="用户管理" name="users" />
-        <el-tab-pane label="分享管理" name="shares" />
-        <el-tab-pane label="系统设置" name="settings" />
-        <el-tab-pane label="联网配置" name="websearch" />
-        <el-tab-pane label="公告管理" name="announcements" />
-        <el-tab-pane label="审计日志" name="audit-logs" />
+        <el-tab-pane :label="$adminText('快速接入')" name="quick-start" />
+        <el-tab-pane :label="$adminText('模型管理')" name="models" />
+        <el-tab-pane :label="$adminText('厂商管理')" name="providers" />
+        <el-tab-pane :label="$adminText('用户管理')" name="users" />
+        <el-tab-pane :label="$adminText('分享管理')" name="shares" />
+        <el-tab-pane :label="$adminText('系统设置')" name="settings" />
+        <el-tab-pane :label="$adminText('联网配置')" name="websearch" />
+        <el-tab-pane :label="$adminText('公告管理')" name="announcements" />
+        <el-tab-pane :label="$adminText('审计日志')" name="audit-logs" />
+        <el-tab-pane :label="$adminText('备份恢复')" name="backups" />
       </el-tabs>
     </div>
 
-    <!-- 主内容区 -->
-    <main class="admin-main">
-      <router-view />
-    </main>
+    <!-- 主内容区：keep-alive 缓存已访问的 tab 页面（切回秒开、保留筛选/分页状态），
+         transition 以淡出淡入过渡缓解内容突变的生硬感；
+         外层 .admin-scroll 独立滚动，品牌栏与 Tab 栏固定不随内容滚动 -->
+    <div class="admin-scroll">
+      <main class="admin-main">
+        <router-view v-slot="{ Component }">
+          <transition name="admin-page" mode="out-in">
+            <keep-alive>
+              <component :is="Component" :key="route.path" />
+            </keep-alive>
+          </transition>
+        </router-view>
+      </main>
 
-    <!-- 底部 -->
-    <footer class="admin-footer">
-      <span class="app-version">v{{ APP_VERSION }}</span>
-    </footer>
+      <!-- 底部 -->
+      <footer class="admin-footer">
+        <span class="app-version">v{{ APP_VERSION }}</span>
+      </footer>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { Grid, Back } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { useTheme } from '@/composables/useTheme'
 import { APP_VERSION } from '@/config/version'
+import { setLocale } from '@/i18n'
 
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
-const { toggleTheme, initTheme, getTheme } = useTheme()
+const { toggleTheme, initTheme } = useTheme()
+const { locale } = useI18n()
+const currentLocale = computed(() => locale.value)
 
 const activeTab = ref('quick-start')
 
@@ -78,35 +100,73 @@ function handleToggleTheme() {
   toggleTheme()
 }
 
+// 在中文与英文之间切换，并复用全站语言持久化逻辑。
+function handleToggleLocale() {
+  setLocale(currentLocale.value === 'en' ? 'zh' : 'en')
+}
+
 function goChat() {
   router.push('/')
+}
+
+// 空闲时依次预加载全部后台子页面的异步 chunk：
+// 避免切换 tab 时现场下载/解析 chunk 阻塞主线程，导致"tab 已切换但内容不变、随后突然跳变"的卡顿
+function prefetchAdminViews() {
+  const loaders = [
+    () => import('@/views/admin/QuickStart.vue'),
+    () => import('@/views/admin/Models.vue'),
+    () => import('@/views/admin/Providers.vue'),
+    () => import('@/views/admin/Users.vue'),
+    () => import('@/views/admin/Shares.vue'),
+    () => import('@/views/admin/Settings.vue'),
+    () => import('@/views/admin/WebSearch.vue'),
+    () => import('@/views/admin/Announcements.vue'),
+    () => import('@/views/admin/AuditLogs.vue'),
+    () => import('@/views/admin/Backups.vue')
+  ]
+  // 优先用浏览器空闲回调逐个加载（不抢占首屏渲染）；不支持时退化为错峰 setTimeout
+  const schedule = window.requestIdleCallback
+    ? (cb) => window.requestIdleCallback(cb, { timeout: 2000 })
+    : (cb) => setTimeout(cb, 300)
+  let idx = 0
+  const loadNext = () => {
+    if (idx >= loaders.length) return
+    loaders[idx++]()
+    schedule(loadNext)
+  }
+  schedule(loadNext)
 }
 
 onMounted(() => {
   initTheme()
   // 鉴权检查
   authStore.checkAuth()
+  // 进入后台后利用空闲时段预热其余 tab 页面 chunk
+  prefetchAdminViews()
 })
 </script>
 
 <style scoped>
 /* chat.css 全局锁死了 html/body 的滚动（overflow:hidden，聊天页自行管理滚动），
    该 CSS 经 JS 引入后常驻文档，会波及后台管理页，导致 body 无法滚动。
-   故这里让 .admin-layout 自己作为滚动容器，数据量多时可正常下滑 */
+   故这里由 .admin-scroll 充当滚动容器；品牌栏与 Tab 栏位于滚动容器之外，
+   滚动时固定不动（不依赖 sticky，避免粘性定位在嵌套滚动容器下的兼容陷阱） */
 .admin-layout {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden;
 }
 @supports (height: 100dvh) {
   .admin-layout { height: 100dvh; }
 }
+.admin-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
 .admin-nav {
-  position: sticky;
-  top: 0;
-  z-index: 50;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -115,7 +175,6 @@ onMounted(() => {
   background: var(--bg-2);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-  backdrop-filter: blur(12px);
 }
 .nav-brand {
   display: flex;
@@ -155,6 +214,26 @@ onMounted(() => {
   align-items: center;
   gap: 12px;
 }
+.language-toggle-btn {
+  min-width: 38px;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.2s var(--ease), color 0.2s var(--ease);
+}
+.language-toggle-btn:hover,
+.language-toggle-btn:focus-visible {
+  border-color: var(--primary);
+  color: var(--primary);
+  outline: none;
+}
 /* Theme toggle - pill-shaped switch (unified with chat/login) */
 .theme-toggle-btn {
   width: 48px; height: 26px;
@@ -193,6 +272,7 @@ onMounted(() => {
 [data-theme="light"] .toggle-knob { left: calc(100% - 20px); background: var(--primary); }
 [data-theme="light"] .toggle-knob::before { content: '\2600'; color: #fff; }
 .admin-tabs-wrapper {
+  flex-shrink: 0;
   padding: 0 32px;
   background: var(--bg-2);
   border-bottom: 1px solid var(--border);
@@ -263,5 +343,22 @@ onMounted(() => {
   .admin-footer {
     padding: 12px 16px;
   }
+}
+</style>
+
+<!-- 过渡类作用于子页面根元素（跨组件），需非 scoped 全局样式 -->
+<style>
+/* 后台 tab 页面切换过渡：旧页快速淡出，新页轻微上浮淡入，
+   缓解路由内容"突然一变"的生硬感；时长控制在 180ms 内不拖慢操作节奏 */
+.admin-page-enter-active,
+.admin-page-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.admin-page-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.admin-page-leave-to {
+  opacity: 0;
 }
 </style>

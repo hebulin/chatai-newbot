@@ -3,18 +3,24 @@
        使日期选择器(el-date-picker)、下拉(el-select)等组件树内弹出层的面板
        z-index（4001 起）高于自定义模态框遮罩（z-index:3000），
        避免弹出面板被模态框盖在下方；同时低于图片灯箱（z-index:5000）。 -->
-  <el-config-provider :z-index="4000" :locale="zhCn">
+  <el-config-provider :z-index="4000" :locale="elementLocale">
     <router-view />
   </el-config-provider>
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 // 按需引入后不再全局 app.use(ElementPlus)，中文语言包改由 el-config-provider 下发
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
+import en from 'element-plus/es/locale/lang/en'
 import { useTheme } from '@/composables/useTheme'
 
 const { initTheme } = useTheme()
+const { locale } = useI18n()
+
+// Element Plus 内建文案与全局界面语言同步，包括后台分页、日期和弹窗按钮。
+const elementLocale = computed(() => locale.value === 'en' ? en : zhCn)
 
 onMounted(() => {
   initTheme()

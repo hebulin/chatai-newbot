@@ -11,12 +11,12 @@
 - **联网搜索**：集成 Tavily 搜索，回答前先检索实时网络信息（后台可配置开关与测试）
 - **智能体/角色**：内置智能体 + 用户自定义提示词预设（多条保存、单条启用），可按会话绑定角色
 - **多模态与附件**：统一附件入口，图片（自动压缩，≤5MB）走多模态理解，文本文档（txt/md/csv/json/doc/docx/xls/xlsx 等，≤3MB）服务端解析为纯文本注入上下文，不依赖模型多模态能力
-- **消息级操作**：重新生成回答、编辑后重发、复制、清除上下文（分隔线后不再携带历史）
+- **消息级操作**：重新生成回答、编辑后重发（留在当前会话，Bot 回答追加分页版本，不自动创建分支）、复制、清除上下文（分隔线后不再携带历史）
 - **跨会话全文搜索**：在所有历史会话中搜索消息内容并定位跳转
 - **富内容渲染**：Markdown、代码高亮、Mermaid 图表、KaTeX 公式、表格（可下载 Excel/CSV）、图片灯箱
 - **会话管理**：新建/切换/重命名/删除，服务端按会话行级持久化，多端同步，AI 自动命名
 - **会话分享**：生成只读分享链接，可设有效期，个人与后台均可管理
-- **界面双语**：用户端中英双语（vue-i18n）即时切换，管理后台保持中文
+- **界面双语**：用户端与管理后台均支持中英双语（vue-i18n）即时切换
 - **响应式设计**：桌面端侧边栏 + 移动端抽屉式导航，明暗主题切换
 
 ### 账户与安全
@@ -63,7 +63,7 @@
 | UI 组件 | Element Plus |
 | 状态管理 | Pinia |
 | 路由 | Vue Router |
-| 国际化 | vue-i18n（用户端中英双语） |
+| 国际化 | vue-i18n（全站中英双语） |
 | 内容渲染 | marked + highlight.js + mermaid + KaTeX + xlsx |
 
 ## 项目结构
@@ -78,8 +78,12 @@ chatai-newbot/
 │   │   ├── model/                        # User / ModelConfig / PromptPreset / ChatAttachment ...
 │   │   └── service/
 │   │       ├── StorageManager.java       # 存储门面（直连 SQLite）
-│   │       ├── SqliteStorageService.java # SQLite 存储实现（建表迁移 + 内存缓存）
+│   │       ├── SqliteStorageService.java # SQLite 兼容门面（委托领域仓储）
+│   │       ├── SqliteSchemaInitializer.java # 建表与老库迁移
+│   │       ├── *Repository.java         # 用户/模型/厂商/会话/设置/用量等领域持久化
 │   │       ├── UnifiedChatService.java   # 统一聊天服务（多协议适配 + 连通性测试）
+│   │       ├── StreamingChatClient.java  # OpenAI/Anthropic SSE、重试与终态结算
+│   │       ├── ChatContextAssembler.java # 系统提示词、附件文本与消息限制
 │   │       ├── ChatHistoryService.java   # 服务端会话持久化（按会话行级存储）
 │   │       ├── WebSearchService.java     # Tavily 联网搜索
 │   │       ├── DocumentParseService.java # 附件文档解析（POI + 文本类）
@@ -88,13 +92,14 @@ chatai-newbot/
 │   │       ├── AuditLogService.java      # 审计日志记录与查询
 │   │       ├── LoginAttemptService.java  # 登录防爆破
 │   │       ├── RateLimitService.java     # 聊天短期限流
+│   │       ├── BudgetReservationService.java # 并发预算/用量预占
+│   │       ├── ObservabilityService.java # 请求、聊天流与 JVM 运行指标
 │   │       ├── DataCleanupService.java   # 过期数据定时清理
 │   │       └── ApiKeyCrypto.java         # API Key AES-256-GCM 加解密
 │   ├── src/main/resources/
 │   │   ├── application.yml
 │   │   ├── logback-spring.xml            # 滚动日志配置
-│   │   ├── providers.json                # 内置厂商 & 模型定义
-│   │   └── static/                       # 前端构建产物（由 web/dist 复制）
+│   │   └── providers.json                # 内置厂商 & 模型定义（源码不保存前端 static）
 │   ├── scripts/deploy.sh                 # 服务器端部署脚本（软链切换 + 回滚）
 │   └── pom.xml
 ├── web/                                  # 前端 (Vue 3 + Vite)
@@ -116,7 +121,7 @@ chatai-newbot/
 
 - JDK 21+
 - Maven 3.6+
-- Node.js 18+（仅前端开发/构建需要）
+- Node.js 22.22.2、24.15.0 或 26+（与 `web/package.json`、CI 保持一致）
 
 ### 构建运行
 
@@ -124,27 +129,56 @@ chatai-newbot/
 git clone https://github.com/hebulin/chatai-newbot.git
 cd chatai-newbot
 
-# 1. 构建前端
-cd web
-npm install
-npm run build          # 产物输出并同步到后端 static 目录
+# 1. 安装前端依赖（根目录命令会统一调度 web 与后端模块）
+npm --prefix web install
 
-# 2. 构建后端
-cd ../chatai-with-newbot
-mvn clean package -DskipTests
+# 2. 运行静态检查、前后端测试与生产构建
+npm run check
 
 # 3. 运行（空白部署无需预建任何目录/文件，首次启动自动初始化）
-java -jar target/*.jar
+java -jar chatai-with-newbot/target/*.jar
 ```
 
 访问 `http://localhost:9092`。
 
-前端开发模式（热更新，代理到后端 9092 端口）：
+同时启动 Spring Boot 与 Vite 开发服务（Vite 自动代理 `/api` 到 9092）：
 
 ```bash
-cd web
 npm run dev
 ```
+
+也可以分别执行 `npm run dev:server` 与 `npm run dev:web`。Maven 不在 PATH 时可设置
+`MAVEN_HOME` 或 `MAVEN_CMD`；Windows 开发机同时兼容 `D:\apache-maven-3.9.16`。
+
+### 测试
+
+```bash
+# 前后端全部单元与集成测试
+npm test
+
+# 首次运行浏览器端到端测试前安装 Chromium
+cd web
+npx playwright install chromium
+cd ..
+
+# 后端真实 HTTP + SQLite 核心链路，以及前端登录/SSE/刷新恢复链路
+npm run test:e2e
+```
+
+后端端到端测试使用独立的 `target/core-e2e-workdir/chatai-core-e2e.db`，前端端到端测试构建生产包并使用 API 替身，
+两者都不会改动开发环境的 `data/chatai.db`。CI 会自动安装 Chromium 并执行浏览器测试。
+
+### 前端加载与体积预算
+
+Markdown 按代码高亮、数学公式、Mermaid、表格和媒体增强分模块。Mermaid 核心在遇到图表时加载，
+各图表定义由 Mermaid 自带的动态加载器按种类加载；ELK 和思维导图保持独立动态块。
+Excel 导出仅在点击下载 Excel 后加载 XLSX，CSV 导出不加载 XLSX。加载失败会释放缓存，允许再次尝试。
+
+`web/build/bundleBudget.js` 在每次生产构建中限制主入口 JS（330 KiB / gzip 118 KiB）和聊天页面 JS
+（325 KiB / gzip 108 KiB）。预算针对对应块自身，不含 CSS；另递归检查全部静态 JS 依赖，
+禁止 Mermaid、ELK、思维导图和 XLSX 被间接提前加载。违反预算或找不到目标入口将使构建失败。
+Playwright 会验证普通流程图、ELK、思维导图及 Excel 的真实网络加载时机。
+构建仍可能提示 ELK/思维导图动态块较大，该提示不代表它们进入首屏。
 
 ### 首次启动自动完成
 
@@ -202,6 +236,7 @@ npm run dev
 | 会话分享 | `t_chat_share` |
 | 系统公告 | `t_announcement` |
 | 用量日志（Token 与人民币成本快照，默认保留 120 天） | `t_usage_log` |
+| 运行指标（UTC 小时桶，跨重启累计，保留 90 天） | `t_observability_hourly` |
 | 审计日志（自动按保留期清理） | `t_audit_log` |
 | 键值配置 | `t_setting` |
 

@@ -1,10 +1,26 @@
 {
   "name": "chatai-newbot",
   "version": "1.0.0",
-  "description": "多厂商 AI 大模型聊天平台，支持动态模型配置、权限管理、流式输出、深度思考模式。",
-  "main": "index.js",
+  "description": "多厂商 AI 大模型聊天平台的统一工程入口。",
+  "private": true,
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "node scripts/run-dev.mjs",
+    "dev:web": "npm --prefix web run dev",
+    "dev:server": "node scripts/run-maven.mjs -f chatai-with-newbot/pom.xml spring-boot:run",
+    "lint": "npm --prefix web run lint",
+    "build:web": "npm --prefix web run build",
+    "build:server": "node scripts/run-maven.mjs -f chatai-with-newbot/pom.xml -DskipTests clean package",
+    "build": "npm run build:web && npm run build:server",
+    "test:web": "npm --prefix web test",
+    "test:server": "node scripts/run-maven.mjs -f chatai-with-newbot/pom.xml test",
+    "test:e2e:web": "npm --prefix web run test:e2e",
+    "test:e2e:server": "node scripts/run-maven.mjs -f chatai-with-newbot/pom.xml -Dtest=CoreJourneyE2ETest test",
+    "test:e2e": "npm run test:e2e:server && npm run test:e2e:web",
+    "test": "npm run test:web && npm run test:server",
+    "check": "npm run lint && npm run test && npm run build"
+  },
+  "engines": {
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
   },
   "repository": {
     "type": "git",
@@ -12,8 +28,7 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
-  "type": "commonjs",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/hebulin/chatai-newbot/issues"
   },

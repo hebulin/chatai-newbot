@@ -2,9 +2,12 @@ package com.chatai.newbot.controller;
 
 import com.chatai.newbot.model.*;
 import com.chatai.newbot.service.ChatHistoryService;
+import com.chatai.newbot.service.BudgetReservationService;
 import com.chatai.newbot.service.RateLimitService;
 import com.chatai.newbot.service.StorageManager;
 import com.chatai.newbot.service.UnifiedChatService;
+import com.chatai.newbot.service.SvgAvatarService;
+import com.chatai.newbot.service.ObservabilityService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
@@ -25,18 +28,30 @@ public class ChatController {
     private final StorageManager storageService;
     private final ChatHistoryService chatHistoryService;
     private final RateLimitService rateLimitService;
+    private final BudgetReservationService budgetReservationService;
+    private final SvgAvatarService svgAvatarService;
+    private final ObservabilityService observabilityService;
 
+    /** 注入聊天、历史、预算预占、头像校验和运行指标服务。 */
     public ChatController(UnifiedChatService chatService, StorageManager storageService,
-                          ChatHistoryService chatHistoryService, RateLimitService rateLimitService) {
+                          ChatHistoryService chatHistoryService, RateLimitService rateLimitService,
+                          BudgetReservationService budgetReservationService,
+                          SvgAvatarService svgAvatarService,
+                          ObservabilityService observabilityService) {
         this.chatService = chatService;
         this.storageService = storageService;
         this.chatHistoryService = chatHistoryService;
         this.rateLimitService = rateLimitService;
+        this.budgetReservationService = budgetReservationService;
+        this.svgAvatarService = svgAvatarService;
+        this.observabilityService = observabilityService;
     }
 
     @GetMapping("/heartbeat")
     public ResponseEntity<Void> heartbeat() {
-        return ResponseEntity.ok().build();
+        return storageService.isReady()
+                ? ResponseEntity.ok().build()
+                : ResponseEntity.status(503).build();
     }
 
     @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -44,17 +59,21 @@ public class ChatController {
         User user = (User) httpRequest.getAttribute("currentUser");
         String modelConfigId = request.getModelConfigId();
 
+        // 前置拒绝统一计数（未进入流式阶段的逻辑聊天请求）
         if (modelConfigId == null || modelConfigId.isEmpty()) {
+            observabilityService.chatRejected();
             return Flux.just("{\"error\":{\"message\":\"未指定模型\",\"type\":\"param_error\"}}");
         }
 
         // 检查权限
         ModelConfig config = storageService.getModelConfigById(modelConfigId);
         if (config == null) {
+            observabilityService.chatRejected();
             return Flux.just("{\"error\":{\"message\":\"模型配置不存在\",\"type\":\"config_error\"}}");
         }
 
         if (!config.isEnabled()) {
+            observabilityService.chatRejected();
             return Flux.just("{\"error\":{\"message\":\"该模型已被禁用\",\"type\":\"config_error\"}}");
         }
 
@@ -66,56 +85,36 @@ public class ChatController {
                     ? allowed.contains(config.getId())
                     : Boolean.TRUE.equals(config.getVisibleToAll());
             if (!permitted) {
+                observabilityService.chatRejected();
                 return Flux.just("{\"error\":{\"message\":\"无权使用该模型\",\"type\":\"permission_error\"}}");
             }
         }
 
-        // 限流与配额检查（admin 豁免）
+        String requestId = UUID.randomUUID().toString();
+        // 限流与预算预占（admin 豁免）
         if (!user.isAdmin()) {
             // 1) 每分钟短时限流（滑动窗口）
             int ratePerMinute = storageService.getRateLimitPerMinute();
             if (!rateLimitService.tryAcquire(user.getId(), ratePerMinute)) {
+                observabilityService.chatRejected();
                 return Flux.just("{\"error\":{\"message\":\"操作过于频繁，请稍后再试（每分钟最多 " + ratePerMinute + " 次）\",\"type\":\"rate_limit_error\"}}");
             }
 
-            // 2) 每日限额：用户个人限额（次数/Token，二选一）优先，未设置则回退全局配额
-            String today = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
-            String personalType = user.getDailyLimitType();
-            int personalValue = user.getDailyLimitValue();
-            if ("count".equals(personalType) && personalValue > 0) {
-                int used = storageService.countUsageByUserAndDay(user.getId(), today);
-                if (used >= personalValue) {
-                    return Flux.just("{\"error\":{\"message\":\"今日调用次数已达上限（" + personalValue + " 次），请明日再试\",\"type\":\"quota_error\"}}");
-                }
-            } else if ("token".equals(personalType) && personalValue > 0) {
-                long usedTokens = storageService.sumTokensByUserAndDay(user.getId(), today);
-                if (usedTokens >= personalValue) {
-                    return Flux.just("{\"error\":{\"message\":\"今日 Token 用量已达上限（" + personalValue + "），请明日再试\",\"type\":\"quota_error\"}}");
-                }
-            } else {
-                // 无个人限额，回退到全局每日调用次数配额
-                int limit = storageService.getDailyChatLimit();
-                if (limit > 0) {
-                    int used = storageService.countUsageByUserAndDay(user.getId(), today);
-                    if (used >= limit) {
-                        return Flux.just("{\"error\":{\"message\":\"今日调用次数已达上限（" + limit + " 次），请明日再试\",\"type\":\"quota_error\"}}");
-                    }
-                }
-                long tokenLimit = storageService.getDailyTokenLimit();
-                if (tokenLimit > 0 && storageService.sumTokensByUserAndDay(user.getId(), today) >= tokenLimit) {
-                    return Flux.just("{\"error\":{\"message\":\"今日 Token 用量已达全局上限，请明日再试\",\"type\":\"quota_error\"}}");
-                }
-                double costLimitCny = storageService.getDailyCostLimitCny();
-                if (costLimitCny > 0 && storageService.sumCostCnyByUserAndDay(user.getId(), today) >= costLimitCny) {
-                    return Flux.just("{\"error\":{\"message\":\"今日金额用量已达全局预算上限，请明日再试\",\"type\":\"quota_error\"}}");
-                }
+            BudgetReservationService.ReservationResult reservation =
+                    budgetReservationService.reserve(user, request, config);
+            if (!reservation.allowed()) {
+                observabilityService.chatRejected();
+                return Flux.just("{\"error\":{\"message\":\"" + reservation.message()
+                        + "\",\"type\":\"quota_error\"}}");
             }
+            requestId = reservation.requestId();
         }
 
         // 记录使用（仅构建对象，不立即入库）：由 UnifiedChatService 在流终止阶段
         // 按实际消耗情况写入——正常完成/客户端取消/已输出后失败才落库，
         // 请求直接失败（未产生任何输出）不写入、不占每日配额
         UsageLog usageLog = new UsageLog();
+        usageLog.setRequestId(requestId);
         usageLog.setUserId(user.getId());
         usageLog.setUsername(user.getUsername());
         usageLog.setModelId(config.getId());
@@ -123,7 +122,14 @@ public class ChatController {
         usageLog.setTimestamp(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
         usageLog.setDeepThinking(request.isDeepThinking());
 
-        return chatService.chat(request, modelConfigId, usageLog);
+        String finalRequestId = requestId;
+        // 逻辑聊天请求计数在 UnifiedChatService 确定进入流式阶段时记录（前置拒绝不计），
+        // 终态分类（成功/失败/取消/超时）由其在流真实终止点记录，避免
+        // onErrorResume 把上游异常转成正常 SSE 错误消息后漏记失败
+        return chatService.chat(request, modelConfigId, usageLog)
+                .doFinally(signal -> {
+                    budgetReservationService.release(finalRequestId);
+                });
     }
 
     /**
@@ -148,16 +154,94 @@ public class ChatController {
             item.put("supportsThinking", m.isSupportsThinking());
             item.put("supportsMultimodal", m.isSupportsMultimodal());
             item.put("thinkingParamType", m.getThinkingParamType());
+            // 上下文容量（Token）：前端展示预计上下文占用用；0/null 表示未配置（按默认 32000 估算）
+            item.put("contextWindow", m.getContextWindow());
             modelList.add(item);
         }
 
         result.put("success", true);
         result.put("data", modelList);
         result.put("defaultModelId", storageService.getDefaultModelId());
+        result.put("botAvatarSvg", storageService.getBotAvatarSvg());
         // 联网搜索能力：全局开启且已配置 Key 时，聊天输入框才展示“联网”开关
         result.put("webSearchEnabled", storageService.getWebSearchEnabled()
                 && storageService.getTavilyApiKey() != null && !storageService.getTavilyApiKey().trim().isEmpty());
         return result;
+    }
+
+    /**
+     * 获取当前用户可维护的个人资料与头像。
+     */
+    @GetMapping("/user/profile")
+    public Map<String, Object> getUserProfile(HttpServletRequest request) {
+        User current = (User) request.getAttribute("currentUser");
+        User user = storageService.getUserById(current.getId());
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("success", true);
+        result.put("data", toProfileMap(user));
+        return result;
+    }
+
+    /**
+     * 更新当前用户个人资料；用户名、角色、配额等安全字段不在本接口修改。
+     */
+    @PutMapping("/user/profile")
+    public Map<String, Object> updateUserProfile(@RequestBody Map<String, Object> body,
+                                                  HttpServletRequest request) {
+        User current = (User) request.getAttribute("currentUser");
+        User user = storageService.getUserById(current.getId());
+        applyProfile(user, body);
+        storageService.updateUser(user);
+        return Map.of("success", true, "message", "个人资料已保存", "data", toProfileMap(user));
+    }
+
+    /**
+     * 将用户资料转换为不含凭据与安全配置的公开 Map。
+     */
+    private Map<String, Object> toProfileMap(User user) {
+        Map<String, Object> profile = new LinkedHashMap<>();
+        profile.put("username", user.getUsername());
+        profile.put("displayName", valueOrEmpty(user.getDisplayName()));
+        profile.put("email", valueOrEmpty(user.getEmail()));
+        profile.put("phone", valueOrEmpty(user.getPhone()));
+        profile.put("department", valueOrEmpty(user.getDepartment()));
+        profile.put("jobTitle", valueOrEmpty(user.getJobTitle()));
+        profile.put("bio", valueOrEmpty(user.getBio()));
+        profile.put("avatarType", valueOrEmpty(user.getAvatarType()).isEmpty() ? "default" : user.getAvatarType());
+        profile.put("avatarValue", valueOrEmpty(user.getAvatarValue()));
+        return profile;
+    }
+
+    /**
+     * 从请求体应用有限长度的用户资料，并对 SVG 代码执行安全检查。
+     */
+    private void applyProfile(User user, Map<String, Object> body) {
+        user.setDisplayName(profileText(body, "displayName", 80));
+        user.setEmail(profileText(body, "email", 160));
+        user.setPhone(profileText(body, "phone", 40));
+        user.setDepartment(profileText(body, "department", 100));
+        user.setJobTitle(profileText(body, "jobTitle", 100));
+        user.setBio(profileText(body, "bio", 500));
+        String avatarType = profileText(body, "avatarType", 20);
+        if ("svg".equals(avatarType)) {
+            user.setAvatarType("svg");
+            user.setAvatarValue(svgAvatarService.sanitize(profileText(body, "avatarValue", 20_000)));
+        } else {
+            user.setAvatarType("default");
+            user.setAvatarValue("");
+        }
+    }
+
+    /** 读取并限制个人资料文本字段长度。 */
+    private String profileText(Map<String, Object> body, String key, int maxLength) {
+        String value = body != null && body.get(key) != null ? String.valueOf(body.get(key)).trim() : "";
+        if (value.length() > maxLength) throw new IllegalArgumentException(key + " 字段过长");
+        return value;
+    }
+
+    /** 将 null 转为空字符串，保持前端表单类型稳定。 */
+    private String valueOrEmpty(String value) {
+        return value == null ? "" : value;
     }
 
     /**
@@ -216,9 +300,11 @@ public class ChatController {
     }
 
     /**
-     * 保存当前用户的会话历史（增量合并：可只上传已加载的部分会话）
-     * 请求体格式: { "lastChatId": "xxx", "chats": {...}, "chatMeta": {...}, "deletedChatIds": [...] }
-     * 返回体携带保存后的 version，前端据此更新本地基准，避免自己的写入触发重拉
+     * 保存当前用户的会话历史（增量合并 + 服务端原子版本校验：可只上传已变更的会话）
+     * 请求体格式: { "lastChatId": "xxx", "chats": {...}, "chatMeta": {...}, "deletedChatIds": [...],
+     *              "baseVersions": {chatId: 版本}, "baseFoldersVersion": n, "restoreChatIds": [...], "folders": [...] }
+     * 返回体携带保存后的 version（全局同步序列号）、每会话新版本 versions、冲突明细 conflicts、
+     * 文件夹版本 foldersVersion；冲突项不被覆盖，由前端提示用户选择保留哪一端
      */
     @PostMapping("/chat/history")
     public Map<String, Object> saveChatHistory(@RequestBody Map<String, Object> body,
@@ -226,9 +312,9 @@ public class ChatController {
         User user = (User) request.getAttribute("currentUser");
         Map<String, Object> result = new HashMap<>();
         try {
-            long version = chatHistoryService.saveChatHistory(user.getId(), body);
+            Map<String, Object> saved = chatHistoryService.saveChatHistory(user.getId(), body);
             result.put("success", true);
-            result.put("version", version);
+            result.putAll(saved);
         } catch (Exception e) {
             log.error("保存会话历史失败: userId={}", user.getId(), e);
             result.put("success", false);
@@ -239,7 +325,7 @@ public class ChatController {
 
     /**
      * 获取单个会话的最新记录（发送消息前的当前会话同步，避免拉全量历史）
-     * 参数: chatId=会话ID；返回 { success, messages, meta }
+     * 参数: chatId=会话ID；返回 { success, messages, meta, version, exists }
      */
     @GetMapping("/chat/history/single")
     public Map<String, Object> getSingleChatHistory(@RequestParam String chatId,
@@ -251,6 +337,8 @@ public class ChatController {
             result.put("success", true);
             result.put("messages", data.get("messages"));
             result.put("meta", data.get("meta"));
+            result.put("version", data.get("version"));
+            result.put("exists", data.get("exists"));
         } catch (Exception e) {
             log.error("加载单会话历史失败: userId={}, chatId={}", user.getId(), chatId, e);
             result.put("success", false);
@@ -260,20 +348,35 @@ public class ChatController {
     }
 
     /**
-     * 跨会话全文搜索当前用户的会话消息
-     * 参数: q=关键字；返回最多 50 条匹配（chatId/chatTitle/role/time/snippet）
+     * 跨会话搜索当前用户的会话标题（含用户重命名标题）与消息内容。
+     * 参数: q=关键字；offset/limit=稳定分页（默认 0/20，limit 上限 50）；
+     *       timeFrom/timeTo=会话更新时间范围（毫秒时间戳，可空）；
+     *       folderId=文件夹归属筛选（可空）；modelName=模型名称筛选（可空，精确匹配）。
+     * 返回 { success, data, hasMore }，消息命中项包含 messageIndex 供前端精确定位。
      */
     @GetMapping("/chat/history/search")
     public Map<String, Object> searchChatHistory(@RequestParam(required = false) String q,
-                                                 HttpServletRequest request) {
+                                                  @RequestParam(defaultValue = "0") int offset,
+                                                  @RequestParam(defaultValue = "20") int limit,
+                                                  @RequestParam(required = false) Long timeFrom,
+                                                  @RequestParam(required = false) Long timeTo,
+                                                  @RequestParam(required = false) String folderId,
+                                                  @RequestParam(required = false) String modelName,
+                                                  HttpServletRequest request) {
         User user = (User) request.getAttribute("currentUser");
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
         if (q == null || q.trim().isEmpty()) {
             result.put("data", Collections.emptyList());
+            result.put("hasMore", false);
             return result;
         }
-        result.put("data", chatHistoryService.searchChatHistory(user.getId(), q.trim(), 50));
+        int safeLimit = Math.max(1, Math.min(50, limit));
+        int safeOffset = Math.max(0, offset);
+        Map<String, Object> searchResult = chatHistoryService.searchChatHistory(
+                user.getId(), q.trim(), safeLimit, safeOffset, timeFrom, timeTo, folderId, modelName);
+        result.put("data", searchResult.get("results"));
+        result.put("hasMore", Boolean.TRUE.equals(searchResult.get("hasMore")));
         return result;
     }
 
@@ -289,6 +392,75 @@ public class ChatController {
             result.put("success", true);
         } catch (Exception e) {
             log.error("删除会话历史失败: userId={}", user.getId(), e);
+            result.put("success", false);
+            result.put("message", "删除失败: " + e.getMessage());
+        }
+        return result;
+    }
+
+    // ========== 回收站（软删除会话的恢复与彻底删除） ==========
+
+    /**
+     * 查询当前用户的回收站会话列表（软删除的会话，按删除时间倒序）
+     */
+    @GetMapping("/chat/trash")
+    public Map<String, Object> listTrash(HttpServletRequest request) {
+        User user = (User) request.getAttribute("currentUser");
+        Map<String, Object> result = new HashMap<>();
+        result.put("success", true);
+        result.put("data", chatHistoryService.listTrash(user.getId()));
+        return result;
+    }
+
+    /**
+     * 从回收站恢复会话（显式操作；恢复后参与多端同步，其他端刷新可见）
+     * 请求体: { "chatIds": ["..."] }
+     */
+    @PostMapping("/chat/trash/restore")
+    public Map<String, Object> restoreTrash(@RequestBody Map<String, Object> body,
+                                             HttpServletRequest request) {
+        User user = (User) request.getAttribute("currentUser");
+        Map<String, Object> result = new HashMap<>();
+        List<String> chatIds = new ArrayList<>();
+        if (body.get("chatIds") instanceof List<?> list) {
+            for (Object id : list) if (id instanceof String s && !s.isEmpty()) chatIds.add(s);
+        }
+        if (chatIds.isEmpty()) {
+            result.put("success", false);
+            result.put("message", "请选择要恢复的会话");
+            return result;
+        }
+        try {
+            List<String> restored = chatHistoryService.restoreFromTrash(user.getId(), chatIds);
+            result.put("success", true);
+            result.put("restored", restored);
+        } catch (Exception e) {
+            log.error("回收站恢复失败: userId={}", user.getId(), e);
+            result.put("success", false);
+            result.put("message", "恢复失败: " + e.getMessage());
+        }
+        return result;
+    }
+
+    /**
+     * 彻底删除回收站中的会话（不可恢复；chatIds 为空数组表示清空回收站）
+     * 请求体: { "chatIds": [...] }
+     */
+    @PostMapping("/chat/trash/purge")
+    public Map<String, Object> purgeTrash(@RequestBody Map<String, Object> body,
+                                           HttpServletRequest request) {
+        User user = (User) request.getAttribute("currentUser");
+        Map<String, Object> result = new HashMap<>();
+        List<String> chatIds = new ArrayList<>();
+        if (body != null && body.get("chatIds") instanceof List<?> list) {
+            for (Object id : list) if (id instanceof String s && !s.isEmpty()) chatIds.add(s);
+        }
+        try {
+            int purged = chatHistoryService.purgeTrash(user.getId(), chatIds);
+            result.put("success", true);
+            result.put("purged", purged);
+        } catch (Exception e) {
+            log.error("回收站彻底删除失败: userId={}", user.getId(), e);
             result.put("success", false);
             result.put("message", "删除失败: " + e.getMessage());
         }
