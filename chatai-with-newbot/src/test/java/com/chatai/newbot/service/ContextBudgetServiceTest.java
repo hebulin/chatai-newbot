@@ -1,127 +1,103 @@
 package com.chatai.newbot.service;
 
-import com.chatai.newbot.model.ModelConfig;
 import com.chatai.newbot.model.NewBotMessage;
 import org.junit.jupiter.api.Test;
-
 import java.util.ArrayList;
 import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.*;
 
-/**
- * ContextBudgetService 长对话上下文预算管理测试。
- * 覆盖：中文长文本估算、超长单条消息明确拒绝、完整对话轮次保留、
- * 附件历史截断、不同模型容量与输出预留。
- */
+/** 验证总上下文容量与输出空间的联合预算和完整轮次裁剪。 */
 class ContextBudgetServiceTest {
-
     private final ContextBudgetService service = new ContextBudgetService();
 
-    /** 构造用户消息 */
-    private NewBotMessage user(String content) {
-        NewBotMessage m = new NewBotMessage();
-        m.setRole("user");
-        m.setContent(content);
-        return m;
-    }
-
-    /** 构造助手消息 */
-    private NewBotMessage assistant(String content) {
-        NewBotMessage m = new NewBotMessage();
-        m.setRole("assistant");
-        m.setContent(content);
-        return m;
-    }
-
-    /** 构造指定上下文容量的模型配置 */
-    private ModelConfig modelWithWindow(Integer contextWindow) {
-        ModelConfig config = new ModelConfig();
-        config.setContextWindow(contextWindow);
-        return config;
-    }
-
+    /** 当前问题优先，输出仅作上限；32K 模型必须给回答留下真实空间。 */
     @Test
-    void estimateTokens_中文按字估算且带安全系数() {
-        // 100 个汉字 ≈ 100 * 1.15 = 115 tokens
-        int tokens = service.estimateTokens("汉".repeat(100));
-        assertEquals(115, tokens);
-        // 400 个 ASCII 字符 ≈ 100 * 1.15 = 115 tokens
-        int asciiTokens = service.estimateTokens("a".repeat(400));
-        assertEquals(115, asciiTokens);
-        // 空文本为 0
+    void applyBudget_输出空间从总容量扣除且不丢当前问题() {
+        var messages = List.of(message("user", "旧问题"), message("assistant", "旧回答".repeat(1000)),
+                message("user", "a".repeat(68000)));
+        var result = service.applyBudget(messages, "系统", 32000, 16384);
+        assertFalse(result.inputOverLimit);
+        assertEquals(2, result.droppedCount);
+        assertEquals(messages.getLast(), result.messages.getLast());
+        assertTrue(result.estimatedPromptTokens < 32000);
+        assertTrue(result.inputBudget < 20000);
+    }
+
+    /** 大容量模型保留超过旧 32K 输入阈值的内容，仅在真实容量不足时拒绝。 */
+    @Test
+    void applyBudget_大容量模型可处理超过旧预算的输入() {
+        var messages = List.of(message("user", "a".repeat(160000)));
+        assertFalse(service.applyBudget(messages, "系统", 128000, 16384).inputOverLimit);
+        assertTrue(service.applyBudget(messages, "系统", 32000, 0).inputOverLimit);
+    }
+
+    /** 构造指定角色的文本消息。 */
+    private NewBotMessage message(String role, String content) {
+        NewBotMessage message = new NewBotMessage();
+        message.setRole(role);
+        message.setContent(content);
+        return message;
+    }
+
+    /** 中文与英文估算保持安全系数，空文本为零。 */
+    @Test
+    void estimateTokens_保留保守估算() {
+        assertEquals(115, service.estimateTokens("汉".repeat(100)));
+        assertEquals(115, service.estimateTokens("a".repeat(400)));
         assertEquals(0, service.estimateTokens(null));
         assertEquals(0, service.estimateTokens(""));
     }
 
+    /** 输入整理保留最近连续轮次，不以孤立的回答开头。 */
     @Test
-    void applyBudget_保留最近完整对话轮次_不破坏角色顺序() {
-        // 小容量模型：3200 tokens，输出预留 1000，系统提示约几十，预算约 2000
-        ModelConfig config = modelWithWindow(3200);
+    void applyBudget_保留最近完整轮次() {
         List<NewBotMessage> messages = new ArrayList<>();
-        // 10 轮历史对话，每轮 user 50 字 + assistant 200 字，最后一条为当前问题
-        for (int i = 0; i < 10; i++) {
-            messages.add(user("问题" + i + "：" + "内".repeat(50)));
-            messages.add(assistant("回答" + i + "：" + "容".repeat(200)));
+        for (int index = 0; index < 10; index++) {
+            messages.add(message("user", "问题".repeat(25)));
+            messages.add(message("assistant", "回答".repeat(100)));
         }
-        messages.add(user("当前问题"));
-        ContextBudgetService.BudgetResult result = service.applyBudget(messages, config, "你是助手", 1000);
+        messages.add(message("user", "当前问题"));
+        var result = service.applyBudget(messages, "系统", 2000);
         assertFalse(result.inputOverLimit);
-        assertTrue(result.droppedCount > 0, "长历史应被裁剪");
-        // 保留的消息必须是连续的最近后缀，且最后一条是当前问题
-        assertEquals("user", result.messages.get(result.messages.size() - 1).getRole());
-        assertTrue(result.messages.get(result.messages.size() - 1).getContent().contains("当前问题"));
-        // 保留部分不以 assistant 开头（不破坏轮次配对：若边界落在 assistant，应再退一步）
-        if (result.messages.size() > 1) {
-            assertNotEquals("assistant", result.messages.get(0).getRole(),
-                    "裁剪边界不得留下缺少问题的孤立 assistant 消息");
-        }
+        assertTrue(result.droppedCount > 0);
+        assertEquals("user", result.messages.getFirst().getRole());
+        assertEquals("当前问题", result.messages.getLast().getContent());
+        assertTrue(result.estimatedPromptTokens <= result.inputBudget);
     }
 
+    /** 超长当前输入明确拒绝，不静默改写用户文本。 */
     @Test
-    void applyBudget_当前输入超限_明确标记不静默截断() {
-        ModelConfig config = modelWithWindow(4000);
-        List<NewBotMessage> messages = List.of(user("超长问题：" + "字".repeat(50000)));
-        ContextBudgetService.BudgetResult result = service.applyBudget(messages, config, "系统", 1000);
-        assertTrue(result.inputOverLimit, "当前输入本身超限必须明确标记，由上层报错而不是静默截断");
+    void applyBudget_当前输入超限保持原文() {
+        var messages = List.of(message("user", "字".repeat(50000)));
+        var result = service.applyBudget(messages, "系统");
+        assertTrue(result.inputOverLimit);
+        assertEquals(messages, result.messages);
     }
 
+    /** 系统提示耗尽预算时即使消息列表为空也不能误判可用。 */
     @Test
-    void applyBudget_未超预算时原样保留() {
-        ModelConfig config = modelWithWindow(null); // 默认 32000
-        List<NewBotMessage> messages = List.of(user("你好"), assistant("你好！有什么可以帮你？"));
-        ContextBudgetService.BudgetResult result = service.applyBudget(messages, config, "系统", 4096);
+    void applyBudget_系统提示词超限() {
+        assertTrue(service.applyBudget(List.of(), "字".repeat(5000), 4000).inputOverLimit);
+        assertTrue(service.applyBudget(List.of(message("user", "当前问题")), "字".repeat(5000), 4000).inputOverLimit);
+    }
+
+    /** 常规对话使用内部输入预算，不再依赖模型配置字段。 */
+    @Test
+    void applyBudget_未超预算原样保留() {
+        var messages = List.of(message("user", "你好"), message("assistant", "你好"));
+        var result = service.applyBudget(messages, "系统");
         assertEquals(0, result.droppedCount);
-        assertEquals(2, result.messages.size());
-        assertEquals(ContextBudgetService.DEFAULT_CONTEXT_WINDOW, result.contextWindow);
+        assertEquals(messages, result.messages);
+        assertEquals(ContextBudgetService.DEFAULT_INPUT_BUDGET, result.inputBudget);
     }
 
+    /** 历史附件仍缩略，当前附件保留全文。 */
     @Test
-    void clipAttachmentText_历史附件截断当前轮全文() {
-        String longText = "附件内容".repeat(500); // 2000 字
-        // 当前轮：全文保留
-        assertEquals(longText, service.clipAttachmentText(longText, true));
-        // 历史轮次：截断并标注
-        String clipped = service.clipAttachmentText(longText, false);
-        assertTrue(clipped.length() < longText.length());
-        assertTrue(clipped.contains("附件内容过长"), "截断后必须明确标注省略范围");
-        // 短附件不截断
-        String shortText = "短附件";
-        assertEquals(shortText, service.clipAttachmentText(shortText, false));
-    }
-
-    @Test
-    void applyBudget_输出预留纳入预算() {
-        // 输出预留越大，历史预算越小
-        ModelConfig config = modelWithWindow(5000);
-        List<NewBotMessage> messages = new ArrayList<>();
-        for (int i = 0; i < 20; i++) {
-            messages.add(user("问题" + i + "：" + "字".repeat(100)));
-            messages.add(assistant("回答" + i + "：" + "字".repeat(300)));
-        }
-        ContextBudgetService.BudgetResult smallReserve = service.applyBudget(messages, config, "系统", 500);
-        ContextBudgetService.BudgetResult largeReserve = service.applyBudget(messages, config, "系统", 4000);
-        assertTrue(largeReserve.droppedCount >= smallReserve.droppedCount,
-                "输出预留增大时历史预算应收紧（裁掉更多）");
+    void clipAttachmentText_仅缩略历史附件() {
+        String content = "附件内容".repeat(500);
+        assertEquals(content, service.clipAttachmentText(content, true));
+        assertTrue(service.clipAttachmentText(content, false).contains("附件内容过长"));
+        assertTrue(service.clipAttachmentText(content, false).length() < content.length());
+        assertEquals("短附件", service.clipAttachmentText("短附件", false));
     }
 }

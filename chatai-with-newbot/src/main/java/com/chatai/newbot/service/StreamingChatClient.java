@@ -159,9 +159,10 @@ public class StreamingChatClient {
         if (request.getTemperature() > 0) {
             requestBody.put("temperature", request.getTemperature());
         }
-        if (request.getMax_tokens() > 0) {
-            requestBody.put("max_tokens", request.getMax_tokens());
-        }
+        int outputLimit = OutputTokenPolicy.resolveForBody(request, config, requestBody,
+                storageService.getSetting(OutputTokenPolicy.GLOBAL_SETTING_KEY),
+                storageService.getSetting(OutputTokenPolicy.CONTEXT_SETTING_KEY));
+        requestBody.put("max_tokens", outputLimit);
 
         // 根据不同厂商处理思考模式参数
         // 注意：很多模型(如DeepSeek、Qwen3等)默认思考模式为enabled，
@@ -302,8 +303,6 @@ public class StreamingChatClient {
         requestBody.put("stream", true);
         requestBody.put("system", systemPrompt);
 
-        // max_tokens 在 Anthropic 中为必填
-        int maxTokens = request.getMax_tokens() > 0 ? request.getMax_tokens() : 8192;
 
         // 构建消息列表（Anthropic 不允许 system role 在 messages 中）
         List<Object> messages = new ArrayList<>();
@@ -377,12 +376,20 @@ public class StreamingChatClient {
             requestBody.put("temperature", request.getTemperature());
         }
 
+        // max_tokens 在 Anthropic 中为必填，不限模式需在最终输入组装后计算剩余预算。
+        int maxTokens = OutputTokenPolicy.resolveForBody(request, config, requestBody,
+                storageService.getSetting(OutputTokenPolicy.GLOBAL_SETTING_KEY),
+                storageService.getSetting(OutputTokenPolicy.CONTEXT_SETTING_KEY));
         // Anthropic 思考模式（Extended Thinking）
         if (request.isDeepThinking() && config.isSupportsThinking()) {
+            if (maxTokens <= 1024) {
+                throw new com.chatai.newbot.exception.ApiException(400,
+                        "当前输出预算不足以开启深度思考，请关闭深度思考或增大上下文与输出大小");
+            }
             Map<String, Object> thinking = new HashMap<>();
             thinking.put("type", "enabled");
             // budget_tokens 必须小于 max_tokens，设为 max_tokens 的 80%
-            int budgetTokens = (int) (maxTokens * 0.8);
+            int budgetTokens = Math.max(1024, Math.min(maxTokens - 1, (int) (maxTokens * 0.8)));
             thinking.put("budget_tokens", budgetTokens);
             requestBody.put("thinking", thinking);
             // Anthropic 思考模式下不允许设置 temperature

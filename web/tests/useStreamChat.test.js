@@ -16,7 +16,7 @@ function makeFetch(chunks, { closeAfter = true } = {}) {
     body: new ReadableStream({
       start(controller) {
         const encoder = new TextEncoder()
-        for (const c of chunks) controller.enqueue(encoder.encode(c))
+        for (const c of chunks) controller.enqueue(typeof c === 'string' ? encoder.encode(c) : c)
         if (closeAfter) controller.close()
         // 真实 fetch 中 abort 会取消 body 流并使 read() 抛出 AbortError，这里模拟该行为
         init?.signal?.addEventListener('abort', () => {
@@ -35,6 +35,105 @@ function sse(obj) {
 }
 
 describe('useStreamChat 流式状态与断网内容保留', () => {
+  it('长输出和无换行尾块均完整保留，结束原因为 stop 时正常完成', async () => {
+    const content = '长内容 data: 中文🙂\n'.repeat(10000)
+    const wire = sse({ choices: [{ delta: { content } }] })
+      + 'data: ' + JSON.stringify({ choices: [{ delta: { content: '最后一段' }, finish_reason: 'stop' }], usage: { completion_tokens: 65536 } })
+    const chunks = []
+    const bytes = new TextEncoder().encode(wire)
+    for (let index = 0; index < bytes.length; index += 37) chunks.push(bytes.slice(index, index + 37))
+    globalThis.fetch = makeFetch(chunks)
+    const sc = useStreamChat()
+    const done = vi.fn()
+    await sc.send({}, { onDone: done })
+    expect(done).toHaveBeenCalledTimes(1)
+    expect(done.mock.calls[0][0]).toMatchObject({ content: content + '最后一段', status: 'done', usage: { completion_tokens: 65536 } })
+  })
+
+  it('达到输出上限后保留思考、正文和最终 usage，DONE 不会误判为完整', async () => {
+    globalThis.fetch = makeFetch([
+      sse({ choices: [{ delta: { reasoning_content: '思考内容', content: '未完正文' } }] }),
+      sse({ choices: [{ finish_reason: 'length' }] }),
+      sse({ usage: { completion_tokens: 65536 } }),
+      'data: [DONE]'
+    ])
+    const sc = useStreamChat()
+    const done = vi.fn()
+    await sc.send({}, { chatId: 'length', onDone: done })
+    expect(done.mock.calls[0][0]).toMatchObject({ status: 'length', content: '未完正文', reasoning_content: '思考内容', interrupted: true, usage: { completion_tokens: 65536 } })
+    expect(done.mock.calls[0][0].error).toContain('上限')
+    expect(sc.loadDraft('length').content).toBe('未完正文')
+    expect(sc.loadDraft('length').notice).toBe(done.mock.calls[0][0].notice)
+    expect(sc.loadDraft('length').notice).toContain('上限')
+  })
+
+  /** 无信号 EOF 必须保留中断状态和草稿，不能仅凭已有内容判为成功。 */
+  it.each([
+    { content: '部分内容' },
+    { reasoning_content: '只有思考内容' },
+    { content: '部分正文', reasoning_content: '部分思考' }
+  ])('无完成信号时正常关闭保留部分内容：%j', async delta => {
+    globalThis.fetch = makeFetch([
+      sse({ choices: [{ delta }] }),
+      sse({ usage: { prompt_tokens: 12, completion_tokens: 6 } })
+    ])
+    const done = vi.fn()
+    const onError = vi.fn()
+    const sc = useStreamChat()
+    await sc.send({}, { chatId: 'missing-done', onDone: done, onError })
+    expect(done).toHaveBeenCalledTimes(1)
+    expect(onError).not.toHaveBeenCalled()
+    const result = done.mock.calls[0][0]
+    expect(result).toMatchObject({ ...delta, status: 'failed', interrupted: true,
+      usage: { prompt_tokens: 12, completion_tokens: 6 } })
+    expect(result.notice).toContain('未收到回答完成信号')
+    expect(sc.loadDraft('missing-done')).toMatchObject({ ...delta, status: 'failed',
+      notice: result.notice, usage: result.usage })
+  })
+
+  /** 结束事件缺字或被截断时不能从损坏 JSON 中推断正常完成。 */
+  it('完成事件 JSON 被截断时按中断保留草稿', async () => {
+    globalThis.fetch = makeFetch([
+      sse({ choices: [{ delta: { content: '保留这段正文' } }] }),
+      'data: {"choices":[{"finish_reason":"stop"'
+    ])
+    const done = vi.fn()
+    const sc = useStreamChat()
+    await sc.send({}, { chatId: 'broken-tail', onDone: done })
+    expect(done.mock.calls[0][0]).toMatchObject({ status: 'failed', interrupted: true, content: '保留这段正文' })
+    expect(sc.loadDraft('broken-tail').content).toBe('保留这段正文')
+  })
+
+  /** 两类明确完成信号均接受，正常完成才清除草稿。 */
+  it.each(['data: [DONE]', sse({ choices: [{ delta: {}, finish_reason: 'stop' }] })])(
+    '收到明确完成信号正常结算并清除草稿：%s', async ending => {
+      globalThis.fetch = makeFetch([sse({ choices: [{ delta: { content: '完整回答' } }] }), ending])
+      const done = vi.fn()
+      const sc = useStreamChat()
+      await sc.send({}, { chatId: 'complete', onDone: done })
+      expect(done).toHaveBeenCalledTimes(1)
+      expect(done.mock.calls[0][0]).toMatchObject({ status: 'done', content: '完整回答' })
+      expect(sc.loadDraft('complete')).toBeNull()
+    }
+  )
+
+  it('既无完成信号也无任何内容时正常关闭判为失败', async () => {
+    globalThis.fetch = makeFetch([])
+    const onError = vi.fn()
+    const sc = useStreamChat()
+    await sc.send({}, { onError })
+    expect(sc.status.value).toBe('failed')
+    expect(onError).toHaveBeenCalledTimes(1)
+  })
+
+  it('流内错误后即使收到 DONE 仍判为失败', async () => {
+    globalThis.fetch = makeFetch([sse({ error: { message: '上游错误' } }), 'data: [DONE]\n'])
+    const onError = vi.fn()
+    const sc = useStreamChat()
+    await sc.send({}, { onError })
+    expect(sc.status.value).toBe('failed')
+    expect(onError).toHaveBeenCalledTimes(1)
+  })
   beforeEach(() => {
     localStorage.clear()
     vi.useFakeTimers()

@@ -71,6 +71,11 @@
         </div>
         <!-- footer -->
         <div class="msg-footer" v-if="!isRegenTarget(idx)">
+          <!-- 中断/达到上限等终止原因：内联展示在该回答下方，不再额外渲染一条新的 bot 消息 -->
+          <div v-if="msg.notice" class="msg-notice" role="alert">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <span>{{ msg.notice }}</span>
+          </div>
           <template v-if="msg.role === 'assistant'">
             <span v-if="msg.modelName" class="msg-model-name">{{ msg.modelName }}</span>
             <span v-if="msg.completionTokens" class="msg-token-info">Token≈{{ fmtToken(msg.completionTokens) }}</span>

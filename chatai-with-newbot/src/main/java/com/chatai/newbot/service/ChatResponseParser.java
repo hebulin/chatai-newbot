@@ -53,23 +53,13 @@ public class ChatResponseParser {
     public List<String> transformAnthropicChunk(String chunk,
                                                 AtomicReference<Map<String, Object>> usageRef) {
         List<String> results = new ArrayList<>();
+        if (chunk == null) return results;
         try {
-            String json = stripSsePrefix(chunk);
-            if (json.isEmpty() || json.startsWith("event:") || json.equals("[DONE]")) return results;
-
-            Map<String, Object> parsed = objectMapper.readValue(json, Map.class);
-            String type = (String) parsed.get("type");
-            if (type == null) return results;
-
-            switch (type) {
-                case "message_start" -> captureAnthropicInputUsage(parsed, usageRef);
-                case "content_block_delta" -> appendAnthropicContentDelta(parsed, results);
-                case "message_delta" -> captureAnthropicOutputUsage(parsed, usageRef);
-                case "message_stop" -> appendFinalUsage(results, usageRef.get());
-                case "error" -> throw new UpstreamStreamException();
-                default -> {
-                    // content_block_start、content_block_stop、ping 等事件无需转发。
-                }
+            // 网络块边界不保证与 SSE 事件对齐：一个块可能包含 event: 行与多条 data: 行，
+            // 逐行取 data 负载解析，避免 message_start 等事件因 event: 前缀被整块丢弃。
+            for (String payload : dataPayloads(chunk)) {
+                Map<String, Object> parsed = objectMapper.readValue(payload, Map.class);
+                handleAnthropicEvent(parsed, results, usageRef);
             }
         } catch (UpstreamStreamException e) {
             throw e;
@@ -77,6 +67,30 @@ public class ChatResponseParser {
             log.trace("Anthropic chunk 解析跳过: {}", e.getMessage());
         }
         return results;
+    }
+
+    /** 按事件类型归一化单条 Anthropic 事件并更新 usage。 */
+    @SuppressWarnings("unchecked")
+    private void handleAnthropicEvent(Map<String, Object> parsed, List<String> results,
+                                      AtomicReference<Map<String, Object>> usageRef) throws Exception {
+        String type = (String) parsed.get("type");
+        if (type == null) return;
+        switch (type) {
+            case "message_start" -> captureAnthropicInputUsage(parsed, usageRef);
+            case "content_block_delta" -> appendAnthropicContentDelta(parsed, results);
+            case "message_delta" -> {
+                captureAnthropicOutputUsage(parsed, usageRef);
+                appendAnthropicStopReason(parsed, results);
+            }
+            case "message_stop" -> {
+                appendFinalUsage(results, usageRef.get());
+                results.add("[DONE]");
+            }
+            case "error" -> throw new UpstreamStreamException();
+            default -> {
+                // content_block_start、content_block_stop、ping 等事件无需转发。
+            }
+        }
     }
 
     /** 标识上游流内业务失败，交由流式客户端统一脱敏、终止与结算。 */
@@ -91,20 +105,36 @@ public class ChatResponseParser {
     @SuppressWarnings("unchecked")
     public void extractUsage(String chunk, AtomicReference<Map<String, Object>> usageRef) {
         try {
-            String json = stripSsePrefix(chunk);
-            if (json.isEmpty() || json.equals("[DONE]")) return;
-            Map<String, Object> parsed = objectMapper.readValue(json, Map.class);
-            Map<String, Object> usage = (Map<String, Object>) parsed.get("usage");
-            if (usage != null) usageRef.set(usage);
+            for (String payload : dataPayloads(chunk)) {
+                Map<String, Object> parsed = objectMapper.readValue(payload, Map.class);
+                Map<String, Object> usage = (Map<String, Object>) parsed.get("usage");
+                if (usage != null) usageRef.set(usage);
+            }
         } catch (Exception ignored) {
             // 非 JSON 或不含 usage 的增量内容无需处理。
         }
     }
 
-    /** 去除 SSE data 前缀并返回紧凑内容。 */
-    private String stripSsePrefix(String chunk) {
-        String json = chunk == null ? "" : chunk.trim();
-        return json.startsWith("data: ") ? json.substring(6).trim() : json;
+    /** 提取一个网络块中所有 `data:` 行的负载；兼容无前缀的裸 JSON，跳过 event: 行与 [DONE]。 */
+    private List<String> dataPayloads(String chunk) {
+        List<String> payloads = new ArrayList<>();
+        if (chunk == null) return payloads;
+        for (String line : chunk.split("\\r?\\n")) {
+            String trimmed = line.trim();
+            if (trimmed.isEmpty()) continue;
+            String payload;
+            if (trimmed.startsWith("data:")) {
+                payload = trimmed.substring(5).trim();
+            } else if (trimmed.startsWith("event:")) {
+                continue; // 事件类型行不携带数据，跳过
+            } else {
+                payload = trimmed; // 无前缀裸 JSON（非常规上游或单元测试）
+            }
+            if (!payload.isEmpty() && !payload.equals("[DONE]") && payload.startsWith("{")) {
+                payloads.add(payload);
+            }
+        }
+        return payloads;
     }
 
     /** 归一化 Anthropic message_start 中的输入与缓存 Token。 */
@@ -141,6 +171,16 @@ public class ChatResponseParser {
         if (outputTokens instanceof Number value) {
             getOrCreateUsage(usageRef).put("completion_tokens", value.intValue());
         }
+    }
+
+    /** 保留 Anthropic 的结束原因，避免达到输出上限后被页面误判为完整回答。 */
+    private void appendAnthropicStopReason(Map<String, Object> parsed, List<String> results) throws Exception {
+        if (!(parsed.get("delta") instanceof Map<?, ?> delta)) return;
+        Object reason = delta.get("stop_reason");
+        if (!(reason instanceof String value) || value.isBlank()) return;
+        String normalized = "max_tokens".equals(value) ? "length" : value;
+        results.add(objectMapper.writeValueAsString(Map.of("choices", List.of(
+                Map.of("index", 0, "delta", Map.of(), "finish_reason", normalized)))));
     }
 
     /** 在流结束时追加统一 usage chunk。 */

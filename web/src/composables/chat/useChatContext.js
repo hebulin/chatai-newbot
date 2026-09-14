@@ -8,7 +8,7 @@ export function useChatContext({ chatStore, modelsStore, streamChat, scrollFollo
   const contextUsageInfo = computed(() => {
     const msgs = chatStore.currentMessages
     if (!msgs.length || !chatStore.isChatHistoryLoaded) return null
-    const window_ = modelsStore.currentModelContextWindow
+    const window_ = modelsStore.currentModelContextWindow || 32000
     let used = 0
     // 与后端一致：仅计最后一个“清除上下文”分隔线之后的消息（倒序累计，遇分隔线停止）
     for (let i = msgs.length - 1; i >= 0; i--) {
@@ -60,13 +60,14 @@ export function useChatContext({ chatStore, modelsStore, streamChat, scrollFollo
       time: formatChatTime(),
       interrupted: true,
       status: draft.status && draft.status !== 'streaming' ? draft.status : 'offline',
+      notice: draft.notice || undefined,
       modelName: modelsStore.currentModelName
     }
     if (draft.usage) {
       restored.promptTokens = draft.usage.prompt_tokens || 0
       restored.completionTokens = draft.usage.completion_tokens || 0
       restored.reasoningTokens = draft.usage.completion_tokens_details?.reasoning_tokens || 0
-      restored.cachedTokens = draft.usage.prompt_tokens_details?.cached_tokens || 0
+      restored.cachedTokens = draft.usage.prompt_tokens_details?.cached_tokens ?? draft.usage.cached_tokens ?? 0
     }
     chatStore.addMessage(chatId, restored)
     streamChat.clearDraft(chatId)

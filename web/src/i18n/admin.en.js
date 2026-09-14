@@ -1,5 +1,17 @@
 // 后台管理英文词典：以现有中文文案作为稳定源文本，便于逐页迁移且中文模式零回归。
 export const ADMIN_EN = {
+  "上下文大小": "Context size",
+  "输出大小": "Output size",
+  "上下文大小（Token）": "Context size (tokens)",
+  "全局上下文大小": "Global context size",
+  "全局缺省值为 {default} Token；当前生效：{value}": "Global default: {default} tokens; currently active: {value}",
+  "上下文大小是输入、历史与输出的总容量，请按模型实际能力配置。未单独配置的模型继承全局设置。": "Context size is the total capacity for input, history, and output. Configure it according to the model capability. Models without overrides inherit the global setting.",
+  "输出大小是单次回答的上限，包含思考内容。未单独配置的模型继承全局设置。": "Output size caps each response, including reasoning. Models without overrides inherit the global setting.",
+  "请输入正整数。删除配置后恢复全局设置；留空不会自动填入默认值。": "Enter a positive integer. Deleting an override restores the global setting; blank inputs do not receive a default value.",
+  "系统会为输出保留空间，超出预算的早期历史按完整轮次裁剪。当前输入超出容量时会明确提示。": "Space is reserved for output. Earlier history is trimmed by complete turns when over budget. Input exceeding the capacity produces an explicit error.",
+  "不限制表示不额外设置输出上限，仍受上下文剩余空间及厂商限制影响。上下文不足时实际输出可能小于此值。": "Unlimited adds no output cap, but remaining context and provider limits still apply. Actual output may be smaller when context is insufficient.",
+  "配置加载失败，请重试": "Could not load settings. Please retry.",
+  '请先在模型管理中添加可用模型': 'Add an available model in Models first.',
   '管理后台': 'Admin Console',
   '切换主题': 'Toggle theme',
   '主题': 'Theme',
@@ -273,6 +285,11 @@ export const ADMIN_EN = {
   , '填 0 时按输出价格计算': '0 uses the output price'
   , '思考模式': 'Reasoning'
   , '上下文容量': 'Context Window'
+  , '最大输出 Token': 'Maximum Output Tokens'
+  , '不限制输出 Token': 'Do not limit output tokens'
+  , '不限制': 'Unlimited'
+  , '缺省 16384，包含思考 Token，可手动修改；不限制表示由上游决定，仍受厂商及上下文容量约束。': 'Defaults to 16,384, including reasoning tokens, and can be changed. Unlimited lets the upstream service decide, subject to provider and context-window limits.'
+  , '此协议要求指定输出预算，不限制时按剩余上下文估算；若厂商拒绝该预算，请设置厂商支持的最大输出值。': 'This protocol requires an output budget. Unlimited uses the estimated remaining context. If the provider rejects it, set a supported maximum output value.'
   , '模型上下文窗口 Token 数；0 或留空按默认 32000 处理，用于长对话预算管理': 'Model context-window tokens. 0 or blank uses the default 32,000 for long-chat budget management.'
   , '新建自定义厂商...': 'New custom provider...'
   , '厂商名称': 'Provider Name'
@@ -479,4 +496,40 @@ export const ADMIN_EN = {
   , '小时': 'h'
   , '已开启「{name}」健康检查': 'Health checks enabled for “{name}”'
   , '已关闭「{name}」健康检查': 'Health checks disabled for “{name}”'
+
+  , '模型 {name} 输出模式': 'Output mode for {name}'
+  , '请输入 1 至 2147483647 的整数': 'Enter an integer from 1 to 2147483647'
+  , '输出配置加载失败，请重新进入系统设置': 'Could not load output settings. Reopen System Settings.'
+  , '保存全局配置': 'Save Global Configuration'
+  , '指定上限': 'Set a Limit'
+  , '全局配置': 'Global Configuration'
+  , '单个模型设置优先；未设置时使用全局配置。保存后对新请求生效，Token 包含思考内容。': 'Model overrides take priority; unset models inherit the global setting. Changes apply to new requests. Tokens include reasoning.'
+  , '不限制仍受厂商和上下文容量约束；上游可能使用自身默认值。Anthropic 协议按剩余上下文估算输出预算，若被厂商拒绝，请设置其支持的明确上限。': 'Unlimited remains subject to provider and context limits; the upstream service may use its own default. Anthropic uses estimated remaining context. If rejected, set a supported explicit limit.'
+  , '单个模型设置': 'Model Overrides'
+  , '当前生效：{value}': 'Currently effective: {value}'
+  , '全局输出模式': 'Global Output Mode'
+  , '回答输出设置': 'Answer Output Settings'
+  , '模型 {name} 输出上限': 'Output limit for {name}'
+  , '编辑': 'Edit'
+  , '留空，继承全局': 'Unset, inherit global'
+  , '全局缺省值为 16384 Token；当前生效：{value}': 'Global default: 16,384 tokens. Currently effective: {value}'
+  , '全局输出上限': 'Global Output Limit'
+
+  , '点击新增，选择模型并填写 Token 上限。未配置的模型自动使用全局设置。': 'Click Add, select a model, and enter its token limit. Unconfigured models use the global setting.'
+  , '0 表示不限制；输入框留空不会自动填入默认值。': '0 means unlimited. Blank inputs are not filled with a default.'
+  , '配置 {index} 的 Token 上限': 'Token limit for configuration {index}'
+  , '该模型已有配置，请勿重复添加': 'This model already has a configuration. Do not add it twice.'
+  , '未添加单独配置的模型使用全局设置。保存后对新请求生效，Token 包含思考内容。': 'Models without an override use the global setting. Changes apply to new requests; tokens include reasoning.'
+  , '输出模式': 'Output Mode'
+  , '配置 {index} 的模型': 'Model for configuration {index}'
+  , '重试': 'Retry'
+  , '请输入 0 至 2147483647 的整数': 'Enter an integer from 0 to 2147483647'
+  , '只显示已添加的配置；删除配置后，该模型恢复使用全局设置。': 'Only added configurations appear here. Removing one restores the global setting for that model.'
+  , '不限制仍受厂商自身限制影响；部分协议需要自动估算输出预算。若厂商拒绝请求，请设置其支持的明确 Token 上限。': 'Unlimited remains subject to provider limits. Some protocols require an estimated output budget. If the provider rejects the request, set an explicit supported token limit.'
+  , '输出配置加载失败，请重试': 'Could not load output settings. Please retry.'
+  , '设置分类': 'Settings Categories'
+  , '暂无单个模型配置': 'No Model Configurations'
+  , '单个模型配置': 'Model Configuration'
+  , '设置加载失败，请重试': 'Could not load settings. Please retry.'
+  , '新增': 'Add'
 }

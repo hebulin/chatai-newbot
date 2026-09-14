@@ -16,7 +16,6 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Service
 public class BudgetReservationService {
-    private static final int MAX_OUTPUT_TOKENS = 32_000;
     private final StorageManager storageManager;
     private final Map<String, Object> userLocks = new ConcurrentHashMap<>();
     private final Map<String, Reservation> reservations = new ConcurrentHashMap<>();
@@ -34,9 +33,11 @@ public class BudgetReservationService {
      * @return 允许结果（含 requestId）或拒绝原因
      */
     public ReservationResult reserve(User user, ChatRequest request, ModelConfig model) {
-        int maxOutput = Math.max(1, Math.min(
-                request.getMax_tokens() <= 0 ? 6000 : request.getMax_tokens(), MAX_OUTPUT_TOKENS));
+        int maxOutput = OutputTokenPolicy.resolve(request, model, storageManager.getSetting(OutputTokenPolicy.GLOBAL_SETTING_KEY));
         request.setMax_tokens(maxOutput);
+        // 不限输出按模型上下文容量保守预占，避免大容量模型仍只预占旧的 32000。
+        if (maxOutput == 0) maxOutput = OutputTokenPolicy.contextWindow(model,
+                storageManager.getSetting(OutputTokenPolicy.CONTEXT_SETTING_KEY));
         long estimatedInput = estimateInputTokens(request);
         long estimatedTokens = estimatedInput + maxOutput;
         double estimatedCost = estimateCost(model, estimatedInput, maxOutput);
@@ -88,7 +89,7 @@ public class BudgetReservationService {
     }
 
     /**
-     * 估算请求输入 Token，文本按 4 字符/Token 近似，图片按固定 1024 Token 预留。
+     * 估算请求输入 Token，文本按 4 字符/Token 近似，图片按固定 1100 Token 预留。
      */
     private long estimateInputTokens(ChatRequest request) {
         long chars = 0;
@@ -99,7 +100,7 @@ public class BudgetReservationService {
                 if (message != null && message.getImages() != null) images += message.getImages().size();
             }
         }
-        return Math.max(1, (chars + 3) / 4) + images * 1024;
+        return Math.max(1, (chars + 3) / 4) + images * 1100;
     }
 
     /**

@@ -18,6 +18,7 @@ export function ensureMessageVersions(message) {
       time: message.time,
       status: message.status || (message.interrupted ? 'stopped' : 'done'),
       isError: message.isError || undefined,
+      notice: message.notice || undefined,
       usage: (message.promptTokens || message.completionTokens) ? {
         promptTokens: message.promptTokens || 0,
         completionTokens: message.completionTokens || 0,
@@ -39,6 +40,7 @@ export function applyMessageVersion(message, version) {
   message.time = version.time
   message.status = version.status
   message.isError = version.isError || undefined
+  message.notice = version.notice || undefined
   message.interrupted = (version.status && version.status !== 'done') || undefined
   message.promptTokens = version.usage?.promptTokens
   message.completionTokens = version.usage?.completionTokens
@@ -60,6 +62,7 @@ export function appendMessageVersion(message, versionData, makeCurrent) {
     time: versionData.time,
     status: versionData.status || 'done',
     isError: versionData.isError || undefined,
+    notice: versionData.notice || undefined,
     usage: versionData.usage
   }
   versions.push(version)

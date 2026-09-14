@@ -10,7 +10,7 @@ public class ChatRequest {
     private List<NewBotMessage> messages;
     private boolean stream = true;
     private double temperature = 0.7;
-    private int max_tokens = 6000;
+    private int max_tokens; // 0 表示使用模型输出配置，由统一策略解析
     private boolean deepThinking;
     private boolean webSearch; // 是否开启联网搜索（Tavily）
     private String promptPresetId; // 会话绑定的提示词预设 ID（角色），为空时使用用户全局启用的预设

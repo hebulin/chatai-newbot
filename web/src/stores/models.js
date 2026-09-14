@@ -50,11 +50,8 @@ export const useModelsStore = defineStore('models', () => {
     return models.value.find(m => m.id === currentModelId.value) || null
   })
 
-  // 当前模型的上下文容量（Token）：未配置时按默认 32000 估算（与后端 ContextBudgetService 一致）
-  const currentModelContextWindow = computed(() => {
-    const m = currentModel.value
-    return (m && m.contextWindow > 0) ? m.contextWindow : 32000
-  })
+  // 使用服务端解析过全局继承的上下文总容量。
+  const currentModelContextWindow = computed(() => currentModel.value?.contextWindow || 32000)
 
   function inferProviderId(model) {
     if (model.providerId) return model.providerId

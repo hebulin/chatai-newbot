@@ -18,6 +18,20 @@ public class SqliteSchemaInitializer {
         this.jdbcTemplate = jdbcTemplate;
     }
 
+    /** 首次升级为全局继承：旧的缺省 16384 改为 NULL，其他显式覆盖保留，后续启动不再重置。 */
+    private void initializeOutputInheritance() {
+        var transaction = new org.springframework.transaction.support.TransactionTemplate(
+                new org.springframework.jdbc.datasource.DataSourceTransactionManager(jdbcTemplate.getDataSource()));
+        transaction.executeWithoutResult(status -> {
+            int inserted = jdbcTemplate.update("INSERT OR IGNORE INTO t_setting(key,value) VALUES('chat_output_inheritance_v1','true')");
+            if (inserted > 0) {
+                jdbcTemplate.update("UPDATE t_model_config SET max_output_tokens=NULL WHERE max_output_tokens=16384");
+            }
+            jdbcTemplate.update("INSERT OR IGNORE INTO t_setting(key,value) VALUES(?,?)",
+                    OutputTokenPolicy.GLOBAL_SETTING_KEY, String.valueOf(OutputTokenPolicy.DEFAULT_MAX_OUTPUT_TOKENS));
+        });
+    }
+
     /**
      * 创建所有数据表（幂等操作）
      */
@@ -97,7 +111,9 @@ public class SqliteSchemaInitializer {
         ensureModelPricingColumns();
         // 老数据库补充健康检查开关列（幂等迁移，默认参与检查）
         ensureColumn("t_model_config", "health_check_enabled", "INTEGER DEFAULT 1");
-        // 老数据库补充上下文容量列（幂等迁移，0/NULL=未设置按默认 32000）
+        // 模型默认空值继承全局，0 代表管理员明确选择不限。
+        ensureColumn("t_model_config", "max_output_tokens", "INTEGER DEFAULT NULL");
+        // 恢复独立上下文列，保留升级前已经配置的模型容量。
         ensureColumn("t_model_config", "context_window", "INTEGER DEFAULT 0");
 
         // 会话上下文摘要缓存（纯服务端缓存，不参与多端同步）：
@@ -191,6 +207,11 @@ public class SqliteSchemaInitializer {
                 "key TEXT PRIMARY KEY," +
                 "value TEXT" +
                 ")");
+
+        // 全局设置表存在后，执行一次性的输出配置继承迁移。
+        initializeOutputInheritance();
+        jdbcTemplate.update("INSERT OR IGNORE INTO t_setting(key,value) VALUES(?,?)",
+                OutputTokenPolicy.CONTEXT_SETTING_KEY, String.valueOf(OutputTokenPolicy.DEFAULT_CONTEXT_WINDOW));
 
         // 登录 Token 持久化表（服务重启后登录态不丢失）
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_token (" +

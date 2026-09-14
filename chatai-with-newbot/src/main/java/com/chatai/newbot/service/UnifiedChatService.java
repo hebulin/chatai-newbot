@@ -70,23 +70,28 @@ public class UnifiedChatService {
             return Flux.just("{\"error\":{\"message\":\"该模型已被禁用\",\"type\":\"config_error\"}}");
         }
 
+        // 管理员不经过配额预占，仍须使用与普通用户一致的模型输出上限。
+        request.setMax_tokens(OutputTokenPolicy.resolve(request, config, storageService.getSetting(OutputTokenPolicy.GLOBAL_SETTING_KEY)));
+
         // 联网搜索：用户开启且全局启用时，用最后一条用户消息检索，将结果作为参考资料注入
         String searchContext = null;
         if (request.isWebSearch() && webSearchService.isEnabled()) {
             searchContext = webSearchService.searchAsContext(contextAssembler.lastUserText(request.getMessages()));
         }
 
-        // 长对话上下文预算管理：按模型上下文容量裁剪历史（替代单纯条数截断）。
+        // 上下文总容量与输出上限独立配置，当前问题优先保留，历史按剩余预算裁剪。
         // 当前输入本身超限时明确报错，不静默截掉用户关键内容。
         String systemPrompt = contextAssembler.resolveSystemPrompt(request, usageLog);
+        int contextWindow = OutputTokenPolicy.contextWindow(config,
+                storageService.getSetting(OutputTokenPolicy.CONTEXT_SETTING_KEY));
         ContextBudgetService.BudgetResult budget = contextBudgetService.applyBudget(
-                request.getMessages(), config, systemPrompt + (searchContext != null ? searchContext : ""),
-                request.getMax_tokens());
+                request.getMessages(), systemPrompt + (searchContext != null ? searchContext : ""),
+                contextWindow, request.getMax_tokens());
         if (budget.inputOverLimit) {
             observabilityService.chatRejected();
-            return Flux.just("{\"error\":{\"message\":\"当前输入内容已超出模型上下文容量（约 "
-                    + budget.estimatedPromptTokens + " / " + budget.contextWindow
-                    + " tokens），请精简输入、清除上下文或更换更大容量的模型\",\"type\":\"context_limit\"}}");
+            return Flux.just("{\"error\":{\"message\":\"当前输入内容已超出上下文容量（约 "
+                    + budget.estimatedPromptTokens + " / " + contextWindow
+                    + " tokens，还需保留输出空间），请精简输入或调整上下文大小\",\"type\":\"context_limit\"}}");
         }
         // 兼容兜底：条数上限仍然生效（取预算裁剪与条数上限的较小结果）
         List<NewBotMessage> limited = contextAssembler.applyMessageLimit(budget.messages);
@@ -113,6 +118,11 @@ public class UnifiedChatService {
                 return streamingChatClient.chatAnthropic(request, config, usageLog, searchContext, summaryContext, startNanos);
             }
             return streamingChatClient.chatOpenAI(request, config, usageLog, searchContext, summaryContext, startNanos);
+        } catch (com.chatai.newbot.exception.ApiException e) {
+            // 预算校验发生在最终协议组装阶段，返回明确的本地提示并补齐已开始的流计数。
+            observabilityService.chatFinished(ObservabilityService.ChatOutcome.FAILED);
+            return Flux.just(objectMapper.createObjectNode().set("error", objectMapper.createObjectNode()
+                    .put("message", e.getMessage()).put("type", "context_limit")).toString());
         } catch (RuntimeException e) {
             // 此时客户端尚未返回装饰后的 Flux，必须在这里补齐终态，返回错误流供控制器释放预算。
             observabilityService.chatFinished(ObservabilityService.ChatOutcome.FAILED);

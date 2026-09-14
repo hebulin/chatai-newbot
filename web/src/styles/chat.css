@@ -1030,9 +1030,30 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
     padding: 0 48px;
     font-size: 10px;
     color: var(--fg-3);
+    flex-wrap: wrap;
 }
 .msg-wrapper.user .msg-footer { justify-content: flex-end; }
 .msg-wrapper.assistant .msg-footer { justify-content: flex-start; }
+
+/* 回答消息下方的中断/达到上限内联提示：与该回答同一条消息内展示，不另起气泡 */
+.msg-notice {
+    flex-basis: 100%;
+    display: flex;
+    align-items: flex-start;
+    gap: 5px;
+    padding: 6px 10px;
+    border: 1px solid color-mix(in srgb, #e6a23c 40%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, #e6a23c 8%, transparent);
+    color: #e6a23c;
+    font-size: 12px;
+    line-height: 1.5;
+    word-break: break-word;
+}
+.msg-notice svg {
+    flex-shrink: 0;
+    margin-top: 2px;
+}
 .msg-model-name {
     color: var(--primary);
     font-weight: 500;

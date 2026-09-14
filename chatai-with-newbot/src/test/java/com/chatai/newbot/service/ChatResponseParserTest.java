@@ -16,6 +16,19 @@ class ChatResponseParserTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ChatResponseParser parser = new ChatResponseParser(objectMapper);
 
+    /** 输出上限事件即使不带 usage 也必须透传结束原因，结束标记不得覆盖该原因。 */
+    @Test
+    void transformAnthropicChunk_透传输出截断并保留最终用量() throws Exception {
+        AtomicReference<Map<String, Object>> usage = new AtomicReference<>();
+        var chunks = parser.transformAnthropicChunk(
+                "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"},\"usage\":{\"output_tokens\":65536}}", usage);
+        assertEquals("length", objectMapper.readTree(chunks.getFirst()).at("/choices/0/finish_reason").asText());
+        var done = parser.transformAnthropicChunk("{\"type\":\"message_stop\"}", usage);
+        assertEquals(65536, objectMapper.readTree(done.getFirst()).at("/usage/completion_tokens").asInt());
+        assertEquals("[DONE]", done.getLast());
+        assertEquals("[DONE]", parser.transformAnthropicChunk("{\"type\":\"message_stop\"}", new AtomicReference<>()).getFirst());
+    }
+
     /** 验证 OpenAI 与 Anthropic 非流式响应正文提取。 */
     @Test
     void extractNonStreamText_兼容两种协议() {
@@ -66,5 +79,16 @@ class ChatResponseParserTest {
 
         assertEquals(7, usageRef.get().get("prompt_tokens"));
         assertEquals(2, usageRef.get().get("completion_tokens"));
+    }
+
+    /** 一个网络块内混排 event: 行与 data: 行时仍须提取 usage，不被 event: 前缀整块丢弃。 */
+    @Test
+    void transformAnthropicChunk_多行Sse块不丢messageStart用量() throws Exception {
+        AtomicReference<Map<String, Object>> usageRef = new AtomicReference<>();
+        List<String> result = parser.transformAnthropicChunk(
+                "event: message_start\r\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":20,\"cache_read_input_tokens\":8}}}", usageRef);
+        assertEquals(20, usageRef.get().get("prompt_tokens"));
+        assertEquals(8, usageRef.get().get("cached_tokens"));
+        assertTrue(result.isEmpty());
     }
 }

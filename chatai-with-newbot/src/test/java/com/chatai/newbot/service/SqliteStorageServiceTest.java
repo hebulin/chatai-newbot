@@ -39,6 +39,67 @@ class SqliteStorageServiceTest {
     private static SqliteStorageService service;
     private static JdbcTemplate jdbcTemplate;
 
+    /** 旧缺省值只在首次升级时归为继承；自定义值和不限保留，后续手设 16384 不再被清空。 */
+    @Test
+    void outputInheritance_旧默认值只迁移一次且保留明确配置() {
+        DriverManagerDataSource dataSource = new DriverManagerDataSource();
+        dataSource.setUrl("jdbc:sqlite:" + tempDir.resolve("output-migration.db"));
+        JdbcTemplate db = new JdbcTemplate(dataSource);
+        SqliteSchemaInitializer initializer = new SqliteSchemaInitializer(db);
+        initializer.createTables();
+        db.update("DELETE FROM t_setting WHERE key='chat_output_inheritance_v1'");
+        db.update("INSERT INTO t_model_config(id,model_id,max_output_tokens) VALUES('old','old',16384),('custom','custom',65536),('unlimited','unlimited',0)");
+        initializer.createTables();
+        assertNull(db.queryForObject("SELECT max_output_tokens FROM t_model_config WHERE id='old'", Integer.class));
+        assertEquals(65536, db.queryForObject("SELECT max_output_tokens FROM t_model_config WHERE id='custom'", Integer.class));
+        assertEquals(0, db.queryForObject("SELECT max_output_tokens FROM t_model_config WHERE id='unlimited'", Integer.class));
+        db.update("UPDATE t_model_config SET max_output_tokens=16384 WHERE id='old'");
+        initializer.createTables();
+        assertEquals(16384, db.queryForObject("SELECT max_output_tokens FROM t_model_config WHERE id='old'", Integer.class));
+    }
+
+    /** 旧表补列可重复执行，模型输出配置经过新增、读回、更新后仍保持完整。 */
+    @Test
+    void modelOutput_迁移及配置持久化() {
+        new SqliteSchemaInitializer(jdbcTemplate).createTables();
+        ModelConfig model = new ModelConfig();
+        model.setModelId("long-output");
+        model.setMaxOutputTokens(65536);
+        ModelConfig saved = service.addModelConfig(model);
+        assertEquals(65536, service.getModelConfigById(saved.getId()).getMaxOutputTokens());
+        saved.setMaxOutputTokens(32768);
+        service.updateModelConfig(saved);
+        assertEquals(32768, service.getModelConfigById(saved.getId()).getMaxOutputTokens());
+        saved.setMaxOutputTokens(0);
+        service.updateModelConfig(saved);
+        assertEquals(0, service.getModelConfigById(saved.getId()).getMaxOutputTokens());
+        saved.setMaxOutputTokens(null);
+        service.updateModelConfig(saved);
+        assertNull(service.getModelConfigById(saved.getId()).getMaxOutputTokens());
+    }
+
+    /** 新版本恢复上下文列后保留旧容量，两个专用列更新互不覆盖。 */
+    @Test
+    void modelContext_保留旧容量并独立清空覆盖() {
+        ModelConfig model = new ModelConfig();
+        model.setModelId("legacy-context");
+        model.setContextWindow(200000);
+        model.setMaxOutputTokens(65536);
+        ModelConfig saved = service.addModelConfig(model);
+        SqliteSchemaInitializer schema = new SqliteSchemaInitializer(jdbcTemplate);
+        schema.createTables();
+        ModelConfigRepository repository = new ModelConfigRepository(jdbcTemplate);
+        assertEquals(200000, repository.findAll().stream().filter(item -> saved.getId().equals(item.getId())).findFirst().orElseThrow().getContextWindow());
+        assertTrue(repository.updateOutputLimit(saved.getId(), 0));
+        assertEquals(200000, repository.findAll().stream().filter(item -> saved.getId().equals(item.getId())).findFirst().orElseThrow().getContextWindow());
+        assertTrue(repository.updateContextWindow(saved.getId(), null));
+        assertNull(repository.findAll().stream().filter(item -> saved.getId().equals(item.getId())).findFirst().orElseThrow().getContextWindow());
+        assertEquals(0, repository.findAll().stream().filter(item -> saved.getId().equals(item.getId())).findFirst().orElseThrow().getMaxOutputTokens());
+        assertTrue(repository.updateContextWindow(saved.getId(), 128000));
+        schema.createTables();
+        assertEquals(128000, new ModelConfigRepository(jdbcTemplate).findAll().stream().filter(item -> saved.getId().equals(item.getId())).findFirst().orElseThrow().getContextWindow());
+    }
+
     @BeforeAll
     static void setup() {
         originalUserDir = System.getProperty("user.dir");

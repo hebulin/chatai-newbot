@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div class="system-settings">
     <div class="section-header">
       <div class="section-title">
         <span class="section-eyebrow">06 / SETTINGS · {{ $adminText('设置') }}</span>
@@ -7,7 +7,20 @@
       </div>
     </div>
 
-    <div class="admin-card" v-loading="loading">
+    <div class="settings-shell">
+      <nav class="settings-menu" :aria-label="$adminText('设置分类')">
+        <RouterLink v-for="item in sections" :key="item.id" :to="{ name: 'Settings', query: { section: item.id } }" custom v-slot="{ href, navigate }">
+          <a :href="href" @click="navigate" :class="['settings-menu-link', { 'is-current': activeSection === item.id }]"
+            :aria-current="activeSection === item.id ? 'page' : undefined">
+            {{ $adminText(item.label) }}
+          </a>
+        </RouterLink>
+      </nav>
+      <div class="settings-content">
+        <ChatOutputSettings kind="context" v-if="visitedSections.has('context')" v-show="activeSection === 'context'" />
+        <ChatOutputSettings kind="output" v-if="visitedSections.has('output')" v-show="activeSection === 'output'" />
+
+    <div class="admin-card" v-if="activeSection === 'storage'" v-loading="loading">
       <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;color:var(--ink);">{{ $adminText('存储模式') }}</h3>
 
       <div style="display:flex;gap:32px;margin-bottom:20px;flex-wrap:wrap;">
@@ -28,7 +41,7 @@
       </div>
     </div>
 
-    <div class="admin-card" v-loading="observabilityLoading" style="margin-top:20px;">
+    <div class="admin-card" v-if="activeSection === 'observability'" v-loading="observabilityLoading">
       <div class="observability-heading">
         <div>
           <h3 style="font-size:16px;font-weight:600;margin:0 0 4px;color:var(--ink);">{{ $adminText('运行状态') }}</h3>
@@ -70,7 +83,7 @@
       </el-table>
     </div>
 
-    <div class="admin-card" v-loading="healthLoading" style="margin-top:20px;">
+    <div class="admin-card" v-if="activeSection === 'health'" v-loading="healthLoading">
       <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;color:var(--ink);">{{ $adminText('模型健康检查') }}</h3>
 
       <div class="security-setting-row">
@@ -104,7 +117,7 @@
       </div>
     </div>
 
-    <div class="admin-card" v-loading="quotaLoading" style="margin-top:20px;">
+    <div class="admin-card" v-if="activeSection === 'quota'" v-loading="quotaLoading">
       <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;color:var(--ink);">{{ $adminText('调用限制') }}</h3>
 
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
@@ -149,7 +162,7 @@
       </div>
     </div>
 
-    <div class="admin-card" v-loading="billingLoading" style="margin-top:20px;">
+    <div class="admin-card" v-if="activeSection === 'billing'" v-loading="billingLoading">
       <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;color:var(--ink);">{{ $adminText('计费与币种') }}</h3>
       <div class="billing-row">
         <span class="billing-label">{{ $adminText('默认展示') }}</span>
@@ -185,7 +198,7 @@
       </div>
     </div>
 
-    <div class="admin-card" v-loading="securityLoading" style="margin-top:20px;">
+    <div class="admin-card" v-if="activeSection === 'security'" v-loading="securityLoading">
       <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;color:var(--ink);">{{ $adminText('安全设置') }}</h3>
 
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
@@ -221,11 +234,15 @@
       </div>
     </div>
 
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onActivated } from 'vue'
+import { computed, ref, watch, onActivated } from 'vue'
+import { useRoute } from 'vue-router'
+import ChatOutputSettings from '@/components/admin/ChatOutputSettings.vue'
 import { ElMessage } from 'element-plus'
 import { getStorageSettings, getQuotaSettings, setQuotaSettings, getSecuritySettings, setSecuritySettings, getBillingSettings, setBillingSettings, getObservability, getObservabilityHistory, getHealthCheckSettings, setHealthCheckSettings } from '@/api/settings'
 import { getModels, updateModel } from '@/api/models'
@@ -321,28 +338,38 @@ async function loadSettings(silent = false) {
   }
 }
 
-onMounted(() => {
-  loadSettings()
-  loadObservability()
-  loadQuota()
-  loadSecurity()
-  loadBilling()
-  loadHealth()
-})
+const route = useRoute()
+const sections = [
+  { id: 'context', label: '上下文大小' },
+  { id: 'output', label: '输出大小' },
+  { id: 'quota', label: '调用限制' },
+  { id: 'security', label: '安全设置' },
+  { id: 'billing', label: '计费与币种' },
+  { id: 'health', label: '模型健康检查' },
+  { id: 'observability', label: '运行状态' },
+  { id: 'storage', label: '存储模式' }
+]
+const activeSection = computed(() => sections.some(item => item.id === route.query.section) ? route.query.section : 'context')
+const visitedSections = ref(new Set())
 
-// keep-alive 缓存下再次进入本页时静默刷新各分区设置；
-// 首次挂载由 onMounted 负责加载，跳过第一次激活避免重复请求
+/** 首次进入分类时才加载接口；切换分类保留尚未保存的表单，不批量加载整页。 */
+async function loadSection(section, refresh = false) {
+  if (visitedSections.value.has(section) && !refresh) return
+  visitedSections.value.add(section)
+  const loaders = { storage: loadSettings, observability: loadObservability, health: loadHealth,
+    quota: loadQuota, security: loadSecurity, billing: loadBilling }
+  try { await loaders[section]?.(refresh) } catch {
+    visitedSections.value.delete(section)
+    ElMessage.error(adminText('设置加载失败，请重试'))
+  }
+}
+
+watch(activeSection, section => loadSection(section), { immediate: true })
 let firstActivation = true
 onActivated(() => {
   if (firstActivation) { firstActivation = false; return }
-  loadSettings(true)
-  loadObservability(true)
-  loadQuota(true)
-  loadSecurity(true)
-  loadBilling(true)
-  loadHealth(true)
+  loadSection(activeSection.value, true)
 })
-
 // 加载持久累计快照和最近 24 小时时间序列；静默刷新时不显示整卡遮罩
 async function loadObservability(silent = false) {
   if (!silent) observabilityLoading.value = true
@@ -512,9 +539,21 @@ async function handleSaveBilling() {
 </script>
 
 <style scoped>
-.billing-row,.currency-row{display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap}.billing-label{width:150px;font-size:13px;color:var(--ink-3)}.currency-table{padding:14px;border:1px solid var(--line);border-radius:8px;background:var(--paper-2)}.currency-rate-prefix,.currency-code-label{font-size:12px;color:var(--ink-3)}.settings-note{margin-top:16px;font-size:13px;color:var(--ink-3);line-height:1.8;background:var(--paper-2);padding:12px 16px;border-radius:8px;border:1px solid var(--line)}
+.settings-shell{display:grid;grid-template-columns:200px minmax(0,1fr);gap:24px;align-items:start}
+.settings-menu{display:flex;flex-direction:column;gap:2px;position:sticky;top:0;padding:4px;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper-2)}
+.settings-menu-link{display:block;padding:10px 12px;border-radius:var(--radius-sm);color:var(--ink-2);font-size:13px;text-decoration:none;white-space:nowrap;transition:background 0.15s ease,color 0.15s ease}
+.settings-menu-link:hover{background:var(--paper);color:var(--ink)}
+.settings-menu-link.is-current{background:var(--paper);color:var(--primary);font-weight:600;box-shadow:inset 2px 0 0 var(--primary)}
+.settings-menu-link:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.settings-content{min-width:0}
+.settings-content :deep(.admin-card){margin-top:0}
+.settings-content :deep(h3){text-wrap:balance}
+.settings-content :deep(p){text-wrap:pretty}
+.metric-item strong{font-variant-numeric:tabular-nums}
+@media(max-width:768px){.settings-shell{grid-template-columns:minmax(0,1fr);gap:16px}.settings-menu{position:static;flex-direction:row;overflow-x:auto;max-width:100%;padding:4px}.settings-menu-link{flex:0 0 auto;padding:9px 12px}.settings-content :deep(.admin-card){padding:18px}.health-model-row{flex-wrap:wrap}.health-model-name{max-width:100%}}
+.billing-row,.currency-row{display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap}.billing-label{width:150px;font-size:13px;color:var(--ink-3)}.currency-table{padding:14px;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper-2)}.currency-rate-prefix,.currency-code-label{font-size:12px;color:var(--ink-3)}.settings-note{margin-top:16px;font-size:13px;color:var(--ink-3);line-height:1.8;background:var(--paper-2);padding:12px 16px;border-radius:var(--radius);border:1px solid var(--line)}
 .security-setting-row{display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}.security-setting-row-top{align-items:flex-start}.security-setting-label{width:150px;font-size:13px;color:var(--ink-3);flex:0 0 auto}
-.observability-heading{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:16px}.observability-subtitle{font-size:12px;color:var(--ink-3)}.observability-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}.metric-item{display:flex;flex-direction:column;gap:6px;padding:14px;border:1px solid var(--line);border-radius:8px;background:var(--paper-2)}.metric-item span{font-size:12px;color:var(--ink-3)}.metric-item strong{font-size:16px;color:var(--ink);font-weight:600}
+.observability-heading{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:16px}.observability-subtitle{font-size:12px;color:var(--ink-3)}.observability-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}.metric-item{display:flex;flex-direction:column;gap:6px;padding:14px;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper-2)}.metric-item span{font-size:12px;color:var(--ink-3)}.metric-item strong{font-size:16px;color:var(--ink);font-weight:600}
 .metrics-period{margin-top:12px;font-size:12px;color:var(--ink-3)}.observability-history-heading{display:flex;justify-content:space-between;gap:12px;align-items:center;margin:20px 0 10px;font-size:13px;font-weight:600;color:var(--ink)}.observability-history-heading span:last-child{font-size:12px;font-weight:400;color:var(--ink-3)}.observability-history-table{width:100%}
-.health-model-list{border:1px solid var(--line);border-radius:8px;background:var(--paper-2);padding:6px 14px;max-height:320px;overflow-y:auto}.health-model-row{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--line)}.health-model-row:last-child{border-bottom:none}.health-model-name{font-size:13px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px}.health-model-provider{font-size:12px;color:var(--ink-3)}.health-model-disabled{font-size:12px;color:#f59e0b}.health-model-row .el-switch{margin-left:auto}
+.health-model-list{border:1px solid var(--line);border-radius:var(--radius);background:var(--paper-2);padding:6px 14px;max-height:320px;overflow-y:auto}.health-model-row{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--line)}.health-model-row:last-child{border-bottom:none}.health-model-name{font-size:13px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px}.health-model-provider{font-size:12px;color:var(--ink-3)}.health-model-disabled{font-size:12px;color:#f59e0b}.health-model-row .el-switch{margin-left:auto}
 </style>

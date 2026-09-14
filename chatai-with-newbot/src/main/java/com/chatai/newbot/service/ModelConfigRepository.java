@@ -43,6 +43,8 @@ public class ModelConfigRepository {
         model.setOutputPriceCny(resultSet.getDouble("output_price_cny"));
         model.setCachedPriceCny(resultSet.getDouble("cached_price_cny"));
         model.setReasoningPriceCny(resultSet.getDouble("reasoning_price_cny"));
+        int maxOutputTokens = resultSet.getInt("max_output_tokens");
+        model.setMaxOutputTokens(resultSet.wasNull() ? null : maxOutputTokens);
         int contextWindow = resultSet.getInt("context_window");
         model.setContextWindow(resultSet.wasNull() || contextWindow <= 0 ? null : contextWindow);
         return model;
@@ -66,7 +68,7 @@ public class ModelConfigRepository {
     /** 插入模型配置并使缓存失效。 */
     public void insert(ModelConfig model) {
         jdbcTemplate.update(
-                "INSERT INTO t_model_config (id, provider_id, provider_name, provider_icon, model_id, display_name, api_key, api_url, protocol, thinking_param_type, supports_thinking, supports_multimodal, enabled, visible_to_all, health_check_enabled, built_in, created_at, test_latency_ms, test_speed, tested_at, input_price_cny, output_price_cny, cached_price_cny, reasoning_price_cny, context_window) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO t_model_config (id, provider_id, provider_name, provider_icon, model_id, display_name, api_key, api_url, protocol, thinking_param_type, supports_thinking, supports_multimodal, enabled, visible_to_all, health_check_enabled, built_in, created_at, test_latency_ms, test_speed, tested_at, input_price_cny, output_price_cny, cached_price_cny, reasoning_price_cny, max_output_tokens, context_window) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 values(model));
         invalidateCache();
     }
@@ -78,7 +80,7 @@ public class ModelConfigRepository {
         System.arraycopy(values, 1, updateValues, 0, values.length - 1);
         updateValues[updateValues.length - 1] = model.getId();
         jdbcTemplate.update(
-                "UPDATE t_model_config SET provider_id=?, provider_name=?, provider_icon=?, model_id=?, display_name=?, api_key=?, api_url=?, protocol=?, thinking_param_type=?, supports_thinking=?, supports_multimodal=?, enabled=?, visible_to_all=?, health_check_enabled=?, built_in=?, created_at=?, test_latency_ms=?, test_speed=?, tested_at=?, input_price_cny=?, output_price_cny=?, cached_price_cny=?, reasoning_price_cny=?, context_window=? WHERE id=?",
+                "UPDATE t_model_config SET provider_id=?, provider_name=?, provider_icon=?, model_id=?, display_name=?, api_key=?, api_url=?, protocol=?, thinking_param_type=?, supports_thinking=?, supports_multimodal=?, enabled=?, visible_to_all=?, health_check_enabled=?, built_in=?, created_at=?, test_latency_ms=?, test_speed=?, tested_at=?, input_price_cny=?, output_price_cny=?, cached_price_cny=?, reasoning_price_cny=?, max_output_tokens=?, context_window=? WHERE id=?",
                 updateValues);
         invalidateCache();
     }
@@ -95,6 +97,20 @@ public class ModelConfigRepository {
         cache = null;
     }
 
+    /** 仅更新模型输出覆盖值，NULL 恢复继承，避免修改其他模型字段或凭据。 */
+    public boolean updateOutputLimit(String id, Integer limit) {
+        boolean updated = jdbcTemplate.update("UPDATE t_model_config SET max_output_tokens=? WHERE id=?", limit, id) > 0;
+        invalidateCache();
+        return updated;
+    }
+
+    /** 仅更新上下文容量覆盖，清空时写 0 兼容旧库列约束，读取时按继承处理。 */
+    public boolean updateContextWindow(String id, Integer size) {
+        boolean updated = jdbcTemplate.update("UPDATE t_model_config SET context_window=? WHERE id=?", size == null ? 0 : size, id) > 0;
+        invalidateCache();
+        return updated;
+    }
+
     /** 将模型配置转换为插入语句参数。 */
     private Object[] values(ModelConfig model) {
         return new Object[] {
@@ -107,7 +123,7 @@ public class ModelConfigRepository {
                 model.isBuiltIn() ? 1 : 0, model.getCreatedAt(), model.getTestLatencyMs(), model.getTestSpeed(),
                 model.getTestedAt(), nonNegative(model.getInputPriceCny()), nonNegative(model.getOutputPriceCny()),
                 nonNegative(model.getCachedPriceCny()), nonNegative(model.getReasoningPriceCny()),
-                model.getContextWindow() == null ? 0 : Math.max(0, model.getContextWindow())
+                model.getMaxOutputTokens(), model.getContextWindow()
         };
     }
 

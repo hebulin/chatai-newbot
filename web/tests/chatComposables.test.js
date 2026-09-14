@@ -28,6 +28,7 @@ vi.mock('@/api/chat', () => ({
 
 import { useChatStreaming } from '@/composables/chat/useChatStreaming'
 import { useChatMessageActions } from '@/composables/chat/useChatMessageActions'
+import { useChatContext } from '@/composables/chat/useChatContext'
 import { useChatStore } from '@/stores/chat'
 import { saveChatHistory } from '@/api/chat'
 
@@ -74,6 +75,22 @@ beforeEach(() => {
 })
 
 describe('聊天流式状态机', () => {
+  /** 恢复草稿应保留长度终态、原因和正文，二次恢复不能生成重复消息。 */
+  it('从持久化草稿恢复达到上限原因且保持幂等', () => {
+    const harness = createStreamingHarness()
+    harness.streamChat.loadDraft = vi.fn(() => ({
+      content: '部分回答', status: 'length', notice: '回答已达到输出上限'
+    }))
+    harness.streamChat.clearDraft = vi.fn()
+    const context = useChatContext({ ...harness, t: key => key })
+    context.restoreStreamDraftIfAny()
+    expect(harness.chatStore.chats['chat-1'][1]).toMatchObject({
+      content: '部分回答', status: 'length', interrupted: true, notice: '回答已达到输出上限'
+    })
+    context.restoreStreamDraftIfAny()
+    expect(harness.chatStore.addMessage).toHaveBeenCalledTimes(1)
+  })
+
   it('正常结算回答、用量与当前轮输入 Token 且仅触发一次自动标题', async () => {
     const harness = createStreamingHarness()
     harness.streamChat.send.mockImplementation(async (body, handlers) => {

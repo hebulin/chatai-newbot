@@ -8,11 +8,16 @@ import com.chatai.newbot.service.StorageManager;
 import com.chatai.newbot.service.UnifiedChatService;
 import com.chatai.newbot.service.SvgAvatarService;
 import com.chatai.newbot.service.ObservabilityService;
+import com.chatai.newbot.service.OutputTokenPolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.context.request.NativeWebRequest;
+import org.springframework.web.context.request.async.DeferredResult;
+import org.springframework.web.context.request.async.DeferredResultProcessingInterceptor;
+import org.springframework.web.context.request.async.WebAsyncUtils;
 import reactor.core.publisher.Flux;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -54,6 +59,7 @@ public class ChatController {
                 : ResponseEntity.status(503).build();
     }
 
+    /** 接收聊天请求，统一鉴权、配额预占和流式响应生命周期。 */
     @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> chat(@RequestBody ChatRequest request, HttpServletRequest httpRequest) {
         User user = (User) httpRequest.getAttribute("currentUser");
@@ -123,12 +129,25 @@ public class ChatController {
         usageLog.setDeepThinking(request.isDeepThinking());
 
         String finalRequestId = requestId;
+        configureChatStreamTimeout(httpRequest);
         // 逻辑聊天请求计数在 UnifiedChatService 确定进入流式阶段时记录（前置拒绝不计），
         // 终态分类（成功/失败/取消/超时）由其在流真实终止点记录，避免
         // onErrorResume 把上游异常转成正常 SSE 错误消息后漏记失败
         return chatService.chat(request, modelConfigId, usageLog)
                 .doFinally(signal -> {
                     budgetReservationService.release(finalRequestId);
+                });
+    }
+
+    /** 仅聊天流取消 Servlet 总时长限制，保留上游及浏览器的五分钟无数据超时。 */
+    private void configureChatStreamTimeout(HttpServletRequest request) {
+        WebAsyncUtils.getAsyncManager(request).registerDeferredResultInterceptor("chatStreamTimeout",
+                new DeferredResultProcessingInterceptor() {
+                    /** 异步上下文启动后覆盖全局 120 秒超时，避免截断仍在持续输出的长回答。 */
+                    @Override
+                    public <T> void preProcess(NativeWebRequest webRequest, DeferredResult<T> result) {
+                        if (request.isAsyncStarted()) request.getAsyncContext().setTimeout(0L);
+                    }
                 });
     }
 
@@ -154,8 +173,9 @@ public class ChatController {
             item.put("supportsThinking", m.isSupportsThinking());
             item.put("supportsMultimodal", m.isSupportsMultimodal());
             item.put("thinkingParamType", m.getThinkingParamType());
-            // 上下文容量（Token）：前端展示预计上下文占用用；0/null 表示未配置（按默认 32000 估算）
-            item.put("contextWindow", m.getContextWindow());
+            // 返回已解析的模型上下文容量，前端占用展示与全局继承保持一致。
+            item.put("contextWindow", OutputTokenPolicy.contextWindow(m,
+                    storageService.getSetting(OutputTokenPolicy.CONTEXT_SETTING_KEY)));
             modelList.add(item);
         }
 
@@ -634,4 +654,3 @@ public class ChatController {
         return result;
     }
 }
-

@@ -64,6 +64,7 @@ public class AdminModelController {
         return result;
     }
 
+    /** 更新模型配置，旧客户端未携带输出配置时保留已有设置。 */
     @PutMapping("/models/{id}")
     public Map<String, Object> updateModel(@PathVariable String id, @RequestBody ModelConfig config,
                                             HttpServletRequest request) {
@@ -71,6 +72,11 @@ public class AdminModelController {
         Map<String, Object> result = new HashMap<>();
         // 如果 API Key 为空或是脱敏值（含*），保留原来的 Key
         ModelConfig existing = storageService.getModelConfigById(id);
+        // 输出覆盖统一由系统设置专用接口维护，忽略旧模型编辑页携带的陈旧值。
+        if (existing != null) {
+            config.setMaxOutputTokens(existing.getMaxOutputTokens());
+            config.setContextWindow(existing.getContextWindow());
+        }
         if (existing != null && (config.getApiKey() == null || config.getApiKey().isEmpty()
                 || config.getApiKey().contains("*"))) {
             config.setApiKey(existing.getApiKey());
@@ -361,6 +367,7 @@ public class AdminModelController {
         copy.setOutputPriceCny(m.getOutputPriceCny());
         copy.setCachedPriceCny(m.getCachedPriceCny());
         copy.setReasoningPriceCny(m.getReasoningPriceCny());
+        copy.setMaxOutputTokens(m.getMaxOutputTokens());
         copy.setContextWindow(m.getContextWindow());
         return copy;
     }

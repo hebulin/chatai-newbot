@@ -534,7 +534,7 @@ async function checkAnnouncement() {
     if (sessionStorage.getItem('announcement_shown') === key) return
     const dontRemind = ref(false)
     await ElMessageBox({
-      title: '📢 ' + (((res && res.title) || '').trim() || t('chat.announcementTitle')),
+      title: ((res && res.title) || '').trim() || t('chat.announcementTitle'),
       message: () => h('div', null, [
         h('div', { style: 'white-space:pre-wrap;max-height:50vh;overflow:auto;' }, content),
         h(ElCheckbox, {

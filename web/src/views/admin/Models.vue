@@ -124,7 +124,7 @@
                 <el-icon v-if="testingIds.has(row.id)" class="is-loading"><Loading /></el-icon>
                 <el-icon v-else><Connection /></el-icon>
               </el-button>
-              <el-button size="small" text @click="editModel(row)">
+              <el-button size="small" text :aria-label="$adminText('编辑')" @click="editModel(row)">
                 <el-icon><Edit /></el-icon>
               </el-button>
               <el-button size="small" text type="danger" @click="handleDelete(row)">
@@ -192,10 +192,6 @@
         </el-form-item>
         <el-form-item :label="$adminText('多模态')">
           <el-switch v-model="editForm.supportsMultimodal" />
-        </el-form-item>
-        <el-form-item :label="$adminText('上下文容量')">
-          <el-input-number v-model="editForm.contextWindow" :min="0" :step="1000" style="width:100%" />
-          <div style="font-size:11px;color:var(--ink-3);margin-top:2px;">{{ $adminText('模型上下文窗口 Token 数；0 或留空按默认 32000 处理，用于长对话预算管理') }}</div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -517,11 +513,13 @@ async function handleTest(row) {
 const editVisible = ref(false)
 const editForm = ref({})
 
+/** 打开模型编辑表单。 */
 function editModel(row) {
   editForm.value = { ...row }
   editVisible.value = true
 }
 
+/** 保存模型基本配置；输出设置统一在系统设置中维护。 */
 async function saveModel() {
   submitting.value = true
   try {

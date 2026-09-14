@@ -15,8 +15,8 @@ const DRAFT_KEY_PREFIX = 'chatai-stream-draft:'
 /**
  * 流式回答生命周期状态：
  * idle=未开始，streaming=生成中，done=正常完成（收到有效结束信号），
- * stopped=用户主动停止，offline=网络中断，timeout=超时，failed=失败/流内错误
- * 约定：只有明确收到 [DONE] 或正常流结束才记为 done；连接结束但未收到有效完成信号按中断处理
+ * stopped=用户主动停止，offline=网络中断，timeout=超时，failed=失败/流内错误，length=输出达到上限
+ * 约定：收到 [DONE] 或有效 finish_reason 才按结束原因结算；单纯 HTTP EOF 按中断处理
  */
 export const STREAM_STATUS = {
   IDLE: 'idle',
@@ -25,9 +25,11 @@ export const STREAM_STATUS = {
   STOPPED: 'stopped',
   OFFLINE: 'offline',
   TIMEOUT: 'timeout',
-  FAILED: 'failed'
+  FAILED: 'failed',
+  LENGTH: 'length'
 }
 
+/** 管理 SSE 读取、完整内容累积、结束原因及草稿恢复。 */
 export function useStreamChat() {
   const router = useRouter()
   const isStreaming = ref(false)
@@ -52,6 +54,7 @@ export function useStreamChat() {
   let draftChatId = null
   let draftUsage = null
   let sawDoneSignal = false
+  let finishReason = null
   // 草稿节流持久化计时器
   let draftTimer = null
 
@@ -85,6 +88,7 @@ export function useStreamChat() {
         thinkingTime: thinkingTime.value,
         usage: draftUsage,
         status: status.value,
+        notice: error.value || undefined,
         savedAt: Date.now()
       }
       localStorage.setItem(draftKey(draftChatId), JSON.stringify(snapshot))
@@ -138,6 +142,7 @@ export function useStreamChat() {
     }
   }
 
+  /** 清空上次请求状态，为新流准备独立缓冲区和结束原因。 */
   function reset() {
     buffer = ''
     thinkingContent.value = ''
@@ -149,6 +154,7 @@ export function useStreamChat() {
     abortReason = null
     settled = false
     sawDoneSignal = false
+    finishReason = null
     draftChatId = null
     draftUsage = null
     status.value = STREAM_STATUS.IDLE
@@ -208,6 +214,8 @@ export function useStreamChat() {
       if (onError) onError(new Error(result.error))
       return
     }
+    // 中断/达到上限等有内容的终态：结果写入最后一条回答消息本身，
+    // 终止原因仅作为该消息下方内联提示（notice），不再追加独立错误气泡
     if (onDone) onDone(result)
   }
 
@@ -222,6 +230,9 @@ export function useStreamChat() {
       thinkingTime: thinkingTime.value,
       usage: usage.value,
       status: status.value,
+      finishReason,
+      // 透传终止原因文案供消息下方内联提示展示（结算时以 settle 覆盖为终态）
+      notice: error.value || undefined,
       ...extra
     }
   }
@@ -250,7 +261,6 @@ export function useStreamChat() {
     // 流式期间监听浏览器网络状态变化
     window.addEventListener('offline', onOfflineAbort)
 
-    let hasResponse = false
     // 首响应超时：服务端迟迟未返回响应头（网关排队/服务挂起）时主动中断
     resetIdleTimer(FIRST_RESPONSE_TIMEOUT, 'timeout')
 
@@ -291,101 +301,82 @@ export function useStreamChat() {
       const reader = resp.body.getReader()
       const decoder = new TextDecoder()
 
-      const read = async () => {
-        // 进入流读取阶段：超时窗口切换为流空闲超时，每次收到 chunk 重置
-        resetIdleTimer(STREAM_IDLE_TIMEOUT, 'timeout')
-        const result = await reader.read()
-        if (result.done) {
-          // 处理 buffer 中残留数据（可能是未以换行结尾的最后一行 data: 事件）
-          let remaining = buffer.trim()
-          if (remaining.startsWith('data:')) remaining = remaining.slice(5).trim()
-          if (remaining && remaining !== '[DONE]' && remaining.startsWith('{')) {
-            try {
-              const json = JSON.parse(remaining)
-              if (json.error) {
-                error.value = json.error.message || '未知错误'
-              }
-            } catch (e) { /* skip */ }
-          }
-          finalizeThinkingTime()
-          // 连接结束但未收到有效完成信号且有未解释的错误：按中断处理而非标记完整
-          if (!sawDoneSignal && error.value) {
-            settle(STREAM_STATUS.FAILED, buildResult({ error: error.value, interrupted: true }), { onDone, onError })
-            return
-          }
-          settle(STREAM_STATUS.DONE, buildResult({ error: error.value || undefined }), { onDone, onError })
-          return
+      /** 完整行和 EOF 尾行使用同一解析路径，保留最后一段正文、用量及结束原因。 */
+      const processLine = rawLine => {
+        const line = rawLine.trim()
+        if (!line.startsWith('data:')) return false
+        const payload = line.slice(5).trim()
+        if (payload === '[DONE]') {
+          sawDoneSignal = true
+          return false
         }
-
-        const chunk = decoder.decode(result.value, { stream: true })
-        buffer += chunk
-        // 按行解析 SSE：仅保留最后一行（可能不完整）在 buffer 中，其余整行处理。
-        // 此前用字面量 'data:' 切分，当模型正文本身包含 'data:' 时会解析错乱、内容丢失。
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
+        if (!payload.startsWith('{')) return false
+        let json
+        try { json = JSON.parse(payload) } catch (e) { return false }
+        if (json.error) {
+          error.value = json.error.message || '未知错误'
+          return false
+        }
+        if (json.usage) {
+          usage.value = json.usage
+          draftUsage = json.usage
+        }
+        const choice = json.choices?.[0]
+        if (choice?.finish_reason) {
+          finishReason = choice.finish_reason
+          sawDoneSignal = true
+        }
+        const delta = choice?.delta
+        if (!delta) return false
         let updated = false
-
-        for (const rawLine of lines) {
-          const line = rawLine.trim()
-          if (!line || !line.startsWith('data:')) continue
-          const payload = line.slice(5).trim()
-          if (!payload) continue
-          if (payload === '[DONE]') {
-            // 收到服务端有效完成信号，允许流正常结算为 done
-            sawDoneSignal = true
-            continue
-          }
-          if (payload.startsWith('{')) {
-            try {
-              const json = JSON.parse(payload)
-              if (json.error) {
-                // 流内错误：记录但继续读完剩余内容，由结算统一处理
-                error.value = json.error.message || '未知错误'
-                continue
-              }
-              // 提取usage数据
-              if (json.usage) {
-                usage.value = json.usage
-                draftUsage = json.usage
-              }
-              if (json.choices && json.choices[0] && json.choices[0].delta) {
-                const delta = json.choices[0].delta
-                if (!hasResponse) hasResponse = true
-
-                // 兼容不同厂商的思考内容字段
-                const deltaThinking = delta.reasoning_content || delta.reasoning
-                if (deltaThinking) {
-                  if (!thinkingStartTime) thinkingStartTime = Date.now()
-                  thinkingContent.value += deltaThinking
-                  updated = true
-                }
-                if (delta.content) {
-                  if (thinkingStartTime) finalizeThinkingTime()
-                  answerContent.value += delta.content
-                  updated = true
-                }
-              }
-            } catch (e) { /* skip parse error */ }
-          }
+        const thinking = delta.reasoning_content || delta.reasoning
+        if (thinking) {
+          if (!thinkingStartTime) thinkingStartTime = Date.now()
+          thinkingContent.value += thinking
+          updated = true
         }
-
-        if (updated) {
-          if (onUpdate) {
-            onUpdate({
-              content: answerContent.value,
-              reasoning_content: thinkingContent.value,
-              thinkingTime: thinkingTime.value,
-              usage: usage.value
-            })
-          }
-          // 节流持久化草稿，支持断网/刷新后恢复
-          scheduleDraftPersist()
+        if (delta.content) {
+          if (thinkingStartTime) finalizeThinkingTime()
+          answerContent.value += delta.content
+          updated = true
         }
-
-        return read()
+        return updated
       }
 
-      await read()
+      // 用循环读取长流，避免为每个网络块保留一层递归 Promise。
+      while (true) {
+        resetIdleTimer(STREAM_IDLE_TIMEOUT, 'timeout')
+        const result = await reader.read()
+        buffer += result.done ? decoder.decode() : decoder.decode(result.value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = result.done ? '' : (lines.pop() || '')
+        let updated = false
+        for (const line of lines) updated = processLine(line) || updated
+        if (updated) {
+          if (onUpdate) onUpdate(buildResult())
+          scheduleDraftPersist()
+        }
+        if (!result.done) continue
+        finalizeThinkingTime()
+        // HTTP 正常关闭并不代表模型完成：网关或上游提前结束也可能只产生 EOF。
+        // 缺少明确完成信号时保留正文、思考、用量与恢复草稿，不能静默标为完整。
+        const hasPartialContent = !!(answerContent.value.trim() || thinkingContent.value.trim())
+        if (error.value) {
+          settle(STREAM_STATUS.FAILED, buildResult({ error: error.value, interrupted: true }), { onDone, onError })
+        } else if (finishReason === 'length' || finishReason === 'max_tokens'
+            || finishReason === 'model_context_window_exceeded') {
+          error.value = '回答已达到模型的输出或上下文上限，内容尚未完整。可继续生成，或请管理员在系统设置中调整回答输出限制。'
+          settle(STREAM_STATUS.LENGTH, buildResult({ error: error.value, interrupted: true }), { onDone, onError })
+        } else if (!sawDoneSignal) {
+          error.value = hasPartialContent
+            ? '连接已结束，但未收到回答完成信号，已保留收到的内容，请继续生成或重试'
+            : '连接已结束，但未收到回答完成信号，请重试'
+          settle(STREAM_STATUS.FAILED, buildResult({ error: error.value, interrupted: true }), { onDone, onError })
+        } else {
+          settle(STREAM_STATUS.DONE, buildResult(), { onDone, onError })
+        }
+        break
+      }
     } catch (err) {
       if (err.name === 'AbortError') {
         finalizeThinkingTime()

@@ -9,6 +9,7 @@ const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const adminSources = [
   path.join(webRoot, 'src/layout/AdminLayout.vue'),
   path.join(webRoot, 'src/components/admin/AdminPager.vue'),
+  path.join(webRoot, 'src/components/admin/ChatOutputSettings.vue'),
   ...fs.readdirSync(path.join(webRoot, 'src/views/admin'))
     .filter(name => name.endsWith('.vue'))
     .map(name => path.join(webRoot, 'src/views/admin', name))

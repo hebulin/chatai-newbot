@@ -147,15 +147,13 @@ export function useChatStreaming({ chatStore, modelsStore, streamChat, scrollFol
     }
     const message = createAssistantMessage(chatId, data, hasContent, interrupted, replyInsertIndex)
     chatStore.addMessage(chatId, message, replyInsertIndex)
-    if (data.error && interrupted) {
-      chatStore.addMessage(chatId, makeErrorMsg(data.error), Number.isInteger(replyInsertIndex) ? replyInsertIndex + 1 : undefined)
-    }
     finishStreamingUi()
     onGenerateTitle?.(chatId)
   }
 
   /**
    * 将重新生成结果追加到目标回答的版本历史。
+   * 中断原因（notice）随版本一并记录，内联展示在该回答下方。
    */
   function settleRegeneratedVersion(data, target, hasContent, hasReasoning, interrupted) {
     if (hasContent || hasReasoning) {
@@ -166,6 +164,7 @@ export function useChatStreaming({ chatStore, modelsStore, streamChat, scrollFol
         modelName: modelsStore.currentModelName,
         time: formatChatTime(),
         status: data.status || 'done',
+        notice: (interrupted && data.notice) || undefined,
         usage: normalizeUsage(data.usage)
       }, !interrupted)
     }
@@ -175,6 +174,7 @@ export function useChatStreaming({ chatStore, modelsStore, streamChat, scrollFol
 
   /**
    * 创建普通回答消息并计算当前轮次的增量输入 Token。
+   * 中断原因（notice）内联展示在回答消息下方，不再生成独立的错误气泡消息。
    */
   function createAssistantMessage(chatId, data, hasContent, interrupted, replyInsertIndex) {
     const message = {
@@ -184,6 +184,7 @@ export function useChatStreaming({ chatStore, modelsStore, streamChat, scrollFol
       time: formatChatTime(),
       interrupted: interrupted || undefined,
       status: interrupted ? data.status : undefined,
+      notice: (interrupted && data.notice) || undefined,
       modelName: modelsStore.currentModelName,
       thinkingTime: data.thinkingTime
     }
@@ -218,7 +219,7 @@ export function useChatStreaming({ chatStore, modelsStore, streamChat, scrollFol
       promptTokens: usage.prompt_tokens || 0,
       completionTokens: usage.completion_tokens || 0,
       reasoningTokens: usage.completion_tokens_details?.reasoning_tokens || 0,
-      cachedTokens: usage.prompt_tokens_details?.cached_tokens || 0
+      cachedTokens: usage.prompt_tokens_details?.cached_tokens ?? usage.cached_tokens ?? 0
     }
   }
 

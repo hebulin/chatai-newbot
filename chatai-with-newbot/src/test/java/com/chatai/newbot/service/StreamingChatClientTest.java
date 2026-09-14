@@ -33,6 +33,90 @@ import static org.mockito.Mockito.when;
 class StreamingChatClientTest {
     private HttpServer server;
 
+    /** 低输出上限不能发送非法思考预算，错误流必须释放计数且不占用量。 */
+    @Test
+    void thinking_预算不足本地拒绝且不泄漏活跃计数() throws Exception {
+        StorageManager storage = mock(StorageManager.class);
+        ObservabilityService observability = mock(ObservabilityService.class);
+        ModelConfig model = new ModelConfig();
+        model.setEnabled(true);
+        model.setProtocol("anthropic");
+        model.setApiKey("test-key");
+        model.setApiUrl("http://127.0.0.1:1/v1");
+        model.setSupportsThinking(true);
+        model.setMaxOutputTokens(1024);
+        when(storage.getModelConfigById("thinking")).thenReturn(model);
+        ChatContextAssembler context = mock(ChatContextAssembler.class);
+        when(context.resolveSystemPrompt(any(), any())).thenReturn("system");
+        when(context.applyMessageLimit(any())).thenReturn(List.of());
+        UnifiedChatService service = new UnifiedChatService(storage, mock(WebSearchService.class),
+                new ContextBudgetService(), observability,
+                new ChatResponseParser(new com.fasterxml.jackson.databind.ObjectMapper()), context,
+                client(storage, observability));
+        ChatRequest request = new ChatRequest();
+        request.setDeepThinking(true);
+        var result = service.chat(request, "thinking", new UsageLog()).collectList().block(Duration.ofSeconds(2));
+        var error = new com.fasterxml.jackson.databind.ObjectMapper().readTree(result.getFirst());
+        assertTrue(error.at("/error/message").asText().contains("深度思考"));
+        verify(observability).chatFinished(ObservabilityService.ChatOutcome.FAILED);
+        verify(storage, never()).addUsageLog(any());
+    }
+
+    /** 两种协议均实际发送模型配置的长输出预算，并完整转发超过旧上限的正文和用量。 */
+    @Test
+    void longOutput_两协议均发送65536预算并无损接收长回答() throws Exception {
+        var json = new com.fasterxml.jackson.databind.ObjectMapper();
+        AtomicReference<com.fasterxml.jackson.databind.JsonNode> sent = new AtomicReference<>();
+        String answer = "长回答".repeat(10000) + "回答终点";
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/", exchange -> {
+            sent.set(json.readTree(exchange.getRequestBody()));
+            boolean anthropic = exchange.getRequestURI().getPath().endsWith("/messages");
+            String response = anthropic
+                    ? "data: " + json.writeValueAsString(Map.of("type", "content_block_delta", "delta", Map.of("type", "text_delta", "text", answer)))
+                        + "\n\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":10000}}\n\ndata: {\"type\":\"message_stop\"}\n\n"
+                    : "data: " + json.writeValueAsString(Map.of("choices", List.of(Map.of("delta", Map.of("content", answer)))))
+                        + "\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"completion_tokens\":10000}}\n\ndata: [DONE]\n\n";
+            byte[] bytes = response.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream out = exchange.getResponseBody()) { out.write(bytes); }
+        });
+        server.start();
+        for (String protocol : List.of("openai", "anthropic")) {
+            StorageManager storage = mock(StorageManager.class);
+            ModelConfig model = new ModelConfig();
+            model.setEnabled(true);
+            model.setModelId("long-model");
+            model.setApiKey("test-key");
+            model.setApiUrl("http://127.0.0.1:" + server.getAddress().getPort() + "/v1");
+            model.setProtocol(protocol);
+            model.setMaxOutputTokens(65536);
+            model.setContextWindow(128000);
+            when(storage.getModelConfigById("long")).thenReturn(model);
+            ChatContextAssembler context = mock(ChatContextAssembler.class);
+            when(context.resolveSystemPrompt(any(), any())).thenReturn("system");
+            when(context.applyMessageLimit(any())).thenReturn(List.of());
+            ObservabilityService observability = mock(ObservabilityService.class);
+            UnifiedChatService service = new UnifiedChatService(storage, mock(WebSearchService.class),
+                    new ContextBudgetService(), observability, new ChatResponseParser(json), context,
+                    client(storage, observability));
+            ChatRequest request = new ChatRequest();
+            UsageLog usage = new UsageLog();
+            List<String> chunks = service.chat(request, "long", usage).collectList().block(Duration.ofSeconds(5));
+            assertEquals(65536, sent.get().get("max_tokens").asInt());
+            assertTrue(chunks.stream().anyMatch(chunk -> chunk.contains("回答终点")));
+            assertEquals(answer, json.readTree(chunks.getFirst()).at("/choices/0/delta/content").asText());
+            verify(storage, timeout(1000)).updateUsageLog(usage);
+            assertEquals(10000, usage.getCompletionTokens());
+            model.setMaxOutputTokens(0);
+            service.chat(new ChatRequest(), "long", new UsageLog()).collectList().block(Duration.ofSeconds(5));
+            assertTrue(sent.get().get("max_tokens").asInt() > 100000,
+                    "不限输出须按配置的 128K 上下文剩余量发送，不受旧 32K 预占预算影响");
+            assertTrue(sent.get().get("max_tokens").asInt() <= 128000);
+        }
+    }
+
     /** 每个用例结束后关闭本地 HTTP 服务。 */
     @AfterEach
     void stopServer() {

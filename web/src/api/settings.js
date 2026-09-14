@@ -1,5 +1,35 @@
 import request from './request'
 
+/** 获取全局输出配置及模型可空覆盖。 */
+export function getChatOutputSettings() {
+  return request.get('/admin/settings/chat-output')
+}
+
+/** 保存全局输出上限，0 为不限。 */
+export function setChatOutputGlobal(maxOutputTokens) {
+  return request.put('/admin/settings/chat-output', { maxOutputTokens })
+}
+
+/** 保存模型覆盖，null 恢复继承，0 单独不限。 */
+export function setChatOutputModel(id, maxOutputTokens) {
+  return request.put(`/admin/settings/chat-output/models/${encodeURIComponent(id)}`, { maxOutputTokens })
+}
+
+/** 获取全局上下文大小与模型覆盖。 */
+export function getChatContextSettings() {
+  return request.get('/admin/settings/chat-context')
+}
+
+/** 保存正整数上下文总容量。 */
+export function setChatContextGlobal(contextWindow) {
+  return request.put('/admin/settings/chat-context', { contextWindow })
+}
+
+/** 保存模型上下文覆盖，null 恢复继承全局。 */
+export function setChatContextModel(id, contextWindow) {
+  return request.put(`/admin/settings/chat-context/models/${encodeURIComponent(id)}`, { contextWindow })
+}
+
 // 获取存储信息（当前为 SQLite 单通道，返回 useSqlite 与数据库文件大小）
 export function getStorageSettings() {
   return request.get('/admin/settings/storage')
