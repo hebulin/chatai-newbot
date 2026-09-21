@@ -349,8 +349,8 @@ const sections = [
   { id: 'observability', label: '运行状态' },
   { id: 'storage', label: '存储模式' }
 ]
-// 无 section 参数时默认进入“输出大小”分类（与端到端测试及菜单首个高亮一致）
-const activeSection = computed(() => sections.some(item => item.id === route.query.section) ? route.query.section : 'output')
+// 无 section 参数时默认进入菜单第一个分类“上下文大小”（与菜单首个高亮一致）
+const activeSection = computed(() => sections.some(item => item.id === route.query.section) ? route.query.section : sections[0].id)
 const visitedSections = ref(new Set())
 
 /** 首次进入分类时才加载接口；切换分类保留尚未保存的表单，不批量加载整页。 */
