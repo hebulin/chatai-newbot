@@ -1,5 +1,8 @@
 package com.chatai.newbot.service;
 
+import com.chatai.newbot.support.IsolatedDataDirectory;
+import org.junit.jupiter.api.parallel.Isolated;
+
 import com.chatai.newbot.model.ModelConfig;
 import com.chatai.newbot.model.ChatShare;
 import com.chatai.newbot.model.ProviderModel;
@@ -30,12 +33,13 @@ import static org.junit.jupiter.api.Assertions.*;
  * 注意：ApiKeyCrypto 的密钥文件基于 user.dir，测试前重定向到临时目录，
  * 避免污染模块目录下的 data/apikey.secret（与 ApiKeyCryptoTest 相同策略）。
  */
+@Isolated
 class SqliteStorageServiceTest {
 
     @TempDir
     static Path tempDir;
 
-    private static String originalUserDir;
+    private static IsolatedDataDirectory dataDirectory;
     private static SqliteStorageService service;
     private static JdbcTemplate jdbcTemplate;
 
@@ -100,10 +104,10 @@ class SqliteStorageServiceTest {
         assertEquals(128000, new ModelConfigRepository(jdbcTemplate).findAll().stream().filter(item -> saved.getId().equals(item.getId())).findFirst().orElseThrow().getContextWindow());
     }
 
+    /** 隔离真实 SQLite 测试库与其 API Key 密钥缓存。 */
     @BeforeAll
-    static void setup() {
-        originalUserDir = System.getProperty("user.dir");
-        System.setProperty("user.dir", tempDir.toString());
+    static void setup() throws Exception {
+        dataDirectory = new IsolatedDataDirectory(tempDir);
         DriverManagerDataSource dataSource = new DriverManagerDataSource();
         dataSource.setDriverClassName("org.sqlite.JDBC");
         dataSource.setUrl("jdbc:sqlite:" + tempDir.resolve("test-chatai.db").toAbsolutePath());
@@ -112,9 +116,10 @@ class SqliteStorageServiceTest {
         service.init();
     }
 
+    /** 同时恢复测试前目录和静态密钥，消除测试类顺序依赖。 */
     @AfterAll
     static void restoreUserDir() {
-        System.setProperty("user.dir", originalUserDir);
+        if (dataDirectory != null) dataDirectory.close();
     }
 
     /** 每个用例生成唯一用户名，避免用例间相互影响 */

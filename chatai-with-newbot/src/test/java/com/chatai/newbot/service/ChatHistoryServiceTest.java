@@ -1,5 +1,8 @@
 package com.chatai.newbot.service;
 
+import com.chatai.newbot.support.IsolatedDataDirectory;
+import org.junit.jupiter.api.parallel.Isolated;
+
 import com.chatai.newbot.exception.ChatSyncConflictException;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -23,19 +26,20 @@ import static org.junit.jupiter.api.Assertions.*;
  * 删除与编辑冲突（已删会话不被静默复活）、显式恢复、文件夹并发修改、
  * 元信息独立更新与全局同步序列号的单调递增。
  */
+@Isolated
 class ChatHistoryServiceTest {
 
     @TempDir
     static Path tempDir;
 
-    private static String originalUserDir;
+    private static IsolatedDataDirectory dataDirectory;
     private static SqliteStorageService storage;
     private static ChatHistoryService service;
 
+    /** 隔离会话测试库及初始化过程中可能使用的静态密钥。 */
     @BeforeAll
-    static void setup() {
-        originalUserDir = System.getProperty("user.dir");
-        System.setProperty("user.dir", tempDir.toString());
+    static void setup() throws Exception {
+        dataDirectory = new IsolatedDataDirectory(tempDir);
         DriverManagerDataSource dataSource = new DriverManagerDataSource();
         dataSource.setDriverClassName("org.sqlite.JDBC");
         dataSource.setUrl("jdbc:sqlite:" + tempDir.resolve("test-chat-sync.db").toAbsolutePath());
@@ -44,9 +48,10 @@ class ChatHistoryServiceTest {
         service = new ChatHistoryService(storage);
     }
 
+    /** 恢复目录与缓存，使本测试类不向其它测试泄漏全局状态。 */
     @AfterAll
     static void restoreUserDir() {
-        System.setProperty("user.dir", originalUserDir);
+        if (dataDirectory != null) dataDirectory.close();
     }
 
     /** 构造一条用户消息 Map */

@@ -1,6 +1,8 @@
 package com.chatai.newbot;
 
 import com.chatai.newbot.service.ObservabilityService;
+import com.chatai.newbot.service.ApiKeyCrypto;
+import com.chatai.newbot.support.IsolatedDataDirectory;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeAll;
@@ -9,6 +11,7 @@ import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.api.parallel.Isolated;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -43,6 +46,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+@Isolated
 class CoreJourneyE2ETest {
     private static final String ORIGINAL_USER_DIR = System.getProperty("user.dir");
     private static final Path MODULE_ROOT = Path.of(ORIGINAL_USER_DIR).toAbsolutePath();
@@ -51,6 +55,7 @@ class CoreJourneyE2ETest {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static MockCookie adminCookie;
     private static String backupName;
+    private static IsolatedDataDirectory dataDirectory;
 
     @Autowired
     private MockMvc mockMvc;
@@ -59,6 +64,8 @@ class CoreJourneyE2ETest {
     private ObservabilityService observabilityService;
     @Autowired
     private com.chatai.newbot.service.StorageManager storage;
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
     /** 通过真实鉴权、专用设置接口与数据库验证全局/覆盖优先级、清空及非法值保护。 */
     @Test
@@ -145,7 +152,7 @@ class CoreJourneyE2ETest {
             Files.deleteIfExists(TEST_DATABASE);
             Files.deleteIfExists(Path.of(TEST_DATABASE + "-wal"));
             Files.deleteIfExists(Path.of(TEST_DATABASE + "-shm"));
-            System.setProperty("user.dir", TEST_WORK_DIR.toString());
+            dataDirectory = new IsolatedDataDirectory(TEST_WORK_DIR);
         } catch (Exception e) {
             throw new ExceptionInInitializerError(e);
         }
@@ -165,10 +172,10 @@ class CoreJourneyE2ETest {
         }
     }
 
-    /** 测试结束后恢复 Maven 进程工作目录属性，避免影响后续测试类。 */
+    /** 测试结束后同时恢复进程目录与密钥缓存，避免测试顺序影响后续用例。 */
     @AfterAll
     static void restoreWorkingDirectory() {
-        System.setProperty("user.dir", ORIGINAL_USER_DIR);
+        if (dataDirectory != null) dataDirectory.close();
     }
 
     /** 验证首次数据库初始化后默认管理员可登录并获得安全 Cookie。 */
@@ -207,6 +214,13 @@ class CoreJourneyE2ETest {
         mockMvc.perform(get("/api/models").cookie(adminCookie))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[?(@.modelId == 'e2e-model')]").exists());
+
+        // 必须由当前隔离目录的磁盘密钥解密，不能仅依靠前一测试类遗留的静态缓存。
+        Path secret = TEST_WORK_DIR.resolve("data/apikey.secret");
+        org.junit.jupiter.api.Assertions.assertTrue(Files.isRegularFile(secret), "模型保存后必须在本测试目录生成密钥");
+        String encrypted = jdbcTemplate.queryForObject("SELECT api_key FROM t_model_config WHERE model_id=?", String.class, "e2e-model");
+        org.junit.jupiter.api.Assertions.assertTrue(ApiKeyCrypto.canDecryptWith(encrypted, Files.readString(secret).trim()),
+                "测试库密文必须与本测试目录的密钥匹配");
     }
 
     /** 验证会话写入 SQLite 后可通过单会话与摘要接口重新加载。 */
@@ -294,6 +308,9 @@ class CoreJourneyE2ETest {
                 .andReturn();
         JsonNode backupBody = JSON.readTree(backup.getResponse().getContentAsString());
         backupName = backupBody.path("data").path("name").asText();
+        try (var zip = new java.util.zip.ZipFile(TEST_WORK_DIR.resolve("data/backups").resolve(backupName).toFile())) {
+            org.junit.jupiter.api.Assertions.assertNotNull(zip.getEntry("apikey.secret"), "包含加密模型的备份必须携带匹配密钥");
+        }
 
         mockMvc.perform(delete("/api/chat/history").cookie(adminCookie))
                 .andExpect(status().isOk())

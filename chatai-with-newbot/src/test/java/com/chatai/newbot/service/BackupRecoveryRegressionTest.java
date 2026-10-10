@@ -1,12 +1,14 @@
 package com.chatai.newbot.service;
 
+import com.chatai.newbot.support.IsolatedDataDirectory;
+import org.junit.jupiter.api.parallel.Isolated;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -18,10 +20,10 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** 跨密钥恢复以及文件切换失败的真实数据库/文件一致性回归。 */
+@Isolated
 class BackupRecoveryRegressionTest {
     @TempDir Path dir;
-    private String originalDir;
-    private Object originalKey;
+    private IsolatedDataDirectory dataDirectory;
     private JdbcTemplate jdbc;
     private StorageManager storage;
     private BackupService backups;
@@ -29,9 +31,7 @@ class BackupRecoveryRegressionTest {
     /** 所有数据库、密钥和文件均位于测试专用目录，保存进程缓存供结束时原样还原。 */
     @BeforeEach
     void setup() throws Exception {
-        originalDir = System.getProperty("user.dir");
-        originalKey = ReflectionTestUtils.getField(ApiKeyCrypto.class, "key");
-        System.setProperty("user.dir", dir.toString());
+        dataDirectory = new IsolatedDataDirectory(dir);
         Files.createDirectories(dir.resolve("data/uploads/202610"));
         jdbc = new JdbcTemplate(new DriverManagerDataSource("jdbc:sqlite:" + dir.resolve("data/chatai.db")));
         SqliteStorageService sqlite = new SqliteStorageService(jdbc);
@@ -44,8 +44,7 @@ class BackupRecoveryRegressionTest {
     /** 还原进程目录和密钥缓存，不读取或替换开发环境密钥文件。 */
     @AfterEach
     void cleanup() {
-        System.setProperty("user.dir", originalDir);
-        ReflectionTestUtils.setField(ApiKeyCrypto.class, "key", originalKey);
+        if (dataDirectory != null) dataDirectory.close();
     }
 
     /** 恢复其它密钥的备份后，不重启即可解密旧数据，新加密也必须使用恢复后的密钥。 */

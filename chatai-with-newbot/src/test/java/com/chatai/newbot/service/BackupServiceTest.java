@@ -1,5 +1,8 @@
 package com.chatai.newbot.service;
 
+import com.chatai.newbot.support.IsolatedDataDirectory;
+import org.junit.jupiter.api.parallel.Isolated;
+
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -19,20 +22,21 @@ import static org.junit.jupiter.api.Assertions.*;
  * 覆盖：备份创建（一致性快照+清单+校验）、恢复后数据一致性、密钥不匹配拒绝、
  * 路径穿越防护、恢复前自动备份、恢复后登录态失效。
  */
+@Isolated
 class BackupServiceTest {
 
     @TempDir
     static Path tempDir;
 
-    private static String originalUserDir;
+    private static IsolatedDataDirectory dataDirectory;
     private static SqliteStorageService storage;
     private static StorageManager storageManager;
     private static BackupService backupService;
 
+    /** 创建独立数据库、资源和真实生成的匹配密钥。 */
     @BeforeAll
     static void setup() throws Exception {
-        originalUserDir = System.getProperty("user.dir");
-        System.setProperty("user.dir", tempDir.toString());
+        dataDirectory = new IsolatedDataDirectory(tempDir);
         // 数据目录结构：data/chatai.db + data/uploads
         Files.createDirectories(tempDir.resolve("data/uploads/img/202608"));
         Files.writeString(tempDir.resolve("data/uploads/img/202608/test.png"), "fake-image-bytes");
@@ -43,18 +47,13 @@ class BackupServiceTest {
         storage.init();
         storageManager = new StorageManager(storage);
         backupService = new BackupService(new JdbcTemplate(dataSource), storageManager);
-        // 确保密钥文件存在于当前临时数据目录（ApiKeyCrypto 为静态单例，
-        // 全量测试时可能已被其他测试类加载而不在本目录生成文件，这里直接写入固定密钥）
-        Path secretFile = tempDir.resolve("data/apikey.secret");
-        if (!Files.exists(secretFile)) {
-            Files.writeString(secretFile,
-                    java.util.Base64.getEncoder().encodeToString(new byte[32]));
-        }
+        ApiKeyCrypto.encrypt("backup-fixture");
     }
 
+    /** 退出作用域后原样恢复目录和密钥缓存，避免污染之后的端到端测试。 */
     @AfterAll
     static void restoreUserDir() {
-        System.setProperty("user.dir", originalUserDir);
+        if (dataDirectory != null) dataDirectory.close();
     }
 
     /** 备份创建：zip 含数据库快照、密钥、上传资源与清单，清单文件校验可解析 */

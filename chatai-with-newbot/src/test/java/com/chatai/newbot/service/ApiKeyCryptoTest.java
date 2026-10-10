@@ -1,5 +1,8 @@
 package com.chatai.newbot.service;
 
+import com.chatai.newbot.support.IsolatedDataDirectory;
+import org.junit.jupiter.api.parallel.Isolated;
+
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -16,22 +19,24 @@ import static org.junit.jupiter.api.Assertions.*;
  * 注意：ApiKeyCrypto 的密钥文件路径基于 user.dir，测试前将 user.dir 重定向到临时目录，
  * 避免在模块目录下生成 data/apikey.secret 测试残留（密钥为进程内静态单例，首次加载后固定）。
  */
+@Isolated
 class ApiKeyCryptoTest {
 
     @TempDir
     static Path tempDir;
 
-    private static String originalUserDir;
+    private static IsolatedDataDirectory dataDirectory;
 
+    /** 隔离目录与密钥缓存，避免继承其他测试类的静态密钥。 */
     @BeforeAll
-    static void redirectUserDir() {
-        originalUserDir = System.getProperty("user.dir");
-        System.setProperty("user.dir", tempDir.toString());
+    static void redirectUserDir() throws Exception {
+        dataDirectory = new IsolatedDataDirectory(tempDir);
     }
 
+    /** 还原测试前全局状态，不写入开发环境的数据目录。 */
     @AfterAll
     static void restoreUserDir() {
-        System.setProperty("user.dir", originalUserDir);
+        if (dataDirectory != null) dataDirectory.close();
     }
 
     @Test
@@ -82,13 +87,16 @@ class ApiKeyCryptoTest {
         assertFalse(ApiKeyCrypto.isEncrypted(""));
     }
 
+    /** 从真正空白的目录验证首次密钥落盘和匹配，禁止使用恒真的兜底断言。 */
     @Test
-    void loadKey_首次加密自动生成密钥文件() {
-        ApiKeyCrypto.encrypt("trigger-key-generation");
-        // 密钥文件应生成在（重定向后的）user.dir/data/apikey.secret
-        // 注：若其他测试先触发过加密，密钥已是进程内单例，此断言仍成立
-        assertTrue(Files.exists(tempDir.resolve("data").resolve("apikey.secret"))
-                        || originalUserDir != null,
-                "首次使用应生成密钥文件");
+    void loadKey_首次加密自动生成密钥文件() throws Exception {
+        Path freshDirectory = tempDir.resolve("first-encryption");
+        try (var ignored = new IsolatedDataDirectory(freshDirectory)) {
+            Path secret = freshDirectory.resolve("data/apikey.secret");
+            assertFalse(Files.exists(secret));
+            String encrypted = ApiKeyCrypto.encrypt("trigger-key-generation");
+            assertTrue(Files.isRegularFile(secret), "首次使用应在当前数据目录生成密钥文件");
+            assertTrue(ApiKeyCrypto.canDecryptWith(encrypted, Files.readString(secret).trim()));
+        }
     }
 }
