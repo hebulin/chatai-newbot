@@ -13,7 +13,6 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -26,7 +25,6 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
-import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 
 /**
@@ -56,13 +54,14 @@ public class BackupService {
             "t_user", "t_model_config", "t_usage_log", "t_setting", "t_token",
             "t_chat_session", "t_chat_user_state", "t_chat_history", "t_chat_share",
             "t_custom_provider", "t_file_asset", "t_file_asset_grant", "t_announcement",
-            "t_observability_hourly");
+            "t_observability_hourly", "t_legacy_public_asset");
 
     private final JdbcTemplate jdbcTemplate;
     private final StorageManager storageManager;
     private final ObjectMapper objectMapper = new ObjectMapper();
     /** 恢复维护状态：进行中时拒绝普通请求（由 AuthInterceptor 检查） */
     private final AtomicBoolean restoring = new AtomicBoolean(false);
+    private volatile boolean recoveryRequired;
 
     public BackupService(JdbcTemplate jdbcTemplate, StorageManager storageManager) {
         this.jdbcTemplate = jdbcTemplate;
@@ -269,8 +268,9 @@ public class BackupService {
         if (!restoring.compareAndSet(false, true)) {
             throw new IllegalStateException("已有恢复任务进行中");
         }
-        Path tempDir = Files.createTempDirectory("chatai-restore");
+        Path tempDir = null;
         try {
+            tempDir = Files.createTempDirectory("chatai-restore");
             // 1) 解压与校验
             Map<String, Object> manifest = extractAndValidate(backupZip, tempDir);
             // 2) 密钥匹配校验：备份内密钥必须能解密备份库中的密文
@@ -279,12 +279,14 @@ public class BackupService {
             Map<String, Object> preRestore = createBackup();
             log.info("恢复前备份已创建: {}", preRestore.get("name"));
             // 4) 逐表导入（事务内，失败回滚）
-            Map<String, Integer> tableCounts = importDatabase(tempDir.resolve("chatai.db"));
-            // 5) 替换资源与密钥文件
-            restoreFiles(tempDir);
-            // 6) 失效全部登录态与临时认证挑战，刷新缓存
-            jdbcTemplate.update("DELETE FROM t_token");
+            Map<String, Integer> tableCounts;
+            try (RestoreFileSwap files = prepareFileRestore(tempDir)) {
+                tableCounts = importDatabase(tempDir.resolve("chatai.db"), files);
+            }
+            // 数据库与文件提交后，缓存刷新失败必须保持维护状态，不能开放混合的新旧状态。
+            recoveryRequired = true;
             storageManager.reloadAllCaches();
+            recoveryRequired = false;
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("tables", tableCounts);
             result.put("preRestoreBackup", preRestore.get("name"));
@@ -293,8 +295,8 @@ public class BackupService {
             log.info("系统恢复完成: 来源={}, 表={}", backupZip.getFileName(), tableCounts);
             return result;
         } finally {
-            restoring.set(false);
-            deleteRecursively(tempDir);
+            restoring.set(recoveryRequired);
+            if (tempDir != null) deleteRecursively(tempDir);
         }
     }
 
@@ -302,7 +304,7 @@ public class BackupService {
      * 解压备份到临时目录并校验：清单格式、文件 SHA-256 完整性、路径穿越与解压体积上限
      */
     private Map<String, Object> extractAndValidate(Path zipPath, Path targetDir) throws Exception {
-        Map<String, byte[]> entries = new HashMap<>();
+        Map<String, String> entries = new HashMap<>();
         long totalBytes = 0;
         try (ZipFile zip = new ZipFile(zipPath.toFile())) {
             var enumeration = zip.entries();
@@ -310,29 +312,46 @@ public class BackupService {
                 ZipEntry entry = enumeration.nextElement();
                 String name = entry.getName();
                 // 路径安全：禁止绝对路径与 .. 穿越
-                if (name.contains("..") || name.startsWith("/") || name.contains("\\")) {
+                if (name.contains("..") || name.startsWith("/") || name.contains("\\") || name.contains(":")) {
                     throw new IllegalArgumentException("备份包含非法路径: " + name);
                 }
                 if (entry.isDirectory()) continue;
-                if (entry.getSize() > MAX_ENTRY_BYTES) {
+                if (!(name.equals("manifest.json") || name.equals("chatai.db") || name.equals("apikey.secret")
+                        || name.startsWith("uploads/")) || entries.containsKey(name) || entries.size() >= 50000) {
+                    throw new IllegalArgumentException("备份含不支持、重复或过多的文件");
+                }
+                long entryLimit = name.equals("manifest.json") ? 8L * 1024 * 1024 : MAX_ENTRY_BYTES;
+                if (entry.getSize() > entryLimit) {
                     throw new IllegalArgumentException("备份文件过大: " + name);
                 }
-                try (InputStream in = zip.getInputStream(entry)) {
-                    byte[] data = in.readAllBytes();
-                    totalBytes += data.length;
-                    if (totalBytes > MAX_EXTRACT_BYTES) {
-                        throw new IllegalArgumentException("备份解压体积超过安全上限");
-                    }
-                    entries.put(name, data);
+                Path target = targetDir.resolve(name).normalize();
+                if (!target.startsWith(targetDir) || Files.exists(target)) {
+                    throw new IllegalArgumentException("备份包含冲突或越界路径");
                 }
+                Files.createDirectories(target.getParent());
+                MessageDigest digest = MessageDigest.getInstance("SHA-256");
+                long entryBytes = 0;
+                try (InputStream in = zip.getInputStream(entry); OutputStream out = Files.newOutputStream(target)) {
+                    byte[] buffer = new byte[8192];
+                    int count;
+                    while ((count = in.read(buffer)) != -1) {
+                        totalBytes += count;
+                        entryBytes += count;
+                        if (totalBytes > MAX_EXTRACT_BYTES || entryBytes > entryLimit) {
+                            throw new IllegalArgumentException("备份解压体积超过安全上限");
+                        }
+                        digest.update(buffer, 0, count);
+                        out.write(buffer, 0, count);
+                    }
+                }
+                entries.put(name, toHex(digest.digest()));
             }
         }
         // 清单校验
-        byte[] manifestBytes = entries.get("manifest.json");
-        if (manifestBytes == null) {
+        if (!entries.containsKey("manifest.json")) {
             throw new IllegalArgumentException("备份缺少 manifest.json 清单");
         }
-        Map<String, Object> manifest = objectMapper.readValue(manifestBytes, Map.class);
+        Map<String, Object> manifest = objectMapper.readValue(targetDir.resolve("manifest.json").toFile(), Map.class);
         if (!MANIFEST_APP.equals(manifest.get("app"))) {
             throw new IllegalArgumentException("备份来源应用不匹配");
         }
@@ -344,29 +363,28 @@ public class BackupService {
             throw new IllegalArgumentException("备份缺少数据库文件");
         }
         // 文件完整性校验（SHA-256）
-        if (manifest.get("files") instanceof List<?> files) {
+        java.util.Set<String> declared = new java.util.HashSet<>();
+        if (manifest.get("files") instanceof List<?> files && !files.isEmpty()) {
             for (Object fo : files) {
-                if (!(fo instanceof Map)) continue;
+                if (!(fo instanceof Map)) throw new IllegalArgumentException("备份文件清单格式错误");
                 String path = String.valueOf(((Map<?, ?>) fo).get("path"));
                 String sha256 = String.valueOf(((Map<?, ?>) fo).get("sha256"));
-                byte[] data = entries.get(path);
-                if (data == null) {
+                if (!declared.add(path) || path.equals("manifest.json")) {
+                    throw new IllegalArgumentException("备份清单含重复或非法条目");
+                }
+                String hash = entries.get(path);
+                if (hash == null) {
                     throw new IllegalArgumentException("备份缺少清单声明的文件: " + path);
                 }
-                MessageDigest digest = MessageDigest.getInstance("SHA-256");
-                if (!toHex(digest.digest(data)).equalsIgnoreCase(sha256)) {
+                if (!hash.equalsIgnoreCase(sha256)) {
                     throw new IllegalArgumentException("备份文件校验失败（数据损坏）: " + path);
                 }
             }
+        } else {
+            throw new IllegalArgumentException("备份缺少文件校验清单");
         }
-        // 写入临时目录
-        for (Map.Entry<String, byte[]> e : entries.entrySet()) {
-            Path target = targetDir.resolve(e.getKey()).normalize();
-            if (!target.startsWith(targetDir)) {
-                throw new IllegalArgumentException("备份路径越界: " + e.getKey());
-            }
-            Files.createDirectories(target.getParent());
-            Files.write(target, e.getValue());
+        if (declared.size() != entries.size() - 1) {
+            throw new IllegalArgumentException("备份含未列入校验清单的文件");
         }
         return manifest;
     }
@@ -385,6 +403,13 @@ public class BackupService {
                 throw new IllegalArgumentException("备份缺少密钥文件，但数据库含加密内容，恢复后无法解密");
             }
             return;
+        }
+        try {
+            if (java.util.Base64.getDecoder().decode(Files.readString(secret).trim()).length != 32) {
+                throw new IllegalArgumentException("密钥长度无效");
+            }
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("备份密钥格式无效", e);
         }
         String encrypted = queryEncryptedSample(db);
         if (encrypted == null) return; // 无加密内容，无需验证
@@ -409,6 +434,11 @@ public class BackupService {
                     "SELECT two_factor_secret FROM t_user WHERE two_factor_secret LIKE 'ENC:%' LIMIT 1", String.class);
             if (!secrets.isEmpty()) return secrets.get(0);
         } catch (Exception ignore) { /* 同上 */ }
+        try {
+            List<String> secrets = backupJdbc.queryForList(
+                    "SELECT password_enc FROM t_chat_share WHERE password_enc LIKE 'ENC:%' LIMIT 1", String.class);
+            if (!secrets.isEmpty()) return secrets.get(0);
+        } catch (Exception ignore) { /* 兼容旧备份无此列 */ }
         return null;
     }
 
@@ -419,7 +449,7 @@ public class BackupService {
      * 仅导入白名单表；列集合取两边交集（旧版本备份缺新列时跳过新列，新列按默认值）。
      * @return 每表导入行数
      */
-    private Map<String, Integer> importDatabase(Path backupDb) {
+    private Map<String, Integer> importDatabase(Path backupDb, RestoreFileSwap files) {
         Map<String, Integer> counts = new LinkedHashMap<>();
         String attachPath = backupDb.toAbsolutePath().toString().replace("'", "''");
         return jdbcTemplate.execute((org.springframework.jdbc.core.ConnectionCallback<Map<String, Integer>>) conn -> {
@@ -438,7 +468,11 @@ public class BackupService {
                                 exists = rs.next() && rs.getInt(1) > 0;
                             }
                         }
-                        if (!exists) continue;
+                        if (!exists) {
+                            // 老备份没有显式旧公开资源表，不能沿用当前部署的授权。
+                            if (table.equals("t_legacy_public_asset")) st.executeUpdate("DELETE FROM main.t_legacy_public_asset");
+                            continue;
+                        }
                         // 列交集：仅导入两边都存在的列（旧备份缺新列时用默认值补齐）
                         List<String> srcColNames = columnNames(conn, "backup_src", table);
                         List<String> dstColNames = columnNames(conn, "main", table);
@@ -451,12 +485,24 @@ public class BackupService {
                             counts.put(table, rs.next() ? rs.getInt(1) : 0);
                         }
                     }
+                    st.executeUpdate("DELETE FROM main.t_token");
+                    files.apply();
                     conn.commit();
+                    // 提交成功即进入待刷新状态；后续连接清理异常也不能提前开放旧缓存。
+                    recoveryRequired = true;
                 } catch (Exception e) {
                     try {
                         conn.rollback();
                     } catch (Exception rollbackErr) {
+                        recoveryRequired = true;
                         log.error("恢复回滚失败", rollbackErr);
+                    }
+                    try {
+                        files.rollback();
+                    } catch (Exception rollbackErr) {
+                        recoveryRequired = true;
+                        e.addSuppressed(rollbackErr);
+                        log.error("资源恢复回滚失败，保持维护状态", rollbackErr);
                     }
                     throw new IllegalStateException("数据库恢复失败，已回滚: " + e.getMessage(), e);
                 } finally {
@@ -482,32 +528,9 @@ public class BackupService {
         return names;
     }
 
-    /** 替换上传资源与密钥文件（先备份当前，再复制备份内容） */
-    private void restoreFiles(Path tempDir) throws IOException {
-        Path dataDir = dataDir();
-        // 上传资源：清空后复制备份内容
-        Path uploadsBackup = tempDir.resolve("uploads");
-        Path uploadsTarget = dataDir.resolve("uploads");
-        if (Files.exists(uploadsBackup)) {
-            if (Files.exists(uploadsTarget)) {
-                deleteRecursively(uploadsTarget);
-            }
-            Files.createDirectories(uploadsTarget);
-            Files.walk(uploadsBackup).filter(Files::isRegularFile).forEach(f -> {
-                try {
-                    Path target = uploadsTarget.resolve(uploadsBackup.relativize(f));
-                    Files.createDirectories(target.getParent());
-                    Files.copy(f, target, StandardCopyOption.REPLACE_EXISTING);
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                }
-            });
-        }
-        // 密钥文件
-        Path secretBackup = tempDir.resolve("apikey.secret");
-        if (Files.exists(secretBackup)) {
-            Files.copy(secretBackup, dataDir.resolve("apikey.secret"), StandardCopyOption.REPLACE_EXISTING);
-        }
+    /** 完整暂存新资源，之后由数据库事务协调文件切换与补偿回滚。 */
+    RestoreFileSwap prepareFileRestore(Path tempDir) throws IOException {
+        return new RestoreFileSwap(tempDir, dataDir());
     }
 
     /** 递归删除目录（临时目录清理用） */

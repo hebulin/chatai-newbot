@@ -9,7 +9,7 @@ export function listBackups() {
 
 // 立即创建完整备份
 export function createBackup() {
-  return request.post('/admin/backups')
+  return request.post('/admin/backups', null, { timeout: 600000 })
 }
 
 // 下载备份文件（返回 blob URL 供 a 标签下载）
@@ -24,16 +24,15 @@ export function deleteBackup(name) {
 
 // 从服务器备份恢复（需管理员密码重新认证）
 export function restoreBackup(name, password) {
-  return request.post('/admin/backups/restore', { name, password })
+  return request.post('/admin/backups/restore', { name, password }, { timeout: 600000 })
 }
 
 // 上传备份文件并恢复（需管理员密码重新认证）
 export function restoreBackupUpload(file, password) {
-  const formData = new FormData()
-  formData.append('file', file)
-  formData.append('password', password)
-  return request.post('/admin/backups/restore-upload', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' }
+  return request.post('/admin/backups/restore-upload', file, {
+    timeout: 600000,
+    headers: { 'Content-Type': 'application/zip',
+      'X-Restore-Password': btoa(String.fromCharCode(...new TextEncoder().encode(password))) }
   })
 }
 

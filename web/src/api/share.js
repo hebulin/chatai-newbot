@@ -35,8 +35,8 @@ export function updateShareSettings(id, payload) {
 }
 
 // 把分享快照复制到当前登录用户的会话列表
-export function cloneSharedChat(id, password = '') {
-  return request.post(`/share/${id}/clone`, { password })
+export function cloneSharedChat(id, password = '', accessToken = '') {
+  return request.post(`/share/${id}/clone`, { password, accessToken })
 }
 
 // ===== 后台管理（仅管理员） =====

@@ -1,5 +1,84 @@
 import { expect, test } from '@playwright/test'
 
+test('旧草稿显示冲突且刷新后仍可找回本地副本', async ({ page }) => {
+  const state = await installApiMock(page)
+  state.chats.a = [{ role: 'user', content: '另一个设备修改后的内容' }]
+  state.lastChatId = 'a'
+  state.version = 8
+  const uploads = []
+  await page.route('**/api/chat/history', async route => {
+    if (route.request().method() !== 'POST') return route.fallback()
+    const payload = route.request().postDataJSON()
+    uploads.push(payload)
+    if (payload.chats?.a && payload.baseVersions.a === 6) {
+      return json(route, { success: true, version: 8, versions: {}, foldersVersion: 0,
+        conflicts: [{ chatId: 'a', reason: 'version', serverVersion: 8 }] })
+    }
+    return route.fallback()
+  })
+  await page.addInitScript(() => {
+    localStorage.setItem('username', 'admin')
+    localStorage.setItem('role', 'admin')
+    if (localStorage.getItem('audit-draft-seeded')) return
+    localStorage.setItem('audit-draft-seeded', 'true')
+    localStorage.setItem('chatai-chat-recovery:admin', JSON.stringify({ revision: 2, savedAt: Date.now(),
+      payload: { chats: { a: [{ role: 'user', content: '离线草稿内容' }] }, baseVersions: { a: 6 }, lastChatId: 'a' } }))
+  })
+  await page.goto('/')
+  await expect(page.locator('.sync-conflict-bar')).toBeVisible()
+  expect(uploads[0].baseVersions.a).toBe(6)
+  expect(state.chats.a[0].content).toBe('另一个设备修改后的内容')
+  await page.reload()
+  await expect(page.locator('.sync-conflict-bar')).toBeVisible()
+  const local = await page.evaluate(() => JSON.parse(localStorage.getItem('chatai-chat-recovery:admin')))
+  expect(local.payload.recoveryConflicts[0].localMessages[0].content).toBe('离线草稿内容')
+})
+
+test('密码分享的复制请求携带本次已授权阅读凭证', async ({ page }) => {
+  await installApiMock(page)
+  let cloned = null
+  await page.route('**/api/share/**', async route => {
+    const request = route.request()
+    if (request.url().endsWith('/clone')) {
+      cloned = request.postDataJSON()
+      return json(route, { success: true, chatId: 'clone' })
+    }
+    if (request.method() === 'GET') return json(route, { success: false, passwordRequired: true })
+    expect(request.postDataJSON().password).toBe('test-password')
+    return json(route, { success: true, title: '受保护分享', accessToken: 'test-view-token', maxViews: 1,
+      accessCount: 1, messages: [{ role: 'user', content: '合法查看的内容' }] })
+  })
+  await page.goto('/share/test')
+  await page.locator('#share-password').fill('test-password')
+  await page.locator('#share-password').press('Enter')
+  await expect(page.getByText('合法查看的内容')).toBeVisible()
+  await page.getByRole('button', { name: '复制到我的会话' }).click()
+  await expect.poll(() => cloned).toEqual({ password: 'test-password', accessToken: 'test-view-token' })
+})
+
+test('备份恢复以独立ZIP请求发送大文件和中文密码', async ({ page }) => {
+  await installApiMock(page)
+  let uploaded = null
+  await page.route('**/api/admin/backups', route => json(route, { success: true, data: [], autoBackupEnabled: false }))
+  await page.route('**/api/admin/backups/restore-upload', async route => {
+    const request = route.request()
+    uploaded = { type: request.headers()['content-type'], password: request.headers()['x-restore-password'],
+      size: request.postDataBuffer().length }
+    return json(route, { success: true })
+  })
+  await page.addInitScript(() => {
+    localStorage.setItem('username', 'admin')
+    localStorage.setItem('role', 'admin')
+  })
+  await page.goto('/admin/backups')
+  await page.getByRole('button', { name: '上传备份文件恢复…' }).click()
+  const dialog = page.getByRole('dialog', { name: '上传备份文件恢复' })
+  await dialog.locator('input[type="file"]').setInputFiles({ name: 'backup.zip', mimeType: 'application/zip', buffer: Buffer.alloc(7 * 1024 * 1024) })
+  await dialog.locator('input[type="password"]').fill('密码test123')
+  await dialog.getByRole('button', { name: '上传并恢复', exact: true }).click()
+  await expect.poll(() => uploaded).toEqual({ type: 'application/zip', password: Buffer.from('密码test123').toString('base64'), size: 7 * 1024 * 1024 })
+})
+
 /**
  * 安装可变的 API 替身：模拟登录、模型、SSE 与会话服务端持久化，
  * 让浏览器测试不依赖真实模型密钥，也不会修改开发数据库。

@@ -116,6 +116,7 @@ public class SqliteStorageService implements StorageService {
 
             // 建表（IF NOT EXISTS，幂等）
             schemaInitializer.createTables();
+            fileAssetRepository.migrateLegacyPublicAssets(java.nio.file.Path.of(System.getProperty("user.dir"), "data", "uploads"));
 
             // 全量加载 t_setting 到内存缓存（后续 getSetting 纯内存读取）
             settingsRepository.reload();
@@ -1165,6 +1166,7 @@ public class SqliteStorageService implements StorageService {
      * 设置、模型配置、公告与用户缓存全部失效，下次读取时从恢复后的数据库重新加载。
      */
     public void reloadCaches() {
+        fileAssetRepository.migrateLegacyPublicAssets(java.nio.file.Path.of(System.getProperty("user.dir"), "data", "uploads"));
         settingsRepository.reload();
         modelConfigRepository.invalidateCache();
         announcementRepository.invalidateCache();

@@ -1,11 +1,11 @@
 package com.chatai.newbot.controller;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.chatai.newbot.service.DocumentParseService;
 import com.chatai.newbot.service.FileStorageService;
 import com.chatai.newbot.service.PdfRenderService;
 import com.chatai.newbot.service.StorageManager;
+import com.chatai.newbot.service.ShareAccessService;
 import com.chatai.newbot.model.ChatShare;
 import com.chatai.newbot.model.User;
 import jakarta.servlet.http.Cookie;
@@ -19,7 +19,6 @@ import org.springframework.web.multipart.MultipartFile;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.Callable;
-import java.util.concurrent.TimeUnit;
 
 /**
  * 文件上传/读取接口
@@ -39,18 +38,20 @@ public class FileController {
     private final PdfRenderService pdfRenderService;
     private final StorageManager storageManager;
     private final ObjectMapper objectMapper;
+    private final ShareAccessService shareAccess;
 
     /** 注入文件处理、所有权校验与分享快照解析依赖。 */
     public FileController(FileStorageService fileStorageService,
                           DocumentParseService documentParseService,
                           PdfRenderService pdfRenderService,
                           StorageManager storageManager,
-                          ObjectMapper objectMapper) {
+                          ObjectMapper objectMapper, ShareAccessService shareAccess) {
         this.fileStorageService = fileStorageService;
         this.documentParseService = documentParseService;
         this.pdfRenderService = pdfRenderService;
         this.storageManager = storageManager;
         this.objectMapper = objectMapper;
+        this.shareAccess = shareAccess;
     }
 
     /**
@@ -148,12 +149,13 @@ public class FileController {
     @GetMapping("/api/files/img/{month}/{filename:.+}")
     public ResponseEntity<byte[]> getImage(@PathVariable String month, @PathVariable String filename,
                                             @RequestParam(required = false) String shareId,
+                                            @RequestParam(required = false) String shareToken,
                                             HttpServletRequest request) {
         String url = FileStorageService.IMG_URL_PREFIX + month + "/" + filename;
         User user = resolveRequestUser(request);
-        boolean ownerAllowed = storageManager.canAccessFileAsset(url,
-                user == null ? null : user.getId(), user != null && user.isAdmin());
-        if (!ownerAllowed && !isAllowedByShare(url, shareId)) {
+        boolean ownerAllowed = shareAccess.isLegacyPublic(url) || (user != null && !user.isDisabled()
+                && (user.isAdmin() || shareAccess.canAccessAsset(url, user.getId())));
+        if (!ownerAllowed && !isAllowedByShare(url, shareId, shareToken)) {
             return ResponseEntity.status(403).build();
         }
         byte[] bytes = fileStorageService.readImage(month, filename);
@@ -162,7 +164,8 @@ public class FileController {
         }
         ResponseEntity.BodyBuilder builder = ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(fileStorageService.mimeOf(filename)))
-                .cacheControl(CacheControl.maxAge(30, TimeUnit.DAYS).cachePrivate());
+                .cacheControl(CacheControl.noStore())
+                .header("Referrer-Policy", "no-referrer");
         // 存量 svg 兜底：新上传已禁止 SVG，但历史文件仍可能存在。SVG 顶级导航打开会执行
         // 内嵌脚本（存储型 XSS），故强制以附件下载而非内联渲染，并附加沙箱 CSP 双重防护
         if (fileStorageService.isSvg(filename)) {
@@ -192,29 +195,14 @@ public class FileController {
     /**
      * 校验匿名分享是否确实包含目标图片 URL，防止仅凭文件名跨分享读取其他资源。
      */
-    private boolean isAllowedByShare(String url, String shareId) {
+    private boolean isAllowedByShare(String url, String shareId, String shareToken) {
         if (shareId == null || shareId.isBlank()) return false;
         ChatShare share = storageManager.getChatShareById(shareId);
-        if (share == null || share.getSnapshotJson() == null) return false;
-        if (share.getExpiresAt() != null && !share.getExpiresAt().isBlank()) {
-            try {
-                if (java.time.LocalDateTime.now().isAfter(java.time.LocalDateTime.parse(
-                        share.getExpiresAt(), java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")))) {
-                    return false;
-                }
-            } catch (Exception ignore) { }
-        }
+        if (!shareAccess.verifyToken(share, shareToken) || share.getSnapshotJson() == null) return false;
         try {
-            JsonNode messages = objectMapper.readTree(share.getSnapshotJson());
-            if (!messages.isArray()) return false;
-            for (JsonNode message : messages) {
-                JsonNode images = message.get("images");
-                if (images == null || !images.isArray()) continue;
-                for (JsonNode image : images) {
-                    if (image.isTextual() && url.equals(image.asText())) return true;
-                }
-            }
-            return false;
+            Object messages = objectMapper.readValue(share.getSnapshotJson(), Object.class);
+            return shareAccess.resourceUrls(messages).contains(url)
+                    && shareAccess.canAccessAsset(url, share.getUserId());
         } catch (Exception ignore) {
             return false;
         }

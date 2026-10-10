@@ -252,7 +252,7 @@ public class UnifiedChatService {
      * @param assistantContent 助手首条回复内容（可为空）
      * @return 生成的标题（已去除引号/换行、截断长度）；失败返回 null
      */
-    public String generateTitle(String modelConfigId, String userContent, String assistantContent) {
+    public String generateTitle(String modelConfigId, String userContent, String assistantContent, UsageLog usageLog) {
         ModelConfig config = storageService.getModelConfigById(modelConfigId);
         if (config == null || !config.isEnabled()) {
             return null;
@@ -266,11 +266,7 @@ public class UnifiedChatService {
         }
 
         boolean anthropic = "anthropic".equalsIgnoreCase(config.getProtocol());
-        StringBuilder convo = new StringBuilder("用户: ").append(clip(userContent, 500));
-        if (assistantContent != null && !assistantContent.trim().isEmpty()) {
-            convo.append("\n助手: ").append(clip(assistantContent, 500));
-        }
-        String prompt = "请为以下对话生成一个不超过 15 个字的简短中文标题，只返回标题本身，不要加引号、标点或解释：\n\n" + convo;
+        String prompt = buildTitlePrompt(userContent, assistantContent);
 
         Map<String, Object> body = new HashMap<>();
         body.put("model", config.getModelId());
@@ -308,11 +304,54 @@ public class UnifiedChatService {
                     .retrieve()
                     .bodyToMono(String.class)
                     .block(Duration.ofSeconds(20));
-            return parseTitleFromResponse(resp, anthropic);
+            String title = parseTitleFromResponse(resp, anthropic);
+            recordTitleUsage(resp, prompt, title, config, usageLog, anthropic);
+            return title;
         } catch (Exception e) {
             log.warn("AI 自动命名失败: {} ({}) -> {}", config.getDisplayName(), config.getModelId(), e.getMessage());
             return null;
         }
+    }
+
+    /** 标题预算和实际调用共用完全一致的裁剪后提示词。 */
+    private String buildTitlePrompt(String userContent, String assistantContent) {
+        StringBuilder convo = new StringBuilder("用户: ").append(clip(userContent, 500));
+        if (assistantContent != null && !assistantContent.isBlank()) {
+            convo.append("\n助手: ").append(clip(assistantContent, 500));
+        }
+        return "请为以下对话生成一个不超过 15 个字的简短中文标题，只返回标题本身，不要加引号、标点或解释：\n\n" + convo;
+    }
+
+    /** 按中英文混合文本估算标题输入，包含消息封装开销。 */
+    public int estimateTitleInputTokens(String userContent, String assistantContent) {
+        return 4 + contextBudgetService.estimateTokens(buildTitlePrompt(userContent, assistantContent));
+    }
+
+    /** 记录标题调用的用户、请求、完整 usage 与模型价格快照；无 usage 的成功响应保守估算。 */
+    private void recordTitleUsage(String response, String prompt, String title, ModelConfig model,
+                                  UsageLog entry, boolean anthropic) throws Exception {
+        if (entry == null || response == null) return;
+        var json = objectMapper.readTree(response);
+        var usage = json.path("usage");
+        if ((title == null || title.isBlank()) && usage.isMissingNode()) return;
+        int cached = anthropic ? usage.path("cache_read_input_tokens").asInt(0)
+                : usage.path("prompt_tokens_details").path("cached_tokens").asInt(usage.path("cached_tokens").asInt(0));
+        int input = usage.path(anthropic ? "input_tokens" : "prompt_tokens")
+                .asInt(4 + contextBudgetService.estimateTokens(prompt));
+        if (anthropic) input += Math.max(0, cached) + Math.max(0, usage.path("cache_creation_input_tokens").asInt(0));
+        // 厂商省略 usage 时按请求输出上限预估，避免漏计或仅按截短后的标题低估消耗。
+        int output = usage.path(anthropic ? "output_tokens" : "completion_tokens").asInt(64);
+        int reasoning = usage.path("completion_tokens_details").path("reasoning_tokens").asInt(0);
+        entry.setPromptTokens(Math.max(0, input));
+        entry.setCompletionTokens(Math.max(0, output));
+        entry.setCachedTokens(Math.max(0, Math.min(cached, entry.getPromptTokens())));
+        entry.setReasoningTokens(Math.max(0, Math.min(reasoning, entry.getCompletionTokens())));
+        double reasoningPrice = model.getReasoningPriceCny() > 0 ? model.getReasoningPriceCny() : model.getOutputPriceCny();
+        entry.setCostCny(((entry.getPromptTokens() - entry.getCachedTokens()) * Math.max(0, model.getInputPriceCny())
+                + entry.getCachedTokens() * Math.max(0, model.getCachedPriceCny())
+                + (entry.getCompletionTokens() - entry.getReasoningTokens()) * Math.max(0, model.getOutputPriceCny())
+                + entry.getReasoningTokens() * Math.max(0, reasoningPrice)) / 1_000_000D);
+        storageService.addUsageLog(entry);
     }
 
     /** 从非流式应答中提取标题文本（OpenAI: choices[0].message.content；Anthropic: content[0].text） */

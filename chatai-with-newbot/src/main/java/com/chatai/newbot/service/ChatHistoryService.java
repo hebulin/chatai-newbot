@@ -415,14 +415,18 @@ public class ChatHistoryService {
                     conflicts.add(conflictItem(chatId, "deleted", 0));
                     continue;
                 }
-                Long expected = resolveExpectedVersion(baseVersions, chatId, false);
+                boolean restoringMeta = restoreIds.contains(chatId);
+                Long expected = resolveExpectedVersion(baseVersions, chatId, restoringMeta);
                 try {
+                    if (restoringMeta) sqliteStorage.restoreChatSessions(userId, List.of(chatId));
                     boolean updated = sqliteStorage.updateChatSessionMetaChecked(userId, chatId,
                             objectMapper.writeValueAsString(entry.getValue()),
                             expected, updatedAt, updatedAtTs);
                     if (updated) {
                         Integer v = sqliteStorage.getChatSessionVersion(userId, chatId);
                         if (v != null) newVersions.put(chatId, v.longValue());
+                    } else {
+                        conflicts.add(conflictItem(chatId, "deleted", 0));
                     }
                 } catch (ChatSyncConflictException e) {
                     conflicts.add(conflictItem(chatId, "version", e.getServerVersion()));

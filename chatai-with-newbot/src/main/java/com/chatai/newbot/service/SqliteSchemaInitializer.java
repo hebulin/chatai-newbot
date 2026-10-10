@@ -268,6 +268,8 @@ public class SqliteSchemaInitializer {
                 "created_at TEXT" +
                 ")");
         jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_file_asset_owner ON t_file_asset(owner_user_id)");
+        // 一次性记录旧版已公开但未登记归属的资源；不再对未来出现的未知文件默认放行。
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_legacy_public_asset (url TEXT PRIMARY KEY)");
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_file_asset_grant (" +
                 "url TEXT NOT NULL," +
                 "user_id TEXT NOT NULL," +

@@ -220,7 +220,7 @@ public class ChatSessionRepository {
                                      Long expectedVersion, String updatedAt, long updatedAtTs) {
         Integer current = findVersion(userId, chatId);
         if (current == null) return false;
-        if (expectedVersion != null && expectedVersion > 0 && expectedVersion != current.longValue()) {
+        if (expectedVersion != null && expectedVersion != current.longValue()) {
             throw new ChatSyncConflictException(chatId, current);
         }
         int updated = jdbcTemplate.update(

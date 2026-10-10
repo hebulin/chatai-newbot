@@ -105,6 +105,8 @@ const messages = ref([])
 const containerRef = ref(null)
 const passwordRequired = ref(false)
 const passwordInput = ref('')
+// 仅保留在当前页面内存中，复制已获准查看的分享不重复消耗阅读次数。
+const accessToken = ref('')
 const passwordError = ref('')
 const accessCount = ref(0)
 const maxViews = ref(0)
@@ -130,6 +132,7 @@ async function loadShare() {
     const res = await getSharedChat(route.params.id, passwordInput.value)
     if (res && res.success) {
       passwordRequired.value = false
+      accessToken.value = res.accessToken || ''
       title.value = res.title || t('share.defaultTitle')
       sharedBy.value = res.sharedBy || ''
       sharedAt.value = res.sharedAt || ''
@@ -176,7 +179,7 @@ async function loadShare() {
 async function cloneToMine() {
   cloning.value = true
   try {
-    const res = await cloneSharedChat(route.params.id, passwordInput.value)
+    const res = await cloneSharedChat(route.params.id, passwordInput.value, accessToken.value)
     if (res?.success) window.location.href = '/'
     else ElMessage.error(res?.message || t('share.loadFailed'))
   } finally {

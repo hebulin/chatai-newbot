@@ -637,8 +637,22 @@ public class ChatController {
                 return result;
             }
         }
+        String requestId = UUID.randomUUID().toString();
+        if (!user.isAdmin()) {
+            var reservation = budgetReservationService.reserveFixed(user, config,
+                    chatService.estimateTitleInputTokens(userContent, assistantContent), 64);
+            if (!reservation.allowed()) return Map.of("success", false, "message", reservation.message());
+            requestId = reservation.requestId();
+        }
+        UsageLog usage = new UsageLog();
+        usage.setRequestId(requestId);
+        usage.setUserId(user.getId());
+        usage.setUsername(user.getUsername());
+        usage.setModelId(config.getId());
+        usage.setModelName(config.getDisplayName() + "·标题");
+        usage.setTimestamp(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
         try {
-            String title = chatService.generateTitle(modelConfigId, userContent, assistantContent);
+            String title = chatService.generateTitle(modelConfigId, userContent, assistantContent, usage);
             if (title == null || title.isEmpty()) {
                 result.put("success", false);
                 result.put("message", "生成失败");
@@ -650,6 +664,8 @@ public class ChatController {
             log.warn("AI 生成会话标题失败: {}", e.getMessage());
             result.put("success", false);
             result.put("message", "生成失败");
+        } finally {
+            budgetReservationService.release(requestId);
         }
         return result;
     }

@@ -107,4 +107,18 @@ public class ChatShareRepository {
         return jdbcTemplate.update("UPDATE t_chat_share SET access_count=access_count+1 "
                 + "WHERE id=? AND (max_views<=0 OR access_count<max_views)", id) > 0;
     }
+
+    /** 安全字段的比较与次数递增使用同一 SQL，避免改密或撤销与读取并发时沿用旧校验。 */
+    public boolean claimAccess(ChatShare share) {
+        return jdbcTemplate.update("UPDATE t_chat_share SET access_count=access_count+1 WHERE id=? "
+                        + "AND (max_views<=0 OR access_count<max_views) AND max_views=? "
+                        + "AND COALESCE(password_hash,'')=? AND COALESCE(expires_at,'')=? "
+                        + "AND COALESCE(snapshot_json,'')=? AND sanitized=? "
+                        + "AND (expires_at IS NULL OR expires_at='' OR expires_at>?)",
+                share.getId(), share.getMaxViews(),
+                share.getPasswordHash() == null ? "" : share.getPasswordHash(),
+                share.getExpiresAt() == null ? "" : share.getExpiresAt(),
+                share.getSnapshotJson() == null ? "" : share.getSnapshotJson(), share.isSanitized() ? 1 : 0,
+                java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))) > 0;
+    }
 }

@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -41,6 +42,8 @@ public class AdminBackupController {
     private final BackupService backupService;
     private final StorageManager storageManager;
     private final AdminSupport adminSupport;
+    @Value("${chatai.backup.max-upload-bytes:536870912}")
+    private long maxUploadBytes = 536870912L;
 
     public AdminBackupController(BackupService backupService, StorageManager storageManager,
                                  AdminSupport adminSupport) {
@@ -151,7 +154,7 @@ public class AdminBackupController {
      * 上传备份文件并恢复（高风险：需重新输入当前管理员密码确认）。
      * 上传文件先落临时目录校验，不进入备份目录，恢复完成后删除。
      */
-    @PostMapping("/restore-upload")
+    @PostMapping(value = "/restore-upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public Map<String, Object> restoreUpload(@RequestParam("file") MultipartFile file,
                                               @RequestParam("password") String password,
                                               HttpServletRequest request) {
@@ -188,6 +191,53 @@ public class AdminBackupController {
             }
         }
         return result;
+    }
+
+    /** 独立的大备份二进制上传入口：分块落盘并检查上限，不放宽聊天附件的 multipart 限额。 */
+    @PostMapping(value = "/restore-upload", consumes = "application/zip")
+    public Map<String, Object> restoreUploadStream(HttpServletRequest request,
+            @org.springframework.web.bind.annotation.RequestHeader("X-Restore-Password") String encodedPassword) throws java.io.IOException {
+        adminSupport.requireAdmin(request);
+        User admin = (User) request.getAttribute("currentUser");
+        String password;
+        try {
+            password = new String(java.util.Base64.getDecoder().decode(encodedPassword), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            return Map.of("success", false, "message", "管理员密码错误，恢复已取消");
+        }
+        if (storageManager.authenticate(admin.getUsername(), password) == null) {
+            return Map.of("success", false, "message", "管理员密码错误，恢复已取消");
+        }
+        if (request.getContentLengthLong() > maxUploadBytes) {
+            throw new com.chatai.newbot.exception.ApiException(413, "备份文件超过允许的上传大小");
+        }
+        Path tempFile = Files.createTempFile("chatai-restore-upload", ".zip");
+        try {
+            long total = 0;
+            try (var input = request.getInputStream(); var output = Files.newOutputStream(tempFile)) {
+                byte[] buffer = new byte[8192];
+                int count;
+                while ((count = input.read(buffer)) != -1) {
+                    total += count;
+                    if (total > maxUploadBytes) {
+                        throw new com.chatai.newbot.exception.ApiException(413, "备份文件超过允许的上传大小");
+                    }
+                    output.write(buffer, 0, count);
+                }
+            }
+            if (total == 0) return Map.of("success", false, "message", "请选择备份文件");
+            Map<String, Object> summary = backupService.restoreBackup(tempFile);
+            adminSupport.audit(request, "上传并恢复系统备份", "zip");
+            return Map.of("success", true, "data", summary, "message", "恢复完成，请重新登录");
+        } catch (com.chatai.newbot.exception.ApiException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("上传恢复系统备份失败", e);
+            adminSupport.audit(request, "恢复系统备份失败", "upload: " + e.getMessage());
+            return Map.of("success", false, "message", "恢复失败: " + e.getMessage());
+        } finally {
+            Files.deleteIfExists(tempFile);
+        }
     }
 
     /** 读取/更新定时备份开关（每日凌晨 03:00 自动备份，保留最近 5 份） */

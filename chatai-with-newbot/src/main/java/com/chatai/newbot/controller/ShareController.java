@@ -6,10 +6,12 @@ import com.chatai.newbot.service.ApiKeyCrypto;
 import com.chatai.newbot.service.ChatHistoryService;
 import com.chatai.newbot.service.StorageManager;
 import com.chatai.newbot.service.PasswordHasher;
+import com.chatai.newbot.service.ShareAccessService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -33,14 +35,17 @@ public class ShareController {
 
     private final StorageManager storageManager;
     private final ChatHistoryService chatHistoryService;
+    private final ShareAccessService shareAccess;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private static final Pattern API_KEY = Pattern.compile("(?i)(sk-[a-z0-9_-]{12,}|bearer\\s+[a-z0-9._-]{12,})");
     private static final Pattern EMAIL = Pattern.compile("(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}");
     private static final Pattern PHONE = Pattern.compile("(?<!\\d)(?:\\+?86[- ]?)?1[3-9]\\d{9}(?!\\d)");
 
-    public ShareController(StorageManager storageManager, ChatHistoryService chatHistoryService) {
+    /** 注入分享持久化、会话读取与统一资源访问策略。 */
+    public ShareController(StorageManager storageManager, ChatHistoryService chatHistoryService, ShareAccessService shareAccess) {
         this.storageManager = storageManager;
         this.chatHistoryService = chatHistoryService;
+        this.shareAccess = shareAccess;
     }
 
     /**
@@ -101,6 +106,7 @@ public class ShareController {
             result.put("message", "会话不存在或没有消息，无法分享");
             return result;
         }
+        shareAccess.validateAssets(messages, user.getId());
 
         // 解析过期天数（expireDays：<=0 或缺省=永久有效）
         int expireDays = 0;
@@ -147,7 +153,7 @@ public class ShareController {
         share.setChatId(chatId);
         share.setUserId(user.getId());
         share.setUserName(user.getUsername());
-        share.setTitle(buildTitle(messages));
+        share.setTitle(buildTitle(snapshot));
         share.setExpiresAt(expiresAt);
         share.setSnapshotJson(snapshotJson);
         share.setPasswordHash(password.isEmpty() ? null : PasswordHasher.hash(password));
@@ -272,7 +278,7 @@ public class ShareController {
             result.put("message", "分享的会话已被删除");
             return result;
         }
-        if (!storageManager.claimChatShareAccess(id)) {
+        if (!shareAccess.claimAccess(share)) {
             // 并发兜底：预检通过但原子申领失败（另一请求刚好消耗完最后一次）
             result.put("success", false);
             result.put("message", "分享链接访问次数已用完");
@@ -280,14 +286,16 @@ public class ShareController {
         }
 
         result.put("success", true);
-        result.put("title", share.getTitle());
+        result.put("title", share.isSanitized() ? buildTitle(messages) : share.getTitle());
         result.put("sharedBy", share.getUserName());
         result.put("sharedAt", share.getCreatedAt());
         result.put("expiresAt", share.getExpiresAt());
         result.put("accessCount", share.getAccessCount() + 1);
         result.put("maxViews", share.getMaxViews());
         result.put("sanitized", share.isSanitized());
-        result.put("messages", withShareImageAccess(messages, id));
+        String accessToken = shareAccess.issueToken(share);
+        result.put("accessToken", accessToken);
+        result.put("messages", withShareImageAccess(messages, id, accessToken));
         return result;
     }
 
@@ -295,6 +303,7 @@ public class ShareController {
      * 将分享快照复制为当前登录用户的新会话分支。
      */
     @PostMapping("/{id}/clone")
+    @Transactional
     public Map<String, Object> cloneShare(@PathVariable String id,
                                           @RequestBody(required = false) Map<String, Object> body,
                                           HttpServletRequest request) {
@@ -305,7 +314,12 @@ public class ShareController {
         if (share == null || isExpired(share.getExpiresAt())) {
             return Map.of("success", false, "message", "分享不存在或已过期");
         }
-        if (share.getPasswordHash() != null && !share.getPasswordHash().isBlank()
+        String accessToken = body != null && body.get("accessToken") instanceof String token ? token : null;
+        boolean authorizedView = shareAccess.verifyToken(share, accessToken);
+        if (!authorizedView && share.getMaxViews() > 0 && share.getAccessCount() >= share.getMaxViews()) {
+            return Map.of("success", false, "message", "分享链接访问次数已用完");
+        }
+        if (!authorizedView && share.getPasswordHash() != null && !share.getPasswordHash().isBlank()
                 && !PasswordHasher.matches(password, share.getPasswordHash())) {
             return Map.of("success", false, "message", "分享密码错误");
         }
@@ -313,10 +327,13 @@ public class ShareController {
         if (messages == null || messages.isEmpty()) {
             return Map.of("success", false, "message", "分享快照不可用");
         }
-        grantSnapshotAssets(messages, user.getId());
+        if (!authorizedView && !shareAccess.claimAccess(share)) {
+            return Map.of("success", false, "message", "分享链接访问次数已用完或访问规则已变更");
+        }
+        shareAccess.grantAssets(messages, share.getUserId(), user.getId());
         String chatId = "share_" + UUID.randomUUID().toString().replace("-", "");
         Map<String, Object> meta = new LinkedHashMap<>();
-        meta.put("title", share.getTitle() + " · 分享副本");
+        meta.put("title", (share.isSanitized() ? buildTitle(messages) : share.getTitle()) + " · 分享副本");
         meta.put("sourceShareId", share.getId());
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("lastChatId", chatId);
@@ -324,23 +341,6 @@ public class ShareController {
         payload.put("chatMeta", Map.of(chatId, meta));
         Map<String, Object> saved = chatHistoryService.saveChatHistory(user.getId(), payload);
         return Map.of("success", true, "chatId", chatId, "version", saved.getOrDefault("version", 0L));
-    }
-
-    /** 将快照中的图片和文档资源授权给复制者，保持原始资源所有权不变。 */
-    private void grantSnapshotAssets(List<Map<String, Object>> messages, String userId) {
-        for (Map<String, Object> message : messages) {
-            if (message.get("images") instanceof List<?> images) {
-                images.stream().filter(String.class::isInstance).map(String.class::cast)
-                        .forEach(url -> storageManager.grantFileAssetAccess(url, userId));
-            }
-            if (message.get("attachments") instanceof List<?> attachments) {
-                for (Object attachment : attachments) {
-                    if (attachment instanceof Map<?, ?> map && map.get("url") instanceof String url) {
-                        storageManager.grantFileAssetAccess(url, userId);
-                    }
-                }
-            }
-        }
     }
 
     /**
@@ -352,7 +352,7 @@ public class ShareController {
             LocalDateTime expiry = LocalDateTime.parse(expiresAt, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
             return LocalDateTime.now().isAfter(expiry);
         } catch (Exception ignore) {
-            return false;
+            return true;
         }
     }
 
@@ -440,15 +440,19 @@ public class ShareController {
      * 优先读取不可变分享快照；历史分享没有快照时回退源会话。
      */
     private List<Map<String, Object>> readShareSnapshot(ChatShare share) {
+        List<Map<String, Object>> messages;
         if (share.getSnapshotJson() != null && !share.getSnapshotJson().isBlank()) {
             try {
-                return objectMapper.readValue(share.getSnapshotJson(),
+                messages = objectMapper.readValue(share.getSnapshotJson(),
                         new TypeReference<List<Map<String, Object>>>() {});
             } catch (Exception ignore) {
                 return null;
             }
+        } else {
+            messages = extractChatMessages(share.getUserId(), share.getChatId());
         }
-        return extractChatMessages(share.getUserId(), share.getChatId());
+        shareAccess.validateAssets(messages, share.getUserId());
+        return share.isSanitized() && messages != null ? sanitizeMessages(messages) : messages;
     }
 
     /**
@@ -457,16 +461,29 @@ public class ShareController {
     private List<Map<String, Object>> sanitizeMessages(List<Map<String, Object>> messages) {
         List<Map<String, Object>> copy = new ArrayList<>();
         for (Map<String, Object> source : messages) {
-            Map<String, Object> item = new LinkedHashMap<>(source);
-            if (item.get("content") instanceof String content) {
-                String safe = API_KEY.matcher(content).replaceAll("[API_KEY已隐藏]");
-                safe = EMAIL.matcher(safe).replaceAll("[邮箱已隐藏]");
-                safe = PHONE.matcher(safe).replaceAll("[手机号已隐藏]");
-                item.put("content", safe);
-            }
+            Map<String, Object> item = new LinkedHashMap<>();
+            source.forEach((key, value) -> item.put(key, sanitizeValue(value, key)));
             copy.add(item);
         }
         return copy;
+    }
+
+    /** 递归复制并脱敏所有对外文本，包括思考、历史版本、附件名称和嵌套元信息。 */
+    private Object sanitizeValue(Object value, String field) {
+        // 资源地址及稳定标识不属于展示文本；替换 UUID 中的数字会破坏图片、文档和回答版本引用。
+        if (Set.of("images", "url", "id", "versionId", "currentVersionId", "role", "status").contains(field)) return value;
+        if (value instanceof String text) {
+            String safe = API_KEY.matcher(text).replaceAll("[API_KEY已隐藏]");
+            safe = EMAIL.matcher(safe).replaceAll("[邮箱已隐藏]");
+            return PHONE.matcher(safe).replaceAll("[手机号已隐藏]");
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> copy = new LinkedHashMap<>();
+            map.forEach((key, child) -> copy.put(String.valueOf(key), sanitizeValue(child, String.valueOf(key))));
+            return copy;
+        }
+        if (value instanceof List<?> list) return list.stream().map(child -> sanitizeValue(child, "")).toList();
+        return value;
     }
 
     /** 解析非负整数参数并限制上界。 */
@@ -482,7 +499,7 @@ public class ShareController {
     /**
      * 为匿名分享页中的受保护图片附加 shareId，只改响应副本，不污染快照。
      */
-    private List<Map<String, Object>> withShareImageAccess(List<Map<String, Object>> messages, String shareId) {
+    private List<Map<String, Object>> withShareImageAccess(List<Map<String, Object>> messages, String shareId, String accessToken) {
         List<Map<String, Object>> result = new ArrayList<>();
         for (Map<String, Object> source : messages) {
             Map<String, Object> item = new LinkedHashMap<>(source);
@@ -490,7 +507,7 @@ public class ShareController {
                 List<Object> rewritten = new ArrayList<>();
                 for (Object image : images) {
                     if (image instanceof String url && url.startsWith("/api/files/img/")) {
-                        rewritten.add(url + (url.contains("?") ? "&" : "?") + "shareId=" + shareId);
+                        rewritten.add(url.split("\\?", 2)[0] + "?shareId=" + shareId + "&shareToken=" + accessToken);
                     } else {
                         rewritten.add(image);
                     }

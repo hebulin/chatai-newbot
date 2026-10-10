@@ -92,6 +92,26 @@ class ChatHistoryServiceTest {
         return (Map<String, Object>) result.get("versions");
     }
 
+    /** 缺失基准的旧元信息草稿以0上传时必须冲突，显式恢复也不能把正文清空。 */
+    @Test
+    void metadataRecoveryProtectsVersionAndPreservesTrashedMessages() {
+        String userId = "meta_recovery_" + System.nanoTime();
+        service.saveChatHistory(userId, payload(Map.of("c", List.of(userMsg("原问题"), assistantMsg("原回答"))), Map.of("c", 0L)));
+        Map<String, Object> metadata = payload(Map.of(), Map.of("c", 0L));
+        metadata.put("chatMeta", Map.of("c", Map.of("title", "离线重命名")));
+        assertEquals("version", conflictsOf(service.saveChatHistory(userId, metadata)).getFirst().get("reason"));
+        Map<String, Object> deletion = payload(Map.of(), Map.of());
+        deletion.put("deletedChatIds", List.of("c"));
+        service.saveChatHistory(userId, deletion);
+        metadata.put("restoreChatIds", List.of("c"));
+        Map<String, Object> restored = service.saveChatHistory(userId, metadata);
+        assertTrue(conflictsOf(restored).isEmpty());
+        Map<String, Object> loaded = service.loadSingleChat(userId, "c");
+        assertEquals(true, loaded.get("exists"));
+        assertEquals(2, ((List<?>) loaded.get("messages")).size());
+        assertEquals("离线重命名", ((Map<?, ?>) loaded.get("meta")).get("title"));
+    }
+
     /** 双端基于同一版本同时追加：后到者必须收到版本冲突而非静默覆盖 */
     @Test
     void save_双端基于同一版本并发修改_后到者收到冲突() {

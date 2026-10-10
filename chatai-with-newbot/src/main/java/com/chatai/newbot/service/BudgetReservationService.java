@@ -39,6 +39,11 @@ public class BudgetReservationService {
         if (maxOutput == 0) maxOutput = OutputTokenPolicy.contextWindow(model,
                 storageManager.getSetting(OutputTokenPolicy.CONTEXT_SETTING_KEY));
         long estimatedInput = estimateInputTokens(request);
+        return reserveFixed(user, model, estimatedInput, maxOutput);
+    }
+
+    /** 为标题等固定上限的非流式调用复用同一用户预算锁与在途预占。 */
+    public ReservationResult reserveFixed(User user, ModelConfig model, long estimatedInput, int maxOutput) {
         long estimatedTokens = estimatedInput + maxOutput;
         double estimatedCost = estimateCost(model, estimatedInput, maxOutput);
         String day = LocalDate.now().toString();

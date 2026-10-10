@@ -132,6 +132,125 @@ describe('多端同步：增量载荷、版本基准与冲突处理', () => {
     expect(payload.chats.a).toHaveLength(2)
   })
 
+  it('旧草稿恢复保留原始基准版本，较短消息和元信息也不能冒用服务端最新版本', async () => {
+    localStorage.setItem('username', 'draft-user')
+    localStorage.setItem('chatai-chat-recovery:draft-user', JSON.stringify({
+      revision: 4, savedAt: Date.now(), payload: {
+        chats: { a: [{ role: 'user', content: '版本6的离线内容' }] },
+        chatMeta: { a: { title: '旧标题' }, b: { title: '离线重命名' } },
+        baseVersions: { a: 6, b: 3 }, folders: [{ id: 'local', name: '离线文件夹' }],
+        baseFoldersVersion: 1, lastChatId: 'a'
+      }
+    }))
+    loadChatSummaries.mockResolvedValue({
+      success: true, summaries: [{ id: 'a', count: 2, version: 8 }, { id: 'b', count: 1, version: 5 }],
+      foldersVersion: 4, version: 20, lastChatId: 'a'
+    })
+    loadSingleChatHistory.mockResolvedValue({
+      success: true, messages: [{ role: 'user', content: '版本8的远端内容' }], version: 8, exists: true
+    })
+    saveChatHistory.mockResolvedValue({
+      success: true, version: 21, versions: {}, foldersVersion: 4,
+      conflicts: [{ chatId: 'a', reason: 'version', serverVersion: 8 }]
+    })
+    await store.loadFromServer()
+    await flushSync()
+    expect(saveChatHistory.mock.calls[0][0]).toMatchObject({
+      baseVersions: { a: 6, b: 3 }, baseFoldersVersion: 1,
+      chats: { a: [{ content: '版本6的离线内容' }] }
+    })
+    expect(store.chats.a[0].content).toBe('版本8的远端内容')
+    expect(store.syncConflicts[0].localMessages[0].content).toBe('版本6的离线内容')
+    const recovery = JSON.parse(localStorage.getItem('chatai-chat-recovery:draft-user'))
+    expect(recovery.payload.recoveryConflicts[0].localMessages[0].content).toBe('版本6的离线内容')
+    store.$dispose()
+    setActivePinia(createPinia())
+    store = useChatStore()
+    await store.loadFromServer()
+    expect(store.syncConflicts[0].localMessages[0].content).toBe('版本6的离线内容')
+  })
+
+  it('无基准版本的旧格式草稿保守使用0，不覆盖已有远端会话', async () => {
+    localStorage.setItem('chatai-chat-recovery:anonymous', JSON.stringify({
+      revision: 1, savedAt: Date.now(), payload: { chats: { a: [] }, lastChatId: 'a' }
+    }))
+    loadChatSummaries.mockResolvedValue({ success: true, summaries: [{ id: 'a', count: 2, version: 9 }] })
+    await store.loadFromServer()
+    await flushSync()
+    expect(saveChatHistory.mock.calls[0][0].baseVersions.a).toBe(0)
+    expect(saveChatHistory.mock.calls[0][0].chats.a).toEqual([])
+  })
+
+  it('当前会话只有重命名草稿时，懒加载保留旧基准，解决冲突不会上传空正文', async () => {
+    localStorage.setItem('chatai-chat-recovery:anonymous', JSON.stringify({
+      revision: 2, savedAt: Date.now(), payload: {
+        chats: {}, chatMeta: { a: { title: '离线标题' } }, baseVersions: { a: 6 }, lastChatId: 'a'
+      }
+    }))
+    loadChatSummaries.mockResolvedValue({ success: true, lastChatId: 'a',
+      chatMeta: { a: { title: '远端标题' } }, summaries: [{ id: 'a', count: 2, version: 8 }] })
+    const messages = [{ role: 'user', content: '原问题' }, { role: 'assistant', content: '原回答' }]
+    loadSingleChatHistory.mockResolvedValue({ success: true, exists: true, version: 8,
+      messages, meta: { title: '远端标题' } })
+    saveChatHistory.mockResolvedValue({ success: true, version: 9, versions: {}, foldersVersion: 0,
+      conflicts: [{ chatId: 'a', reason: 'version', serverVersion: 8 }] })
+    await store.loadFromServer()
+    expect(store.chatMeta.a.title).toBe('离线标题')
+    expect(store.chatVersions.a).toBe(6)
+    await flushSync()
+    expect(saveChatHistory.mock.calls[0][0]).toMatchObject({ chats: {}, baseVersions: { a: 6 }, chatMeta: { a: { title: '离线标题' } } })
+    expect(store.syncConflicts[0].hasLocalMessages).toBe(false)
+    saveChatHistory.mockClear()
+    saveChatHistory.mockResolvedValue({ success: true, version: 10, versions: { a: 9 }, foldersVersion: 0, conflicts: [] })
+    store.resolveSyncConflict('a', true)
+    await flushSync()
+    expect(saveChatHistory.mock.calls[0][0]).toMatchObject({ chats: {}, baseVersions: { a: 8 }, chatMeta: { a: { title: '离线标题' } } })
+    expect(store.chats.a).toEqual(messages)
+  })
+
+  it('纯元信息的删除冲突恢复后立即补回正文和会话列表', async () => {
+    store.chatMeta = { b: { title: '离线标题' } }
+    store.chatSummaries = { b: { id: 'b', title: '原标题', count: 2, version: 6 } }
+    store.chatVersions = { b: 6 }
+    store.renameChat('b', '离线标题')
+    loadSingleChatHistory.mockResolvedValue({ success: true, exists: false, messages: [], version: 0 })
+    saveChatHistory.mockResolvedValue({ success: true, version: 8, versions: {}, foldersVersion: 0,
+      conflicts: [{ chatId: 'b', reason: 'deleted', serverVersion: 0 }] })
+    await flushSync()
+    expect(store.syncConflicts[0].hasLocalMessages).toBe(false)
+    const messages = [{ role: 'user', content: '原问题' }, { role: 'assistant', content: '原回答' }]
+    loadSingleChatHistory.mockResolvedValue({ success: true, exists: true, messages,
+      meta: { title: '离线标题' }, version: 9 })
+    saveChatHistory.mockResolvedValue({ success: true, version: 9, versions: { b: 9 }, foldersVersion: 0, conflicts: [] })
+    saveChatHistory.mockClear()
+    store.resolveSyncConflict('b', true)
+    await flushSync()
+    expect(saveChatHistory.mock.calls[0][0].chats).toEqual({})
+    expect(saveChatHistory.mock.calls[0][0].restoreChatIds).toContain('b')
+    expect(store.chats.b).toEqual(messages)
+    expect(store.sortedChatList.total).toBe(1)
+  })
+
+  it('恢复补拉期间再次删除会话，迟到的正文不会把已删除会话放回列表', async () => {
+    store.chats = { b: [{ role: 'user', content: '原问题' }] }
+    store.chatMeta = { b: { title: '原名' } }
+    store.syncConflicts = [{ chatId: 'b', reason: 'deleted', hasLocalMessages: false,
+      localMessages: null, localMeta: { title: '离线标题' }, serverVersion: 0 }]
+    let resolveLoad
+    loadSingleChatHistory.mockImplementation(() => new Promise(resolve => { resolveLoad = resolve }))
+    saveChatHistory.mockResolvedValue({ success: true, version: 9, versions: { b: 9 }, foldersVersion: 0, conflicts: [] })
+    store.resolveSyncConflict('b', true)
+    await vi.advanceTimersByTimeAsync(500)
+    expect(resolveLoad).toBeTypeOf('function')
+    store.deleteChat('b')
+    resolveLoad({ success: true, exists: true, messages: [{ role: 'user', content: '原问题' }],
+      meta: { title: '离线标题' }, version: 9 })
+    await flushSync()
+    expect(store.deletedChatIds).toContain('b')
+    expect(store.chats.b).toBeUndefined()
+    expect(store.sortedChatList.total).toBe(0)
+  })
+
   it('元信息变更（置顶未加载会话）仅上传元信息且携带基准版本', async () => {
     store.chatMeta = { x: { pinned: false } }
     store.chatVersions = { x: 3 }

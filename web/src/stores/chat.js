@@ -96,7 +96,9 @@ export const useChatStore = defineStore('chat', () => {
   // 写入刷新/断网恢复快照；保存成功且无后续变更时才清除
   function persistRecoveryDraft(payload) {
     try {
-      persistSyncRecovery(localStorage, recoveryKey(), localRevision, payload)
+      persistSyncRecovery(localStorage, recoveryKey(), localRevision, {
+        ...payload, recoveryConflicts: syncConflicts.value
+      })
     } catch { /* 浏览器可能在访问 localStorage 属性时即抛错，不能中断服务器保存 */ }
   }
 
@@ -106,25 +108,33 @@ export const useChatStore = defineStore('chat', () => {
       const draft = readSyncRecovery(localStorage, recoveryKey())
       if (!draft) return
       const payload = draft.payload
+      localRevision = Math.max(localRevision, Number(draft.revision || 1))
+      syncConflicts.value = Array.isArray(payload.recoveryConflicts) ? payload.recoveryConflicts : []
+      // 草稿必须沿用写入时的基准版本；缺少基准的旧草稿使用 0，让已有会话走冲突处理。
+      const restoreBaseVersion = id => {
+        const version = payload.baseVersions?.[id]
+        chatVersions.value[id] = Number.isSafeInteger(version) && version >= 0 ? version : 0
+      }
       Object.entries(payload.chats || {}).forEach(([id, messages]) => {
-        const serverCount = Number(chatSummaries.value[id]?.count || 0)
-        if (Array.isArray(messages) && (messages.length >= serverCount || !chatSummaries.value[id])) {
+        if (Array.isArray(messages)) {
           chats.value[id] = messages
+          restoreBaseVersion(id)
           // 恢复的草稿属于未上传变更，标记为脏数据等待重新同步
           dirtyChatIds.set(id, localRevision + 1)
         }
       })
       chatMeta.value = { ...chatMeta.value, ...(payload.chatMeta || {}) }
       Object.keys(payload.chatMeta || {}).forEach(id => {
+        restoreBaseVersion(id)
         if (!dirtyChatIds.has(id)) dirtyMetaIds.set(id, localRevision + 1)
       })
       deletedChatIds.value = [...new Set([...deletedChatIds.value, ...(payload.deletedChatIds || [])])]
       if (Array.isArray(payload.folders)) {
         folders.value = normalizeFolders(payload.folders)
+        foldersVersion.value = Number.isSafeInteger(payload.baseFoldersVersion) ? payload.baseFoldersVersion : 0
         foldersDirty = true
       }
       if (payload.lastChatId) currentChatId.value = payload.lastChatId
-      localRevision = Number(draft.revision || 1)
       flushPending = true
     } catch (e) { /* 损坏草稿忽略，服务端数据仍可使用 */ }
   }
@@ -203,8 +213,9 @@ export const useChatStore = defineStore('chat', () => {
       throw new Error((res && res.message) || '加载会话内容失败')
     }
     chats.value[id] = Array.isArray(res.messages) ? res.messages : []
-    if (res.version) chatVersions.value[id] = res.version
-    if (res.meta && typeof res.meta === 'object') {
+    // 正文懒加载不能清除尚未同步的重命名/置顶，也不能把它的旧版本基准更新为最新值。
+    if (res.version && !dirtyMetaIds.has(id) && !dirtyChatIds.has(id)) chatVersions.value[id] = res.version
+    if (res.meta && typeof res.meta === 'object' && !dirtyMetaIds.has(id)) {
       chatMeta.value[id] = { ...res.meta }
     }
   }
@@ -279,12 +290,16 @@ export const useChatStore = defineStore('chat', () => {
           foldersDirty = false
         }
         ;(payload.restoreChatIds || []).forEach(id => pendingRestoreIds.delete(id))
-        if (savedRevision === localRevision) {
-          try { localStorage.removeItem(recoveryKey()) } catch (e) { /* ignore */ }
-        }
+        await loadRestoredMetadataChats(payload, res.versions || {})
         // 版本冲突处理：服务端未覆盖的数据在此合并，产生用户可见的冲突入口
         if (Array.isArray(res.conflicts) && res.conflicts.length > 0) {
           await handleSyncConflicts(res.conflicts, payload)
+        }
+        // 未决冲突也属于尚未保存的数据；必须保留到用户明确选择，刷新不能丢失本地副本。
+        if (savedRevision === localRevision && syncConflicts.value.length === 0) {
+          try { localStorage.removeItem(recoveryKey()) } catch (e) { /* ignore */ }
+        } else {
+          persistRecoveryDraft(buildSyncPayload())
         }
       } else {
         flushPending = true
@@ -299,6 +314,26 @@ export const useChatStore = defineStore('chat', () => {
       if (flushPending || savedRevision < localRevision) {
         flushPending = false
         syncTimer = setTimeout(flushSyncQueue, syncRetryDelay)
+      }
+    }
+  }
+
+  /** 纯元信息恢复没有本地正文；直接重拉恢复后的行，使会话立即回到列表和聊天区。 */
+  async function loadRestoredMetadataChats(payload, versions) {
+    for (const id of payload.restoreChatIds || []) {
+      if (Object.hasOwn(payload.chats || {}, id) || versions[id] === undefined) continue
+      try {
+        const data = await loadSingleChatHistory(id)
+        // 用户可能在补拉期间再次删除；迟到的读取响应不能让已删除会话在本地复活。
+        if (deletedChatIds.value.includes(id)) continue
+        if (!data?.success || data.exists === false) {
+          remoteVersion = 0 // 下次自动同步重新拉摘要，不能把缺失的本地列表视为已经同步。
+          continue
+        }
+        if (!dirtyChatIds.has(id)) chats.value[id] = Array.isArray(data.messages) ? data.messages : []
+        if (!dirtyMetaIds.has(id) && data.meta) chatMeta.value[id] = { ...data.meta }
+      } catch {
+        remoteVersion = 0
       }
     }
   }
@@ -330,7 +365,9 @@ export const useChatStore = defineStore('chat', () => {
         serverVersion,
         title: (payload.chatMeta?.[chatId]?.title) || (serverMeta && serverMeta.title) || '',
         // 保留双方数据：本地未上传副本完整保存在冲突记录中，绝不直接丢弃
-        localMessages: JSON.parse(JSON.stringify(payload.chats?.[chatId] || chats.value[chatId] || [])),
+        hasLocalMessages: Object.hasOwn(payload.chats || {}, chatId),
+        localMessages: Object.hasOwn(payload.chats || {}, chatId)
+          ? JSON.parse(JSON.stringify(payload.chats[chatId])) : null,
         localMeta: payload.chatMeta?.[chatId] ? { ...payload.chatMeta[chatId] } : null,
         serverMessages,
         serverMeta
@@ -370,7 +407,10 @@ export const useChatStore = defineStore('chat', () => {
     const entry = syncConflicts.value.find(x => x.chatId === chatId)
     if (!entry) return
     syncConflicts.value = syncConflicts.value.filter(x => x.chatId !== chatId)
-    if (!useLocal) return
+    if (!useLocal) {
+      persistRecoveryDraft(buildSyncPayload())
+      return
+    }
     // 保留本地：以服务端当前版本为新基准重新上传（已删会话走显式恢复通道）
     if (entry.reason === 'deleted') {
       pendingRestoreIds.add(chatId)
@@ -381,9 +421,13 @@ export const useChatStore = defineStore('chat', () => {
     } else {
       chatVersions.value[chatId] = entry.serverVersion || chatVersions.value[chatId] || 0
     }
-    chats.value[chatId] = entry.localMessages
+    if (entry.hasLocalMessages !== false) {
+      chats.value[chatId] = entry.localMessages || []
+      dirtyChatIds.set(chatId, localRevision + 1)
+    } else {
+      dirtyMetaIds.set(chatId, localRevision + 1)
+    }
     if (entry.localMeta) chatMeta.value[chatId] = { ...entry.localMeta }
-    dirtyChatIds.set(chatId, localRevision + 1)
     syncToServer()
   }
 

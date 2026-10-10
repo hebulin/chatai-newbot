@@ -43,6 +43,25 @@ public final class ApiKeyCrypto {
     private ApiKeyCrypto() {
     }
 
+    /** 恢复切换密钥后显式重载；读取失败保留原缓存并中止提交，防止落盘混用密钥。 */
+    public static synchronized void reloadKey() throws java.io.IOException {
+        Path path = Paths.get(System.getProperty("user.dir"), "data", KEY_FILE);
+        if (!Files.exists(path)) {
+            key = null;
+            return;
+        }
+        try {
+            byte[] bytes = Base64.getDecoder().decode(Files.readString(path, StandardCharsets.UTF_8).trim());
+            if (bytes.length != 32) throw new IllegalArgumentException("需要 256 位密钥");
+            key = new SecretKeySpec(bytes, "AES");
+            try {
+                Files.setPosixFilePermissions(path, PosixFilePermissions.fromString("rw-------"));
+            } catch (UnsupportedOperationException ignored) { /* Windows 由 NTFS ACL 管理 */ }
+        } catch (IllegalArgumentException e) {
+            throw new java.io.IOException("备份密钥格式无效", e);
+        }
+    }
+
     /**
      * 加密 API Key
      * @param plain 明文 Key；null/空串/已是密文时原样返回
