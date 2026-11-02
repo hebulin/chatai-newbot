@@ -475,7 +475,7 @@ function showMermaidThemeMenu(btn, container) {
   })
   menu.innerHTML = html
   const toolbar = container.querySelector('.mermaid-toolbar')
-  if (toolbar) { toolbar.style.position = 'relative'; toolbar.appendChild(menu) }
+  if (toolbar) toolbar.appendChild(menu)
   else { container.appendChild(menu) }
   const closeMenu = bindMermaidMenuLifecycle(menu, btn)
   menu.querySelectorAll('.mermaid-theme-menu-item').forEach(item => {
@@ -497,7 +497,7 @@ function showMermaidDownloadMenu(btn, container) {
     '<div class="mermaid-download-menu-item" data-fmt="svg"><span>下载 SVG</span></div>' +
     '<div class="mermaid-download-menu-item" data-fmt="png"><span>下载 PNG</span></div>'
   const toolbar = container.querySelector('.mermaid-toolbar')
-  if (toolbar) { toolbar.style.position = 'relative'; toolbar.appendChild(menu) }
+  if (toolbar) toolbar.appendChild(menu)
   else { container.appendChild(menu) }
   const closeMenu = bindMermaidMenuLifecycle(menu, btn)
   menu.querySelectorAll('.mermaid-download-menu-item').forEach(item => {

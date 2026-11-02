@@ -2,9 +2,15 @@ import { downloadFile, showToast } from '@/composables/markdown/domActions'
 import { loadXlsxExporter } from '@/composables/markdown/lazyDependencies'
 import { onElementDetached } from '@/composables/markdown/domLifecycle'
 
-/** 包裹 Markdown 表格并挂载溢出状态和下载工具栏。 */
+const DOWNLOAD_ICON = '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>'
+const FULLSCREEN_ICON = '<polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>'
+const CLOSE_ICON = '<path d="m18 6-12 12M6 6l12 12"/>'
+let menuSequence = 0
+
+/** 包裹 Markdown 表格并挂载溢出状态和顶部工具栏。 */
 export function enhanceMarkdownTables(container) {
   container.querySelectorAll('.msg-bubble table, .answer-content table').forEach(table => {
+    if (table.closest('.md-table-header-scroll')) return
     if (table.parentElement.classList.contains('table-wrapper')) return
     const wrapper = document.createElement('div')
     wrapper.className = 'table-wrapper'
@@ -20,18 +26,110 @@ export function enhanceMarkdownTables(container) {
 }
 
 /**
- * 为 Markdown 表格追加 Excel/CSV 下载工具栏。
+ * 为 Markdown 表格挂载顶部工具栏，工具栏不随表格横向滚动。
  */
 export function attachTableDownload(wrapper, table) {
+  const card = document.createElement('div')
+  card.className = 'md-table-container'
+  wrapper.parentNode.insertBefore(card, wrapper)
+  const toolbar = createTableToolbar(table)
+  const fullscreenButton = createTableButton('全屏查看表格', FULLSCREEN_ICON)
+  fullscreenButton.addEventListener('click', () => openTableFullscreen(table, fullscreenButton))
+  toolbar.appendChild(fullscreenButton)
+  const stickyGroup = document.createElement('div')
+  stickyGroup.className = 'md-table-sticky-group'
+  stickyGroup.appendChild(toolbar)
+  card.append(stickyGroup, wrapper)
+}
+
+/** 创建带可访问名称和悬停提示的纯图标按钮。 */
+function createTableButton(label, icon) {
+  const button = document.createElement('button')
+  button.type = 'button'
+  button.className = 'md-table-btn'
+  button.title = label
+  button.setAttribute('aria-label', label)
+  button.innerHTML = `<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${icon}</svg>`
+  return button
+}
+
+/** 创建内联与全屏视图共用的下载工具栏。 */
+function createTableToolbar(table) {
   const toolbar = document.createElement('div')
   toolbar.className = 'md-table-toolbar'
-  toolbar.innerHTML = '<button class="md-table-btn" title="下载表格"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> 下载表格</button>'
-  const button = toolbar.querySelector('button')
+  const button = createTableButton('下载表格', DOWNLOAD_ICON)
+  button.setAttribute('aria-expanded', 'false')
+  button.setAttribute('aria-controls', `md-table-menu-${++menuSequence}`)
   button.addEventListener('click', event => {
     event.stopPropagation()
     showTableDownloadMenu(toolbar, button, table)
   })
-  wrapper.parentNode.insertBefore(toolbar, wrapper.nextSibling)
+  toolbar.appendChild(button)
+  return toolbar
+}
+
+/** 使用原生模态对话框展示表格副本，保留原表格位置并管理键盘焦点。 */
+function openTableFullscreen(table, trigger) {
+  const dialog = document.createElement('dialog')
+  dialog.className = 'md-table-fullscreen'
+  dialog.setAttribute('aria-label', '全屏查看表格')
+  const content = document.createElement('div')
+  content.className = 'md-table-fullscreen-content msg-bubble'
+  content.tabIndex = 0
+  content.setAttribute('role', 'region')
+  content.setAttribute('aria-label', '表格内容，可滚动查看')
+  const clone = table.cloneNode(true)
+  // 副本不重复原表格中的 ID，避免干扰聊天页面的锚点与标签关联。
+  clone.removeAttribute('id')
+  clone.querySelectorAll('[id]').forEach(element => element.removeAttribute('id'))
+  content.appendChild(clone)
+  const toolbar = createTableToolbar(clone)
+  const closeButton = createTableButton('退出全屏', CLOSE_ICON)
+  toolbar.appendChild(closeButton)
+  dialog.append(toolbar, content)
+  document.body.appendChild(dialog)
+
+  let closed = false
+  const cancelSourceWatch = onElementDetached(table, close)
+  const cancelDialogWatch = onElementDetached(dialog, close)
+  /** 关闭弹层并释放观察器、下载菜单监听，恢复触发按钮焦点。 */
+  function close() {
+    if (closed) return
+    closed = true
+    cancelSourceWatch()
+    cancelDialogWatch()
+    const menu = toolbar.querySelector('.md-table-menu')
+    if (menu) closeTableDownloadMenu(menu)
+    if (dialog.open) dialog.close()
+    dialog.remove()
+    if (trigger.isConnected) trigger.focus({ preventScroll: true })
+  }
+  closeButton.addEventListener('click', close)
+  dialog.addEventListener('cancel', event => {
+    event.preventDefault()
+    close()
+  })
+  dialog.addEventListener('close', close)
+  dialog.addEventListener('keydown', trapTableDialogFocus)
+  dialog.showModal()
+  closeButton.focus({ preventScroll: true })
+}
+
+/** 在首尾控件间循环 Tab，避免原生模态对话框把焦点移到浏览器工具栏。 */
+function trapTableDialogFocus(event) {
+  if (event.key !== 'Tab') return
+  const controls = Array.from(event.currentTarget.querySelectorAll(
+    'button, a[href], input, select, textarea, [tabindex]'
+  )).filter(element => !element.disabled && element.tabIndex >= 0 && element.getClientRects().length)
+  const first = controls[0]
+  const last = controls[controls.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus({ preventScroll: true })
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus({ preventScroll: true })
+  }
 }
 
 /**
@@ -74,14 +172,25 @@ function showTableDownloadMenu(toolbar, button, table) {
   }
   const menu = document.createElement('div')
   menu.className = 'md-table-menu'
-  menu.innerHTML = '<div class="md-table-menu-item" data-fmt="xlsx"><span>下载 Excel (.xlsx)</span></div>'
-    + '<div class="md-table-menu-item" data-fmt="csv"><span>下载 CSV</span></div>'
+  menu.id = button.getAttribute('aria-controls')
+  menu.innerHTML = '<button type="button" class="md-table-menu-item" data-fmt="xlsx">下载 Excel (.xlsx)</button>'
+    + '<button type="button" class="md-table-menu-item" data-fmt="csv">下载 CSV</button>'
   toolbar.appendChild(menu)
+  button.setAttribute('aria-expanded', 'true')
+  menu.__trigger = button
+  menu.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return
+    event.preventDefault()
+    event.stopPropagation()
+    closeTableDownloadMenu(menu)
+    button.focus({ preventScroll: true })
+  })
   menu.querySelectorAll('.md-table-menu-item').forEach(item => {
     item.addEventListener('click', () => {
       const format = item.getAttribute('data-fmt')
       const rows = extractTableRows(table)
       closeTableDownloadMenu(menu)
+      button.focus({ preventScroll: true })
       if (!rows.length) {
         showToast('表格内容为空')
         return
@@ -90,9 +199,8 @@ function showTableDownloadMenu(toolbar, button, table) {
       else downloadTableXlsx(rows)
     })
   })
-  setTimeout(() => {
-    if (menu.isConnected) menu.__removeOutsideClick = registerOutsideClick(menu, button)
-  }, 0)
+  menu.__removeOutsideClick = registerOutsideClick(menu, button)
+  menu.querySelector('button').focus({ preventScroll: true })
 }
 
 /** 关闭菜单并同步释放 document 级监听。 */
@@ -100,6 +208,7 @@ function closeTableDownloadMenu(menu) {
   const removeOutsideClick = menu.__removeOutsideClick
   menu.__removeOutsideClick = null
   if (removeOutsideClick) removeOutsideClick()
+  menu.__trigger?.setAttribute('aria-expanded', 'false')
   menu.remove()
 }
 
@@ -109,11 +218,18 @@ function registerOutsideClick(menu, button) {
     if (menu.contains(event.target) || button.contains(event.target)) return
     closeTableDownloadMenu(menu)
   }
+  /** 焦点移出下载按钮与菜单时收起菜单，支持纯键盘导航。 */
+  const onFocusOut = event => {
+    if (menu.contains(event.relatedTarget) || button === event.relatedTarget) return
+    closeTableDownloadMenu(menu)
+  }
   document.addEventListener('click', onDocumentClick)
+  menu.addEventListener('focusout', onFocusOut)
   const cancelDetachWatch = onElementDetached(menu, () => closeTableDownloadMenu(menu))
   return () => {
     cancelDetachWatch()
     document.removeEventListener('click', onDocumentClick)
+    menu.removeEventListener('focusout', onFocusOut)
   }
 }
 

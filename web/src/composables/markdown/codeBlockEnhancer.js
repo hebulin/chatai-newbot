@@ -73,6 +73,7 @@ function flushPendingHighlights(container) {
 function attachCodeHeader(block, language) {
   const pre = block.parentElement
   if (!pre || pre.querySelector('.code-header')) return
+  pre.classList.add('md-code-block')
   const header = document.createElement('div')
   header.className = 'code-header'
   const isHtml = language.toLowerCase() === 'html'
@@ -81,6 +82,11 @@ function attachCodeHeader(block, language) {
     '<button class="code-download-btn" title="下载代码"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>' +
     '<button class="code-copy-btn">复制代码</button></div>'
   pre.insertBefore(header, pre.firstChild)
+  header.querySelectorAll('button').forEach(button => {
+    button.type = 'button'
+    if (button.title) button.setAttribute('aria-label', button.title)
+    button.querySelector('svg')?.setAttribute('aria-hidden', 'true')
+  })
   header.querySelector('.code-download-btn').addEventListener('click', event => {
     event.stopPropagation()
     downloadFile(block.textContent, `code-${Date.now()}.${codeFileExtension(language)}`, 'text/plain;charset=utf-8')

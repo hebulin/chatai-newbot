@@ -668,7 +668,7 @@ test('生产包按图表类型加载布局引擎，Excel 仅在导出时加载',
   await expect(page.locator('.mermaid-view svg')).toHaveCount(3)
   expect([...loaded].some(path => /mermaid-mindmap/.test(path))).toBe(true)
   expect([...loaded].some(path => /xlsx-export/.test(path))).toBe(false)
-  await page.locator('.md-table-btn').click()
+  await page.getByRole('button', { name: '下载表格', exact: true }).click()
   expect([...loaded].some(path => /xlsx-export/.test(path))).toBe(false)
   const download = page.waitForEvent('download')
   await page.locator('.md-table-menu-item[data-fmt="xlsx"]').click()
@@ -676,3 +676,258 @@ test('生产包按图表类型加载布局引擎，Excel 仅在导出时加载',
   expect([...loaded].some(path => /xlsx-export/.test(path))).toBe(true)
   expect(pageErrors).toEqual([])
 })
+
+for (const theme of ['dark', 'light']) {
+  test(`表格顶部工具栏与全屏查看（${theme}）`, async ({ page }) => {
+    const state = await installApiMock(page)
+    const viewport = theme === 'light' ? { width: 390, height: 844 } : { width: 1280, height: 800 }
+    await page.setViewportSize(viewport)
+    const wideText = '用于验证横向滚动的长单元格内容'.repeat(8)
+    state.reply = '| 名称 | 说明 |\n| --- | --- |\n'
+      + Array.from({ length: 50 }, (_, index) => `| 条目${index + 1} | ${wideText} |`).join('\n')
+      + '\n\n| 第二张表 | 数量 |\n| --- | --- |\n| 独立数据 | 2 |'
+    await page.addInitScript(value => {
+      localStorage.setItem('username', 'admin')
+      localStorage.setItem('role', 'admin')
+      localStorage.setItem('ai-chat-theme', value)
+    }, theme)
+    await page.goto('/')
+    await page.locator('.input-area textarea').fill('展示两个表格')
+    await page.locator('.send-btn').click()
+    const cards = page.locator('.md-table-container')
+    await expect(cards).toHaveCount(2)
+    const card = cards.first()
+    const toolbar = card.locator('.md-table-toolbar')
+    await expect(toolbar).toHaveText('')
+    await expect(toolbar.getByRole('button')).toHaveCount(2)
+    const fullscreen = card.getByRole('button', { name: '全屏查看表格', exact: true })
+    await scrollInsideCard(card, -80)
+    const toolbarBox = await toolbar.boundingBox()
+    const tableBox = await card.locator('.table-wrapper > table').boundingBox()
+    expect(toolbarBox.y + toolbarBox.height).toBeLessThanOrEqual(tableBox.y + 1)
+    await card.locator('.table-wrapper').evaluate(element => { element.scrollLeft = 300 })
+    expect((await toolbar.boundingBox()).x).toBe(toolbarBox.x)
+    await fullscreen.click()
+
+    const dialog = page.getByRole('dialog', { name: '全屏查看表格' })
+    const close = dialog.getByRole('button', { name: '退出全屏' })
+    const downloadButton = dialog.getByRole('button', { name: '下载表格', exact: true })
+    await expect(dialog).toBeVisible()
+    await expect(dialog.locator('tbody tr')).toHaveCount(50)
+    expect(await dialog.boundingBox()).toEqual({ x: 0, y: 0, ...viewport })
+    await expect(close).toBeFocused()
+    await page.keyboard.press('Shift+Tab')
+    await expect(downloadButton).toBeFocused()
+    await page.keyboard.press('Shift+Tab')
+    await expect(dialog.getByRole('region')).toBeFocused()
+    await page.keyboard.press('Tab')
+    await expect(downloadButton).toBeFocused()
+    const scrollState = await dialog.getByRole('region').evaluate(element => {
+      element.scrollLeft = 300
+      element.scrollTop = 300
+      return { x: element.scrollLeft, y: element.scrollTop }
+    })
+    expect(scrollState.x).toBeGreaterThan(0)
+    expect(scrollState.y).toBeGreaterThan(0)
+
+    await downloadButton.press('Enter')
+    await expect(dialog.getByRole('button', { name: '下载 Excel (.xlsx)' })).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(dialog.locator('.md-table-menu')).toHaveCount(0)
+    await expect(dialog).toBeVisible()
+    await expect(downloadButton).toBeFocused()
+    await downloadButton.click()
+    const downloaded = page.waitForEvent('download')
+    await dialog.getByRole('button', { name: '下载 CSV', exact: true }).click()
+    const file = await downloaded
+    expect(file.suggestedFilename()).toMatch(/\.csv$/)
+    let csv = ''
+    for await (const chunk of await file.createReadStream()) csv += chunk.toString('utf8')
+    expect(csv).toContain('条目50')
+    expect(csv).not.toContain('独立数据')
+    await page.keyboard.press('Escape')
+    await expect(dialog).toHaveCount(0)
+    await expect(fullscreen).toBeFocused()
+    await expect(cards).toHaveCount(2)
+
+    await cards.last().getByRole('button', { name: '全屏查看表格' }).click()
+    await expect(dialog.locator('table')).toContainText('独立数据')
+    await close.click()
+    await expect(dialog).toHaveCount(0)
+  })
+}
+
+/** 将卡片内指定位置滚到真实聊天/分享视口顶部，等待浏览器完成吸顶布局。 */
+async function scrollInsideCard(card, distance) {
+  await card.evaluate((element, offset) => {
+    const root = element.closest('.chat-container, .share-page')
+    root.scrollTop += element.getBoundingClientRect().top - root.getBoundingClientRect().top + offset
+  }, distance)
+}
+
+/** 读取工具栏与视口位置，供滚动吸顶及退出边界断言使用。 */
+async function stickyPosition(card, selector) {
+  return card.evaluate((element, target) => {
+    const root = element.closest('.chat-container, .share-page')
+    const bar = element.querySelector(target).getBoundingClientRect()
+    const bounds = element.getBoundingClientRect()
+    const obstruction = root.querySelector(':scope > .share-top')
+    return {
+      top: bar.top, bottom: bar.bottom, cardBottom: bounds.bottom,
+      viewportTop: root.getBoundingClientRect().top + (obstruction?.getBoundingClientRect().height || 0)
+    }
+  }, selector)
+}
+
+test('分享页长表格吸顶避让站点顶栏', async ({ page }) => {
+  await installApiMock(page)
+  const content = '| 序号 | 内容 |\n| --- | --- |\n'
+    + Array.from({ length: 100 }, (_, index) => `| ${index} | 分享表格内容 |`).join('\n')
+    + '\n\n```html\n' + '<p>分享代码</p>\n'.repeat(100) + '```'
+  await page.route('**/api/share/view/sticky', route => json(route, {
+    success: true, title: '吸顶测试分享', messages: [{ role: 'assistant', content }]
+  }))
+  await page.goto('/share/sticky')
+  const table = page.locator('.md-table-container')
+  await expect(table).toBeVisible()
+  await scrollInsideCard(table, 700)
+  await expect.poll(async () => {
+    const position = await stickyPosition(table, '.md-table-toolbar')
+    return Math.abs(position.top - position.viewportTop)
+  }).toBeLessThan(2)
+  await expect.poll(() => table.evaluate(element => Math.abs(
+    element.querySelector('thead').getBoundingClientRect().top
+      - element.querySelector('.md-table-toolbar').getBoundingClientRect().bottom
+  ))).toBeLessThan(2)
+  const code = page.locator('pre.md-code-block')
+  await scrollInsideCard(code, 500)
+  await expect.poll(async () => {
+    const position = await stickyPosition(code, '.code-header')
+    return Math.abs(position.top - position.viewportTop)
+  }).toBeLessThan(2)
+})
+
+for (const theme of ['dark', 'light']) {
+  test(`长内容工具栏和列标题随页面滚动吸顶（${theme}）`, async ({ page }, testInfo) => {
+    const state = await installApiMock(page)
+    await page.setViewportSize(theme === 'dark' ? { width: 1280, height: 800 } : { width: 390, height: 844 })
+    const longCell = '较长列内容用于验证表头和单元格始终横向对齐'.repeat(4)
+    const table = '| 序号 | 内容 |\n| --- | --- |\n'
+      + Array.from({ length: 120 }, (_, index) => `| ${index} | ${longCell} |`).join('\n')
+    const html = '```html\n' + Array.from({ length: 100 }, (_, index) => `<p>预览行${index}</p>`).join('\n') + '\n```'
+    const code = '```js\n' + Array.from({ length: 100 }, (_, index) => `const value${index} = "${longCell}";`).join('\n') + '\n```'
+    const diagram = '```mermaid\nflowchart TD\n' + Array.from({ length: 40 }, (_, index) => `N${index} --> N${index + 1}`).join('\n') + '\n```'
+    const tail = Array.from({ length: 50 }, () => '用于验证卡片滚完后的普通正文。').join('\n\n')
+    state.reply = [table, html, code, diagram, tail].join('\n\n')
+    await page.addInitScript(value => {
+      localStorage.setItem('username', 'admin')
+      localStorage.setItem('role', 'admin')
+      localStorage.setItem('ai-chat-theme', value)
+    }, theme)
+    await page.goto('/')
+    await page.locator('.input-area textarea').fill('长内容吸顶测试')
+    await page.locator('.send-btn').click()
+    await expect(page.locator('.mermaid-view svg')).toHaveCount(1)
+    const card = page.locator('.md-table-container')
+    await scrollInsideCard(card, 1000)
+    await expect.poll(async () => {
+      const position = await stickyPosition(card, '.md-table-toolbar')
+      return Math.abs(position.top - position.viewportTop)
+    }).toBeLessThan(2)
+    await expect.poll(() => card.evaluate(element => {
+      const head = element.querySelector('thead').getBoundingClientRect()
+      const bar = element.querySelector('.md-table-toolbar').getBoundingClientRect()
+      return Math.abs(head.top - bar.bottom)
+    })).toBeLessThan(2)
+    // 同一 JS 任务内连续大幅滚动并立即测量，不给 rAF 事后修正的机会。
+    const fastScroll = await card.evaluate(element => {
+      const root = element.closest('.chat-container')
+      const start = root.scrollTop
+      return [700, -400, 1300, -1100, 500, -500].map(delta => {
+        root.scrollTop = start + delta
+        const bar = element.querySelector('.md-table-toolbar').getBoundingClientRect()
+        const head = element.querySelector('.md-table-header-scroll').getBoundingClientRect()
+        return Math.abs(head.top - bar.bottom)
+      })
+    })
+    expect(Math.max(...fastScroll)).toBeLessThan(1)
+    await expect(card.getByRole('table')).toHaveCount(1)
+    await page.mouse.move((await card.boundingBox()).x + 40, 250)
+    await page.mouse.wheel(0, 800)
+    await page.mouse.wheel(0, -650)
+    await expect.poll(() => card.evaluate(element => Math.abs(
+      element.querySelector('.md-table-header-scroll').getBoundingClientRect().top
+        - element.querySelector('.md-table-toolbar').getBoundingClientRect().bottom
+    ))).toBeLessThan(1)
+    await page.screenshot({ path: testInfo.outputPath('sticky-table.png') })
+    await card.locator('.table-wrapper').evaluate(element => { element.scrollLeft = 230 })
+    // scrollLeft 赋值后浏览器异步派发 scroll；等待该事件完成横向同步。
+    await expect.poll(() => card.evaluate(element => Math.abs(
+      element.querySelector('th:nth-child(2)').getBoundingClientRect().left
+        - element.querySelector('td:nth-child(2)').getBoundingClientRect().left
+    ))).toBeLessThan(1)
+    await card.getByRole('button', { name: '下载表格', exact: true }).click()
+    await expect(card.getByRole('button', { name: '下载 CSV' })).toBeVisible()
+    await page.keyboard.press('Escape')
+    await card.getByRole('button', { name: '全屏查看表格' }).click()
+    const dialog = page.getByRole('dialog', { name: '全屏查看表格' })
+    await dialog.getByRole('region').evaluate(element => { element.scrollTop = 900 })
+    await expect.poll(() => dialog.evaluate(element => {
+      const top = element.querySelector('thead').getBoundingClientRect().top
+      return Math.abs(top - element.querySelector('.md-table-toolbar').getBoundingClientRect().bottom)
+    })).toBeLessThan(2)
+    await page.keyboard.press('Escape')
+    await scrollInsideCard(card, await card.evaluate(element => element.offsetHeight + 40))
+    await expect.poll(async () => {
+      const position = await stickyPosition(card, '.md-table-toolbar')
+      return position.bottom - position.viewportTop
+    }).toBeLessThan(0)
+
+    const htmlCard = page.locator('pre.md-code-block').filter({ has: page.locator('code.language-html') })
+    await scrollInsideCard(htmlCard, 800)
+    await expect.poll(async () => {
+      const position = await stickyPosition(htmlCard, '.code-header')
+      return Math.abs(position.top - position.viewportTop)
+    }).toBeLessThan(2)
+    const cornersCovered = await htmlCard.locator('.code-header').evaluate(header => {
+      const bounds = header.getBoundingClientRect()
+      return [bounds.left + 1, bounds.right - 1].every(x =>
+        header.contains(document.elementFromPoint(x, bounds.top + 1)))
+    })
+    expect(cornersCovered).toBe(true)
+    await page.screenshot({ path: testInfo.outputPath('sticky-html.png') })
+    await htmlCard.getByRole('button', { name: '预览 HTML' }).click()
+    await expect(page.locator('.html-preview-pane iframe')).toBeVisible()
+    await page.keyboard.press('Escape')
+    const jsCard = page.locator('pre.md-code-block').filter({ has: page.locator('code.language-js') })
+    await scrollInsideCard(jsCard, 800)
+    await jsCard.getByRole('button', { name: '复制代码' }).click()
+    await expect(jsCard.getByRole('button', { name: '已复制!' })).toBeVisible()
+    await expect.poll(async () => {
+      const position = await stickyPosition(jsCard, '.code-header')
+      return Math.abs(position.top - position.viewportTop)
+    }).toBeLessThan(2)
+
+    const mermaid = page.locator('.mermaid-container')
+    await scrollInsideCard(mermaid, 250)
+    await expect.poll(async () => {
+      const position = await stickyPosition(mermaid, '.mermaid-toolbar')
+      return Math.abs(position.top - position.viewportTop)
+    }).toBeLessThan(2)
+    await page.screenshot({ path: testInfo.outputPath('sticky-diagram.png') })
+    await mermaid.locator('[data-act="download"]').click()
+    await expect.poll(async () => {
+      const position = await stickyPosition(mermaid, '.mermaid-toolbar')
+      return Math.abs(position.top - position.viewportTop)
+    }).toBeLessThan(2)
+    await mermaid.locator('[data-act="showCode"]').click()
+    await scrollInsideCard(mermaid, 250)
+    await mermaid.locator('[data-act="copy"]').click()
+    await expect(mermaid.locator('[data-act="copy"]')).toHaveClass(/success/)
+    await scrollInsideCard(mermaid, await mermaid.evaluate(element => element.offsetHeight + 50))
+    await expect.poll(async () => {
+      const position = await stickyPosition(mermaid, '.mermaid-toolbar')
+      return position.bottom - position.viewportTop
+    }).toBeLessThan(0)
+  })
+}

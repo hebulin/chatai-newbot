@@ -1164,18 +1164,29 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
     position: relative;
 }
 [data-theme="light"] .msg-bubble pre { background: #f6f8fa !important; border-color: var(--border); }
+.msg-bubble pre.md-code-block { overflow: clip; }
+.msg-bubble pre.md-code-block > code { border-radius: 0 0 var(--radius) var(--radius); }
+/* 仅在当前卡片范围内吸顶；横向滚动留给正文层，工具栏保持可操作。 */
+.code-header,
+.mermaid-toolbar,
+.md-table-sticky-group {
+    position: sticky;
+    top: var(--markdown-sticky-top, 0px);
+    z-index: 4;
+}
 .code-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
     padding: 8px 14px;
-    background: rgba(0,0,0,0.2);
+    background: var(--surface-2);
+    white-space: normal;
     color: var(--fg-3);
     font-size: 10px;
     border-bottom: 1px solid var(--border);
-    border-radius: var(--radius) var(--radius) 0 0;
+    /* 工具栏完整覆盖正文；未吸顶时由 pre 外框裁出圆角。 */
+    border-radius: 0;
 }
-[data-theme="light"] .code-header { background: rgba(0,0,0,0.04); }
 .code-copy-btn {
     background: none; border: 1px solid var(--border);
     color: var(--fg-3);
@@ -1212,13 +1223,29 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
 /* ============================================
    TABLES
    ============================================ */
+.md-table-container {
+    margin: 14px 0;
+    max-width: 100%;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+.md-table-sticky-group { background: var(--surface-2); }
+.md-table-header-scroll {
+    height: var(--table-head-height, 0px);
+    overflow: hidden;
+    pointer-events: none;
+}
+.md-table-header-scroll table {
+    table-layout: fixed;
+    margin: 0;
+}
 .msg-bubble .table-wrapper {
     overflow-x: auto;
     max-width: 100%;
-    margin: 14px 0;
+    /* 可视表头覆盖原表头占位；原表格保留完整语义，吸顶组自身没有负边距。 */
+    margin: calc(0px - var(--table-head-height, 0px)) 0 0;
     -webkit-overflow-scrolling: touch;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: 0 0 var(--radius) var(--radius);
     position: relative;
 }
 .msg-bubble .table-wrapper::after {
@@ -1258,66 +1285,110 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
     z-index: 1;
 }
 .msg-bubble tr:hover td { background: var(--primary-soft); }
+.md-table-container thead th { position: static; }
+.md-table-fullscreen-content thead { position: sticky; top: calc(0px - var(--table-view-padding)); z-index: 2; }
+.md-table-fullscreen-content thead th { position: static; }
 
-/* 表格下载工具栏（Excel/CSV） */
+/* 表格顶部工具栏：下载与全屏操作固定在右侧。 */
 .md-table-toolbar {
     position: relative;
     display: flex;
     justify-content: flex-end;
-    margin: -8px 0 14px;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+    border-radius: var(--radius) var(--radius) 0 0;
 }
 .md-table-btn {
     background: transparent;
-    border: 1px solid var(--border);
-    color: var(--fg-3);
-    padding: 4px 8px;
+    border: none;
+    color: var(--fg);
+    width: 32px;
+    height: 32px;
+    padding: 0;
     cursor: pointer;
     display: flex;
     align-items: center;
-    gap: 4px;
-    font-size: 10px;
-    transition: all 0.15s;
-    font-family: var(--mono);
-    letter-spacing: 0.04em;
+    justify-content: center;
+    flex-shrink: 0;
     border-radius: var(--radius-sm);
 }
-.md-table-btn:hover { border-color: var(--primary); color: var(--primary); }
+.md-table-btn:hover { background: var(--primary-soft); color: var(--primary); }
+.md-table-btn:focus-visible,
+.md-table-menu-item:focus-visible,
+.md-table-fullscreen-content:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: -2px;
+}
 .md-table-btn svg { flex-shrink: 0; }
-/* 下载格式菜单（外观与 mermaid 下载菜单一致） */
+/* 下载格式菜单放在滚动区域之外，避免被宽表格裁切。 */
 .md-table-menu {
     position: absolute;
     top: calc(100% + 4px);
-    right: 0;
-    background: #1e293b;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 8px;
+    right: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
     padding: 4px;
     min-width: 150px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    box-shadow: var(--shadow-lg);
     z-index: 100;
-}
-[data-theme="light"] .md-table-menu {
-    background: #ffffff;
-    border: 1px solid rgba(0, 0, 0, 0.08);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
 }
 .md-table-menu-item {
     display: flex;
     align-items: center;
     gap: 8px;
     padding: 6px 10px;
-    font-size: 12px;
-    color: #a1a1aa;
+    width: 100%;
+    border: none;
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    white-space: nowrap;
+    color: var(--fg);
     cursor: pointer;
-    border-radius: 5px;
-    transition: all 0.15s;
+    border-radius: var(--radius-sm);
 }
 .md-table-menu-item:hover {
-    background: rgba(255, 255, 255, 0.08);
-    color: #e0e0e0;
+    background: var(--primary-soft);
+    color: var(--primary);
 }
-[data-theme="light"] .md-table-menu-item { color: #64748b; }
-[data-theme="light"] .md-table-menu-item:hover { background: rgba(0, 0, 0, 0.04); color: #1e293b; }
+
+/* 原生模态弹层占满当前视口，工具栏常驻，表格独立横纵滚动。 */
+.md-table-fullscreen {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    height: 100dvh;
+    max-width: none;
+    max-height: none;
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: var(--bg);
+    color: var(--fg);
+    font: inherit;
+    overflow: hidden;
+}
+.md-table-fullscreen[open] { display: flex; flex-direction: column; }
+.md-table-fullscreen .md-table-toolbar { flex-shrink: 0; border-radius: 0; }
+.md-table-fullscreen-content.msg-bubble {
+    --table-view-padding: 16px;
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: var(--table-view-padding);
+    border: none;
+    border-radius: 0;
+    background: var(--bg);
+    overflow: auto;
+    overscroll-behavior: contain;
+}
 
 /* 会话列表加载骨架屏 */
 .chat-list-skeleton { padding: 4px 0; }
@@ -1436,7 +1507,7 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
     margin: 14px 0;
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    overflow: hidden;
+    overflow: visible;
     background: var(--surface);
 }
 .mermaid-toolbar {
@@ -1446,6 +1517,7 @@ body.sidebar-collapsed .sidebar-edge-toggle svg { transform: rotate(180deg); }
     padding: 6px 10px;
     background: var(--surface-2);
     border-bottom: 1px solid var(--border);
+    border-radius: var(--radius) var(--radius) 0 0;
 }
 .mermaid-toolbar-left {
     display: flex;

@@ -6,6 +6,7 @@ import { enhanceGeneratedMedia } from '@/composables/markdown/mediaEnhancer'
 import { ensureMathDependency, extractMathBlocks } from '@/composables/markdown/mathRenderer'
 import { renderDepsVersion } from '@/composables/markdown/renderDependencyState'
 import { enhanceMarkdownTables } from '@/composables/markdown/tableExporter'
+import { enhanceStickyHeaders } from '@/composables/markdown/stickyHeaders'
 import {
   detectDiagramType,
   getCachedMermaidSvg,
@@ -184,6 +185,7 @@ export function processSpecialContent(container) {
   enhanceCodeBlocks(container)
   enhanceGeneratedMedia(container)
   reattachMermaidInteractions(container)
+  enhanceStickyHeaders(container)
 }
 
 /** 返回 Markdown 渲染的兼容组合式入口。 */
