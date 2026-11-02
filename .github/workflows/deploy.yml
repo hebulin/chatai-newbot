@@ -49,7 +49,8 @@ jobs:
         run: |
           # data/ 被 Git 忽略，Actions 的全新检出不会包含该目录；SQLite 只能创建数据库文件，不能创建父目录。
           mkdir -p data
-          mvn -B clean verify
+          # 当前测试使用 subclass MockMaker；禁用动态 Attach，防止回退到依赖运行器环境的 inline 模式。
+          mvn -B -DargLine="-XX:+DisableAttachMechanism" clean verify
 
       - name: Get JAR filename
         id: jar

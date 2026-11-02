@@ -172,6 +172,11 @@ npm run test:e2e
 后端端到端测试使用独立的 `target/core-e2e-workdir/chatai-core-e2e.db`，前端端到端测试构建生产包并使用 API 替身，
 两者都不会改动开发环境的 `data/chatai.db`。CI 会自动安装 Chromium 并执行浏览器测试。
 
+后端 Mockito 在 `src/test/resources/mockito-extensions/org.mockito.plugins.MockMaker` 中显式选择
+`mock-maker-subclass`，覆盖现有普通类的 mock/spy，避免依赖 CI 的 Java Agent 动态附加能力。
+CI 以 `mvn -B -DargLine="-XX:+DisableAttachMechanism" clean verify` 验证此约束。
+该模式不能 mock final 类、final 方法、静态方法或构造过程；若未来测试需要这些能力，应显式配置测试 JVM 启动时加载 Agent，不能直接删除该配置恢复运行时自附加。
+
 ### 前端加载与体积预算
 
 Markdown 按代码高亮、数学公式、Mermaid、表格和媒体增强分模块。Mermaid 核心在遇到图表时加载，

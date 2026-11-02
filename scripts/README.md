@@ -13,3 +13,5 @@
 - 2026-09-14 使用记录：上下文大小与输出大小独立配置、草稿中断原因修复。复用原 Node/Maven 构建入口，无新增安装；验证前端 lint/Vitest/Playwright、后端测试和生产打包。
 
 - 2026-09-14 后续使用：修复无完成信号 EOF 误判，重新执行 lint、Vitest、生产 Chromium 和 Maven verify，将所有后续源码修改重新打包。无新增工具或依赖。
+
+- 2026-11-02：复用 Node/Maven 启动脚本与既有 JDK 21.0.1、Maven 3.9.16、Mockito 5.11.0，定位并修复 CI inline MockMaker 动态 Attach 失败。使用 `-DargLine=-XX:+DisableAttachMechanism` 复现故障，并验证 subclass 测试配置和完整 `clean verify`；无安装升级。
