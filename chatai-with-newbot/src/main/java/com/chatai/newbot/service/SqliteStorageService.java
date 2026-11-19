@@ -950,6 +950,16 @@ public class SqliteStorageService implements StorageService {
     }
 
     /**
+     * 查询用户全部“曾被恢复过”的会话及其最近恢复时的行版本。
+     * 保存时据此批量忽略早于恢复的陈旧删除声明。
+     * @param userId 用户ID
+     * @return chatId -> 恢复时的行版本
+     */
+    public Map<String, Long> getChatRestoredVersions(String userId) {
+        return chatSessionRepository.getRestoredVersions(userId);
+    }
+
+    /**
      * 彻底删除回收站中的会话行（不可恢复；仅允许删除已软删除的行，防止误删正常会话）
      * @param userId 用户ID
      * @param chatIds 待彻底删除的会话ID集合；null 或空列表表示清空该用户全部回收站

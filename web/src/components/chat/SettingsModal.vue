@@ -423,8 +423,10 @@ const profileSaving = ref(false)
 const showRecycleBin = ref(false)
 
 // 回收站恢复/删除后刷新侧边栏会话列表（静默拉取服务端最新摘要）
-function onTrashChanged() {
-  chatStore.refreshFromServer()
+// 恢复流程已在 store 内完成强制对账（payload.handled），store 会直接忽略；
+// 无 payload 的彻底删除走普通版本号刷新。
+function onTrashChanged(payload) {
+  chatStore.syncSidebarAfterTrashChange(payload)
 }
 const profileForm = ref({ username: '', displayName: '', email: '', phone: '', bio: '', avatarType: 'default', avatarValue: '' })
 const profileAvatarSrc = computed(() => profileForm.value.avatarType === 'svg' && profileForm.value.avatarValue.trim()

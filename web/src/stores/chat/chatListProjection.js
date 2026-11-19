@@ -1,7 +1,9 @@
 /**
  * 将会话正文、摘要和元信息投影为侧边栏分组结构。
  */
-export function buildChatListProjection({ chats, chatSummaries, chatMeta, folders, searchKeyword, now = new Date() }) {
+export function buildChatListProjection({
+  chats, chatSummaries, chatMeta, folders, searchKeyword, restoredEmptyChatIds = new Set(), now = new Date()
+}) {
   const chatInfos = []
   const ids = new Set([...Object.keys(chats), ...Object.keys(chatSummaries)])
   ids.forEach(id => {
@@ -17,12 +19,13 @@ export function buildChatListProjection({ chats, chatSummaries, chatMeta, folder
         if (messages[index].role === 'user' && !first) first = messages[index]
         if (messages[index].time) lastTime = messages[index].time
       }
-      if (!first) return
-      autoTitle = first.content.substring(0, 20)
-      fullContent = first.content
+      // 空会话默认不进入侧边栏；刚恢复的空会话允许显示一次，便于用户找到并继续使用
+      if (!first && !restoredEmptyChatIds.has(id)) return
+      autoTitle = first ? first.content.substring(0, 20) : '新会话'
+      fullContent = first ? first.content : ''
     } else {
       const summary = chatSummaries[id] || {}
-      if ((summary.count || 0) === 0) return
+      if ((summary.count || 0) === 0 && !restoredEmptyChatIds.has(id)) return
       autoTitle = summary.title || '新会话'
       fullContent = summary.preview || ''
       lastTime = summary.lastTime || null

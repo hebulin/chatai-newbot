@@ -289,7 +289,13 @@ public class ChatController {
     public Map<String, Object> getChatHistory(HttpServletRequest request) {
         User user = (User) request.getAttribute("currentUser");
         Map<String, Object> history = chatHistoryService.loadChatHistory(user.getId());
-        history.put("success", true);
+        if (Boolean.TRUE.equals(history.get("loadFailed"))) {
+            history.remove("loadFailed");
+            history.put("success", false);
+            history.put("message", "加载会话历史失败，请稍后重试");
+        } else {
+            history.put("success", true);
+        }
         return history;
     }
 
@@ -301,7 +307,14 @@ public class ChatController {
     public Map<String, Object> getChatHistorySummary(HttpServletRequest request) {
         User user = (User) request.getAttribute("currentUser");
         Map<String, Object> result = chatHistoryService.loadChatSummaries(user.getId());
-        result.put("success", true);
+        if (Boolean.TRUE.equals(result.get("loadFailed"))) {
+            // 读取失败时不得返回空摘要并标记成功，否则客户端会把空快照当作权威数据应用
+            result.remove("loadFailed");
+            result.put("success", false);
+            result.put("message", "加载会话列表失败，请稍后重试");
+        } else {
+            result.put("success", true);
+        }
         return result;
     }
 
@@ -354,11 +367,16 @@ public class ChatController {
         Map<String, Object> result = new HashMap<>();
         try {
             Map<String, Object> data = chatHistoryService.loadSingleChat(user.getId(), chatId);
-            result.put("success", true);
-            result.put("messages", data.get("messages"));
-            result.put("meta", data.get("meta"));
-            result.put("version", data.get("version"));
-            result.put("exists", data.get("exists"));
+            if (Boolean.TRUE.equals(data.get("loadFailed"))) {
+                result.put("success", false);
+                result.put("message", "加载会话内容失败，请稍后重试");
+            } else {
+                result.put("success", true);
+                result.put("messages", data.get("messages"));
+                result.put("meta", data.get("meta"));
+                result.put("version", data.get("version"));
+                result.put("exists", data.get("exists"));
+            }
         } catch (Exception e) {
             log.error("加载单会话历史失败: userId={}, chatId={}", user.getId(), chatId, e);
             result.put("success", false);
@@ -454,6 +472,13 @@ public class ChatController {
             List<String> restored = chatHistoryService.restoreFromTrash(user.getId(), chatIds);
             result.put("success", true);
             result.put("restored", restored);
+            // 返回恢复后的行版本：客户端在强制刷新到达前删除会话时使用正确基准，
+            // 避免恢复前旧版本被服务端误判为陈旧删除声明
+            Map<String, Long> versions = new LinkedHashMap<>();
+            for (String chatId : restored) {
+                versions.put(chatId, chatHistoryService.getChatVersion(user.getId(), chatId));
+            }
+            result.put("versions", versions);
         } catch (Exception e) {
             log.error("回收站恢复失败: userId={}", user.getId(), e);
             result.put("success", false);

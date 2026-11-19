@@ -27,11 +27,18 @@ export function createSyncPayload(state) {
   Object.keys(metaPayload).forEach(id => {
     if (baseVersions[id] === undefined) baseVersions[id] = state.chatVersions[id] || 0
   })
+  // 每个删除项都必须携带版本（未知记 0）：服务端据此判断删除声明是否早于最近一次恢复
+  const deletedChatIdVersions = {}
+  state.deletedChatIds.forEach(id => {
+    const version = state.deletedChatIdVersions?.[id]
+    deletedChatIdVersions[id] = typeof version === 'number' && version > 0 ? version : 0
+  })
   return {
     lastChatId: state.currentChatId,
     chats: chatsPayload,
     chatMeta: metaPayload,
     deletedChatIds: [...state.deletedChatIds],
+    deletedChatIdVersions,
     folders: state.foldersDirty ? state.folders : undefined,
     baseVersions,
     baseFoldersVersion: state.foldersVersion,

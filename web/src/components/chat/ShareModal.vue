@@ -166,7 +166,8 @@ async function handleSubmit() {
       lastChatId: chatStore.currentChatId,
       chats: chatStore.chats,
       chatMeta: chatStore.chatMeta,
-      deletedChatIds: chatStore.deletedChatIds
+      deletedChatIds: chatStore.deletedChatIds,
+      deletedChatIdVersions: chatStore.deletedChatIdVersions
     })
     const res = await createShare(props.chatId, payload)
     if (res && res.success) {

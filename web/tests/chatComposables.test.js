@@ -23,7 +23,8 @@ vi.mock('@/api/chat', () => ({
   loadChatSummaries: vi.fn(),
   loadChatVersion: vi.fn(),
   loadSingleChatHistory: vi.fn(),
-  saveChatHistory: vi.fn(async () => ({ success: true, version: 1 }))
+  saveChatHistory: vi.fn(async () => ({ success: true, version: 1 })),
+  restoreTrash: vi.fn(async chatIds => ({ success: true, restored: chatIds }))
 }))
 
 import { useChatStreaming } from '@/composables/chat/useChatStreaming'

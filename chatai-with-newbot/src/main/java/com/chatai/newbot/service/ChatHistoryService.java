@@ -76,7 +76,10 @@ public class ChatHistoryService {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("userId", userId);
         try {
-            ensureSessionMigrated(userId);
+            if (!ensureSessionMigrated(userId)) {
+                result.put("loadFailed", true);
+                return result;
+            }
             Map<String, Object> chats = new LinkedHashMap<>();
             Map<String, Object> chatMeta = new LinkedHashMap<>();
             for (Map<String, Object> row : sqliteStorage.listChatSessions(userId)) {
@@ -99,6 +102,7 @@ public class ChatHistoryService {
             return result;
         } catch (Exception e) {
             log.error("从SQLite加载会话历史失败: userId={}", userId, e);
+            result.put("loadFailed", true);
         }
         result.put("lastChatId", null);
         result.put("chats", new LinkedHashMap<>());
@@ -111,13 +115,14 @@ public class ChatHistoryService {
      * 整文档拆分为 t_chat_session 行；无旧数据时也写入空状态行标记已迁移。
      * 旧整文档保留作备份，不删除。
      * @param userId 用户ID
+     * @return true=已就绪或迁移成功；false=迁移失败（旧文档损坏等），调用方需按失败处理
      */
     @SuppressWarnings("unchecked")
-    private void ensureSessionMigrated(String userId) {
-        if (sqliteStorage.hasChatUserState(userId)) return;
+    private boolean ensureSessionMigrated(String userId) {
+        if (sqliteStorage.hasChatUserState(userId)) return true;
         Object lock = userLocks.computeIfAbsent(userId, k -> new Object());
         synchronized (lock) {
-            if (sqliteStorage.hasChatUserState(userId)) return;
+            if (sqliteStorage.hasChatUserState(userId)) return true;
             String updatedAt = LocalDateTime.now().format(
                     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
             long updatedAtTs = System.currentTimeMillis();
@@ -159,7 +164,9 @@ public class ChatHistoryService {
                 }
             } catch (Exception e) {
                 log.error("会话历史按会话行迁移失败: userId={}", userId, e);
+                return false;
             }
+            return true;
         }
     }
 
@@ -232,7 +239,11 @@ public class ChatHistoryService {
         Map<String, Object> state = null;
         long version = 0L;
         try {
-            ensureSessionMigrated(userId);
+            // 旧整文档迁移失败时不能返回“空列表成功”，否则客户端会把空摘要当权威快照应用
+            if (!ensureSessionMigrated(userId)) {
+                result.put("loadFailed", true);
+                return result;
+            }
             // 版本号先于摘要读取：若读取期间有并发写入，下次变更检测仍能发现新版本
             version = sqliteStorage.getChatHistoryVersion(userId);
             for (Map<String, Object> row : sqliteStorage.listChatSessionSummaries(userId)) {
@@ -258,6 +269,8 @@ public class ChatHistoryService {
             state = sqliteStorage.loadChatUserState(userId);
         } catch (Exception e) {
             log.error("从SQLite加载会话摘要失败: userId={}", userId, e);
+            // 明确标记失败：调用方不得把空摘要当作权威快照应用（否则会清空客户端侧边栏）
+            result.put("loadFailed", true);
         }
         result.put("lastChatId", state != null ? state.get("last_chat_id") : null);
         result.put("chatMeta", chatMeta);
@@ -270,6 +283,19 @@ public class ChatHistoryService {
         // 随摘要一并返回当前版本号，前端以此作为后续变更检测的基准
         result.put("version", version);
         return result;
+    }
+
+    /**
+     * 查询会话当前行版本（不存在返回 0）。
+     * 回收站恢复后返回给客户端，作为后续删除/保存的乐观锁基准，
+     * 避免客户端在强制刷新到达前用恢复前旧版本删除，被误判为陈旧声明。
+     * @param userId 用户ID
+     * @param chatId 会话ID
+     * @return 当前行版本
+     */
+    public long getChatVersion(String userId, String chatId) {
+        Integer version = sqliteStorage.getChatSessionVersion(userId, chatId);
+        return version == null ? 0L : version.longValue();
     }
 
     /**
@@ -286,7 +312,9 @@ public class ChatHistoryService {
         long version = 0L;
         boolean exists = false;
         try {
-            ensureSessionMigrated(userId);
+            if (!ensureSessionMigrated(userId)) {
+                result.put("loadFailed", true);
+            }
             Map<String, Object> row = sqliteStorage.getChatSession(userId, chatId);
             if (row != null) {
                 exists = true;
@@ -304,6 +332,7 @@ public class ChatHistoryService {
             }
         } catch (Exception e) {
             log.error("从SQLite加载单个会话失败: userId={}, chatId={}", userId, chatId, e);
+            result.put("loadFailed", true);
         }
         result.put("messages", messages != null ? messages : new ArrayList<>());
         result.put("meta", meta);
@@ -357,10 +386,16 @@ public class ChatHistoryService {
         Map<String, Object> result = new LinkedHashMap<>();
         Map<String, Object> newVersions = new LinkedHashMap<>();
         List<Map<String, Object>> conflicts = new ArrayList<>();
+        // 被服务端判定为陈旧而忽略的删除声明，回传客户端以便立即对账（会话已被其他端恢复）
+        List<String> ignoredDeleteIds = new ArrayList<>();
         result.put("versions", newVersions);
         result.put("conflicts", conflicts);
+        result.put("ignoredDeleteIds", ignoredDeleteIds);
         try {
-            ensureSessionMigrated(userId);
+            // 迁移失败时禁止写入：否则会用空/部分状态行覆盖旧文档，导致旧会话永久不可见
+            if (!ensureSessionMigrated(userId)) {
+                throw new IllegalStateException("会话历史迁移失败，请稍后重试");
+            }
             Map<String, Object> incomingChats = chatData.get("chats") instanceof Map
                     ? (Map<String, Object>) chatData.get("chats") : new LinkedHashMap<>();
             Map<String, Object> incomingMeta = chatData.get("chatMeta") instanceof Map
@@ -374,8 +409,37 @@ public class ChatHistoryService {
 
             Map<String, Object> state = sqliteStorage.loadChatUserState(userId);
             Set<String> deletedIds = new LinkedHashSet<>(parseDeletedIds(state));
+            // 客户端逐条删除声明对应的本地已知行版本；只有携带该映射的新客户端才做
+            // “陈旧删除”保护（旧客户端无法提供删除时的行版本，保持原有行为）
+            Map<String, Object> deletedChatIdVersions = chatData.get("deletedChatIdVersions") instanceof Map
+                    ? (Map<String, Object>) chatData.get("deletedChatIdVersions") : null;
+            // 一次查出该用户所有恢复过版本，供下面的删除声明批量校验（避免逐条查询）；
+            // 旧客户端没有逐项版本映射，跳过该查询
+            Map<String, Long> restoredVersions = Collections.emptyMap();
+            if (deletedChatIdVersions != null
+                    && chatData.get("deletedChatIds") instanceof List<?> list && !list.isEmpty()) {
+                restoredVersions = sqliteStorage.getChatRestoredVersions(userId);
+            }
             if (chatData.get("deletedChatIds") instanceof List<?> list) {
-                for (Object id : list) if (id instanceof String s) deletedIds.add(s);
+                for (Object id : list) {
+                    if (!(id instanceof String s)) continue;
+                    Long restoredVersion = restoredVersions.get(s);
+                    Object deleteVersion = deletedChatIdVersions != null ? deletedChatIdVersions.get(s) : null;
+                    // 删除声明早于服务端最近一次恢复：忽略该陈旧声明，避免把已恢复会话重新软删除。
+                    // 未知版本（0）也按陈旧处理；未携带映射的旧客户端保持原有行为。
+                    if (restoredVersion != null && deleteVersion instanceof Number n
+                            && n.longValue() < restoredVersion) {
+                        log.debug("忽略陈旧删除声明: userId={}, chatId={}, deleteVersion={}, restoredVersion={}",
+                                userId, s, n.longValue(), restoredVersion);
+                        // 该会话已在回收站（服务端累积删除列表或行 deleted_at 命中）时，
+                        // 陈旧声明是幂等重复，不回传 ignored，避免客户端反复对账/刷新
+                        boolean alreadyDeleted = deletedIds.contains(s)
+                                || sqliteStorage.getChatSessionDeletedAt(userId, s) != null;
+                        if (!alreadyDeleted) ignoredDeleteIds.add(s);
+                        continue;
+                    }
+                    deletedIds.add(s);
+                }
             }
             // 显式恢复的会话从删除集合中移除；不再按“上传即复活”处理
             deletedIds.removeAll(restoreIds);
@@ -683,7 +747,9 @@ public class ChatHistoryService {
     public List<String> restoreFromTrash(String userId, Collection<String> chatIds) {
         Object lock = userLocks.computeIfAbsent(userId, k -> new Object());
         synchronized (lock) {
-            ensureSessionMigrated(userId);
+            if (!ensureSessionMigrated(userId)) {
+                throw new IllegalStateException("会话历史迁移失败，请稍后重试");
+            }
             List<String> restored = sqliteStorage.restoreChatSessions(userId, chatIds);
             if (restored.isEmpty()) return restored;
             // 从状态表删除列表移除，防止下次同步再次软删除
@@ -738,9 +804,14 @@ public class ChatHistoryService {
     public int purgeTrash(String userId, Collection<String> chatIds) {
         Object lock = userLocks.computeIfAbsent(userId, k -> new Object());
         synchronized (lock) {
-            ensureSessionMigrated(userId);
+            if (!ensureSessionMigrated(userId)) {
+                throw new IllegalStateException("会话历史迁移失败，请稍后重试");
+            }
             int purged = sqliteStorage.purgeChatSessions(userId, chatIds);
             if (purged > 0) {
+                // 注意：这里故意保留状态表中的 tombstone。彻底删除后行已不存在，
+                // tombstone 是阻止陈旧客户端全量保存/导入把同一 ID 重新 INSERT 复活的唯一标记，
+                // 不能仅因“行已物理删除”就清理；否则已彻底删除的会话可能被旧客户端复活。
                 sqliteStorage.bumpChatSyncSeq(userId);
                 log.info("回收站彻底删除会话: userId={}, 删除数={}", userId, purged);
             }

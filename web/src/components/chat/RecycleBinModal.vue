@@ -15,7 +15,7 @@
             autocomplete="off"
           />
           <label class="recycle-bin-select-all">
-            <input type="checkbox" :checked="allChecked" @change="toggleSelectAll" />
+            <input type="checkbox" :checked="allChecked" :disabled="busy" @change="toggleSelectAll" />
             {{ t('trash.selectAll') }}
           </label>
         </div>
@@ -23,23 +23,23 @@
           <div v-if="loading" class="recycle-bin-empty">{{ t('trash.loading') }}</div>
           <div v-else-if="filteredList.length === 0" class="recycle-bin-empty">{{ t('trash.empty') }}</div>
           <div v-for="item in filteredList" :key="item.id" class="recycle-bin-item">
-            <input type="checkbox" :checked="selected.has(item.id)" @change="toggleSelect(item.id)" />
+            <input type="checkbox" :checked="selected.has(item.id)" :disabled="busy" @change="toggleSelect(item.id)" />
             <div class="recycle-bin-info">
               <div class="recycle-bin-name">{{ item.title }}</div>
               <div class="recycle-bin-meta">{{ t('trash.meta', { n: item.count, time: item.deletedAt || '' }) }}</div>
             </div>
-            <button class="recycle-bin-btn" @click="restoreOne(item)">{{ t('trash.restore') }}</button>
-            <button class="recycle-bin-btn danger" @click="purgeOne(item)">{{ t('trash.purge') }}</button>
+            <button class="recycle-bin-btn" :disabled="busy" @click="restoreOne(item)">{{ t('trash.restore') }}</button>
+            <button class="recycle-bin-btn danger" :disabled="busy" @click="purgeOne(item)">{{ t('trash.purge') }}</button>
           </div>
         </div>
         <div class="recycle-bin-footer">
-          <button class="recycle-bin-btn" :disabled="selected.size === 0" @click="restoreSelected">
+          <button class="recycle-bin-btn" :disabled="selected.size === 0 || busy" @click="restoreSelected">
             {{ t('trash.restoreSelected', { n: selected.size }) }}
           </button>
-          <button class="recycle-bin-btn danger" :disabled="selected.size === 0" @click="purgeSelected">
+          <button class="recycle-bin-btn danger" :disabled="selected.size === 0 || busy" @click="purgeSelected">
             {{ t('trash.purgeSelected', { n: selected.size }) }}
           </button>
-          <button class="recycle-bin-btn danger" :disabled="list.length === 0" @click="emptyTrash">
+          <button class="recycle-bin-btn danger" :disabled="list.length === 0 || busy" @click="emptyTrash">
             {{ t('trash.emptyAll') }}
           </button>
         </div>
@@ -52,15 +52,22 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
-import { listTrash, restoreTrash, purgeTrash } from '@/api/chat'
+import { listTrash, purgeTrash } from '@/api/chat'
+import { useChatStore } from '@/stores/chat'
 
 const emit = defineEmits(['close', 'changed'])
 const { t } = useI18n()
+const chatStore = useChatStore()
 
 const list = ref([])
 const loading = ref(false)
+const restoring = ref(false)
+const purging = ref(false)
 const keyword = ref('')
 const selected = ref(new Set())
+
+// 任一写操作进行中即锁定列表操作，避免恢复/彻底删除并发产生矛盾提示
+const busy = computed(() => restoring.value || purging.value)
 
 // 本地搜索过滤（标题/预览内容，忽略大小写）
 const filteredList = computed(() => {
@@ -116,17 +123,41 @@ async function restoreSelected() {
 }
 
 async function doRestore(ids) {
+  // 恢复/彻底删除期间禁止重复提交，避免并发操作产生矛盾提示
+  if (busy.value) return
+  restoring.value = true
   try {
-    const res = await restoreTrash(ids)
+    // store 会等待首屏加载与本地同步空闲，并在恢复提交后自行强制对账；
+    // 即使弹窗在请求期间被关闭，侧边栏仍会刷新。
+    const res = await chatStore.restoreChatsFromTrash(ids)
     if (res?.success) {
-      ElMessage.success(t('trash.restored', { n: (res.restored || []).length }))
-      emit('changed')
+      const restoredCount = (res.restored || []).length
+      if (restoredCount > 0) ElMessage.success(t('trash.restored', { n: restoredCount }))
+      else ElMessage.warning(t('trash.restoredNone'))
+      // handled=true：store 已完成强制对账，父组件无需重复刷新
+      emit('changed', { restored: res.restored || [], handled: true })
+      await load()
+    } else if (res?.busy) {
+      // 历史仍在加载或本地保存尚未结束：恢复已中止，避免竞态
+      ElMessage.warning(t('trash.restoreBusy'))
+    } else if (res?.unknown) {
+      // 请求结果未知（响应丢失）：store 已强制对账，提示用户稍后确认
+      ElMessage.warning(t('trash.restoreUnknown'))
+      emit('changed', { restored: [], handled: true })
       await load()
     } else {
       ElMessage.error(res?.message || t('trash.restoreFailed'))
+      // store 已对失败/部分提交做过强制对账，这里只刷新回收站列表
+      emit('changed', { restored: [], handled: true })
+      await load()
     }
   } catch (e) {
     ElMessage.error(t('trash.restoreFailed'))
+    // store 已对账；重新拉取回收站列表避免误导
+    emit('changed', { restored: [], handled: true })
+    await load()
+  } finally {
+    restoring.value = false
   }
 }
 
@@ -167,6 +198,9 @@ async function emptyTrash() {
 }
 
 async function doPurge(ids) {
+  // 恢复/彻底删除进行中禁止并发操作，避免同一会话出现互相矛盾的结果
+  if (busy.value) return
+  purging.value = true
   try {
     const res = await purgeTrash(ids)
     if (res?.success) {
@@ -178,6 +212,8 @@ async function doPurge(ids) {
     }
   } catch (e) {
     ElMessage.error(t('trash.purgeFailed'))
+  } finally {
+    purging.value = false
   }
 }
 

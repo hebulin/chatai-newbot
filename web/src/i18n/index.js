@@ -187,9 +187,12 @@ const zh = {
     emptyTitle: '清空回收站',
     emptyConfirm: '将彻底删除回收站中的全部 {n} 个会话，不可恢复。确定清空？',
     restored: '已恢复 {n} 个会话',
+    restoredNone: '未恢复任何会话（可能已被恢复或彻底删除）',
     purged: '已彻底删除 {n} 个会话',
     loadFailed: '回收站加载失败',
     restoreFailed: '恢复失败，请稍后重试',
+    restoreBusy: '会话仍在同步中，请稍后重试',
+    restoreUnknown: '恢复结果未知，已重新同步，请稍后确认',
     purgeFailed: '删除失败，请稍后重试'
   },
   input: {
@@ -748,9 +751,12 @@ const en = {
     emptyTitle: 'Empty Recycle Bin',
     emptyConfirm: 'All {n} chat(s) in the recycle bin will be permanently deleted and cannot be recovered. Continue?',
     restored: '{n} chat(s) restored',
+    restoredNone: 'No chats were restored (they may already be restored or permanently deleted)',
     purged: '{n} chat(s) permanently deleted',
     loadFailed: 'Failed to load recycle bin',
     restoreFailed: 'Restore failed, please try again later',
+    restoreBusy: 'Chat sync is still in progress, please try again shortly',
+    restoreUnknown: 'Restore result is unknown; the list has been resynced, please check again shortly',
     purgeFailed: 'Delete failed, please try again later'
   },
   input: {

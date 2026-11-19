@@ -174,6 +174,7 @@ public class SqliteSchemaInitializer {
                 "msg_count INTEGER DEFAULT 0," +
                 "version INTEGER NOT NULL DEFAULT 1," +
                 "deleted_at TEXT," +
+                "restored_version INTEGER NOT NULL DEFAULT 0," +
                 "updated_at TEXT," +
                 "updated_at_ts INTEGER DEFAULT 0," +
                 "PRIMARY KEY (user_id, chat_id)" +
@@ -183,6 +184,12 @@ public class SqliteSchemaInitializer {
         ensureColumn("t_chat_session", "version", "INTEGER NOT NULL DEFAULT 1");
         // 老数据库补充软删除标记列（幂等迁移，回收站功能：NULL=正常，非空=已删除时间）
         ensureColumn("t_chat_session", "deleted_at", "TEXT");
+        // 老数据库补充“最近一次从回收站恢复时的行版本”列（0=从未恢复）：
+        // 保存时据此忽略早于恢复的陈旧删除声明，避免已恢复会话被其他端重新软删除
+        ensureColumn("t_chat_session", "restored_version", "INTEGER NOT NULL DEFAULT 0");
+        // 恢复版本查询索引必须在补列之后创建：已有旧库不含 restored_version，
+        // 提前建索引会因 "no such column" 导致应用启动失败
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_chat_session_restored ON t_chat_session(user_id, restored_version)");
 
         // 用户会话全局状态（最后所在会话 + 已删除会话ID累积 + 会话文件夹定义；行存在即表示该用户已完成按会话行迁移）
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS t_chat_user_state (" +

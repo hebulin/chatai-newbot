@@ -35,6 +35,7 @@ class ChatHistoryServiceTest {
     private static IsolatedDataDirectory dataDirectory;
     private static SqliteStorageService storage;
     private static ChatHistoryService service;
+    private static JdbcTemplate jdbcTemplate;
 
     /** 隔离会话测试库及初始化过程中可能使用的静态密钥。 */
     @BeforeAll
@@ -43,7 +44,8 @@ class ChatHistoryServiceTest {
         DriverManagerDataSource dataSource = new DriverManagerDataSource();
         dataSource.setDriverClassName("org.sqlite.JDBC");
         dataSource.setUrl("jdbc:sqlite:" + tempDir.resolve("test-chat-sync.db").toAbsolutePath());
-        storage = new SqliteStorageService(new JdbcTemplate(dataSource));
+        jdbcTemplate = new JdbcTemplate(dataSource);
+        storage = new SqliteStorageService(jdbcTemplate);
         storage.init();
         service = new ChatHistoryService(storage);
     }
@@ -321,6 +323,7 @@ class ChatHistoryServiceTest {
         Map<String, Object> row = service.loadSingleChat(userId, "c1");
         assertTrue((Boolean) row.get("exists"), "恢复后会话应可见");
         assertEquals(2L, ((Number) row.get("version")).longValue(), "恢复后版本号应递增");
+        assertEquals(2L, service.getChatVersion(userId, "c1"), "恢复后应能查询到新版本作为客户端基准");
         assertTrue(service.listTrash(userId).isEmpty(), "恢复后回收站应为空");
 
         // 再次删除并彻底清除：物理删除不可恢复
@@ -330,8 +333,134 @@ class ChatHistoryServiceTest {
         assertEquals(1, service.purgeTrash(userId, List.of("c1")));
         assertTrue(service.listTrash(userId).isEmpty());
         assertFalse((Boolean) service.loadSingleChat(userId, "c1").get("exists"));
+        // 状态表保留 tombstone，阻止陈旧客户端全量保存把已彻底删除会话重新插入
+        assertTrue(((List<?>) service.loadChatSummaries(userId).get("deletedChatIds")).contains("c1"),
+                "彻底删除后应保留 tombstone 防止陈旧客户端复活会话");
         // 彻底删除后恢复操作无效
         assertTrue(service.restoreFromTrash(userId, List.of("c1")).isEmpty());
+    }
+
+    /** 旧整文档损坏导致迁移失败时，摘要读取必须标记 loadFailed 而不是返回空列表成功 */
+    @Test
+    void summary_迁移失败时标记loadFailed() {
+        String userId = "legacy_broken_" + System.nanoTime();
+        jdbcTemplate.update("INSERT INTO t_chat_history(user_id, chat_data, updated_at, updated_at_ts) VALUES(?,?,?,?)",
+                userId, "{broken", "2026-11-18 00:00:00", 0L);
+        Map<String, Object> result = service.loadChatSummaries(userId);
+        assertEquals(Boolean.TRUE, result.get("loadFailed"), "迁移失败必须标记 loadFailed");
+    }
+
+    /** 清空回收站：物理删除全部回收站行，但保留 tombstone 防止陈旧客户端复活会话 */
+    @Test
+    void trash_清空回收站保留tombstone() {
+        String userId = "trash_empty_" + System.nanoTime();
+        service.saveChatHistory(userId, payload(
+                Map.of("c1", List.of(userMsg("一")), "c2", List.of(userMsg("二"))),
+                Map.of("c1", 0L, "c2", 0L)));
+        Map<String, Object> deleteReq = payload(Map.of(), Map.of());
+        deleteReq.put("deletedChatIds", List.of("c1", "c2"));
+        service.saveChatHistory(userId, deleteReq);
+        assertEquals(2, service.purgeTrash(userId, List.of()));
+        assertTrue(service.listTrash(userId).isEmpty());
+        List<?> tombstones = (List<?>) service.loadChatSummaries(userId).get("deletedChatIds");
+        assertTrue(tombstones.contains("c1"), "清空回收站后应保留 c1 tombstone");
+        assertTrue(tombstones.contains("c2"), "清空回收站后应保留 c2 tombstone");
+    }
+
+    /** 恢复前产生的陈旧删除声明不能把已恢复会话重新软删除；恢复后的主动删除仍须生效 */
+    @Test
+    void trash_恢复后忽略陈旧删除声明但允许再次删除() {
+        String userId = "trash_stale_" + System.nanoTime();
+        service.saveChatHistory(userId, payload(
+                Map.of("c1", List.of(userMsg("内容"))), Map.of("c1", 0L)));
+        // 客户端在版本 1 时删除会话
+        Map<String, Object> deleteReq = payload(Map.of(), Map.of());
+        deleteReq.put("deletedChatIds", List.of("c1"));
+        deleteReq.put("deletedChatIdVersions", Map.of("c1", 1L));
+        service.saveChatHistory(userId, deleteReq);
+        assertEquals(1, service.listTrash(userId).size());
+        // 恢复后行版本变为 2
+        assertEquals(List.of("c1"), service.restoreFromTrash(userId, List.of("c1")));
+        assertEquals(2L, ((Number) service.loadSingleChat(userId, "c1").get("version")).longValue());
+
+        // 仍持有删除前版本 1 的陈旧端保存：删除声明必须被忽略，会话保持可见
+        Map<String, Object> staleDelete = payload(Map.of(), Map.of());
+        staleDelete.put("deletedChatIds", List.of("c1"));
+        staleDelete.put("deletedChatIdVersions", Map.of("c1", 1L));
+        Map<String, Object> staleResult = service.saveChatHistory(userId, staleDelete);
+        assertEquals(List.of("c1"), staleResult.get("ignoredDeleteIds"), "应回传被忽略的删除声明便于客户端对账");
+        assertTrue((Boolean) service.loadSingleChat(userId, "c1").get("exists"), "陈旧删除声明不应重新软删除已恢复会话");
+        assertTrue(service.listTrash(userId).isEmpty());
+
+        // 客户端看到恢复后的版本 2 再次主动删除：必须生效
+        Map<String, Object> freshDelete = payload(Map.of(), Map.of());
+        freshDelete.put("deletedChatIds", List.of("c1"));
+        freshDelete.put("deletedChatIdVersions", Map.of("c1", 2L));
+        service.saveChatHistory(userId, freshDelete);
+        assertFalse((Boolean) service.loadSingleChat(userId, "c1").get("exists"), "恢复后的主动删除应生效");
+        assertEquals(1, service.listTrash(userId).size());
+
+        // 会话已在回收站时，重复到达的陈旧声明是幂等操作，不应回传 ignored 触发客户端反复对账
+        Map<String, Object> repeatStale = payload(Map.of(), Map.of());
+        repeatStale.put("deletedChatIds", List.of("c1"));
+        repeatStale.put("deletedChatIdVersions", Map.of("c1", 0L));
+        Map<String, Object> repeatResult = service.saveChatHistory(userId, repeatStale);
+        assertTrue(((List<?>) repeatResult.get("ignoredDeleteIds")).isEmpty(), "已删除会话的陈旧声明不应回传 ignored");
+        assertFalse((Boolean) service.loadSingleChat(userId, "c1").get("exists"));
+    }
+
+    /** 新客户端未知版本(0)按陈旧处理；未携带逐项版本的旧客户端保持原有删除语义 */
+    @Test
+    void trash_未知版本与旧客户端删除声明兼容() {
+        String userId = "trash_legacy_" + System.nanoTime();
+        service.saveChatHistory(userId, payload(
+                Map.of("c1", List.of(userMsg("内容"))), Map.of("c1", 0L)));
+        Map<String, Object> deleteReq = payload(Map.of(), Map.of());
+        deleteReq.put("deletedChatIds", List.of("c1"));
+        deleteReq.put("deletedChatIdVersions", Map.of("c1", 1L));
+        service.saveChatHistory(userId, deleteReq);
+        service.restoreFromTrash(userId, List.of("c1"));
+
+        // 新客户端携带未知版本 0：视为恢复前产生的陈旧声明，忽略
+        Map<String, Object> unknownDelete = payload(Map.of(), Map.of());
+        unknownDelete.put("deletedChatIds", List.of("c1"));
+        unknownDelete.put("deletedChatIdVersions", Map.of("c1", 0L));
+        service.saveChatHistory(userId, unknownDelete);
+        assertTrue((Boolean) service.loadSingleChat(userId, "c1").get("exists"), "未知版本删除声明应被忽略");
+
+        // 旧客户端不携带逐项版本：保持原有行为，删除生效
+        Map<String, Object> legacyDelete = payload(Map.of(), Map.of());
+        legacyDelete.put("deletedChatIds", List.of("c1"));
+        service.saveChatHistory(userId, legacyDelete);
+        assertFalse((Boolean) service.loadSingleChat(userId, "c1").get("exists"), "旧客户端删除声明应保持原语义");
+    }
+
+    /** 通过会话内容显式恢复（冲突处理保留本地）同样记录恢复版本，陈旧删除声明被忽略 */
+    @Test
+    void trash_内容恢复记录恢复版本并忽略陈旧删除() {
+        String userId = "trash_restore_content_" + System.nanoTime();
+        service.saveChatHistory(userId, payload(
+                Map.of("c1", List.of(userMsg("内容"))), Map.of("c1", 0L)));
+        Map<String, Object> deleteReq = payload(Map.of(), Map.of());
+        deleteReq.put("deletedChatIds", List.of("c1"));
+        deleteReq.put("deletedChatIdVersions", Map.of("c1", 1L));
+        service.saveChatHistory(userId, deleteReq);
+
+        // 冲突处理选择保留本地：携带正文与 restoreChatIds 恢复，行版本递增到 2 并记录恢复版本
+        Map<String, Object> restoreContent = payload(
+                Map.of("c1", List.of(userMsg("本地保留内容"))), Map.of());
+        restoreContent.put("restoreChatIds", List.of("c1"));
+        service.saveChatHistory(userId, restoreContent);
+        Map<String, Object> restored = service.loadSingleChat(userId, "c1");
+        assertTrue((Boolean) restored.get("exists"));
+        assertEquals(2L, ((Number) restored.get("version")).longValue());
+
+        // 恢复前版本 1 的陈旧删除声明必须被忽略
+        Map<String, Object> staleDelete = payload(Map.of(), Map.of());
+        staleDelete.put("deletedChatIds", List.of("c1"));
+        staleDelete.put("deletedChatIdVersions", Map.of("c1", 1L));
+        service.saveChatHistory(userId, staleDelete);
+        assertTrue((Boolean) service.loadSingleChat(userId, "c1").get("exists"), "内容恢复后陈旧删除声明应被忽略");
     }
 
     /** 回收站恢复时原文件夹已删除：归属自动清除，不恢复到不存在的文件夹 */

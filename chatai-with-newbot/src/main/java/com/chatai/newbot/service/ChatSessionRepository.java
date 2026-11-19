@@ -10,6 +10,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -205,7 +206,9 @@ public class ChatSessionRepository {
         }
         int updated = jdbcTemplate.update(
                 "UPDATE t_chat_session SET messages=?, meta=COALESCE(?, meta), title=?, preview=?, last_time=?, " +
-                        "msg_count=?, updated_at=?, updated_at_ts=?, version=version+1, deleted_at=NULL WHERE user_id=? AND chat_id=? AND version=?",
+                        "msg_count=?, updated_at=?, updated_at_ts=?, version=version+1, deleted_at=NULL, " +
+                        "restored_version=CASE WHEN deleted_at IS NOT NULL THEN version+1 ELSE restored_version END " +
+                        "WHERE user_id=? AND chat_id=? AND version=?",
                 messagesJson, metaJson, title, preview, lastTime, msgCount, updatedAt, updatedAtTs,
                 userId, chatId, current);
         if (updated == 0) {
@@ -250,12 +253,29 @@ public class ChatSessionRepository {
         if (chatIds == null || chatIds.isEmpty()) return restored;
         for (String chatId : chatIds) {
             int updated = jdbcTemplate.update(
-                    "UPDATE t_chat_session SET deleted_at = NULL, version = version + 1, updated_at_ts = ? " +
+                    "UPDATE t_chat_session SET deleted_at = NULL, version = version + 1, " +
+                            "restored_version = version + 1, updated_at_ts = ? " +
                             "WHERE user_id = ? AND chat_id = ? AND deleted_at IS NOT NULL",
                     System.currentTimeMillis(), userId, chatId);
             if (updated > 0) restored.add(chatId);
         }
         return restored;
+    }
+
+    /**
+     * 查询用户全部“曾被恢复过”的会话及其最近恢复时的行版本（chatId -> version）。
+     * 一次查询批量返回，保存时用于忽略早于恢复的陈旧删除声明，避免逐条查询。
+     * @param userId 用户ID
+     * @return 恢复版本映射；未恢复过的会话不在结果中
+     */
+    public Map<String, Long> getRestoredVersions(String userId) {
+        Map<String, Long> result = new HashMap<>();
+        jdbcTemplate.query(
+                "SELECT chat_id, restored_version FROM t_chat_session WHERE user_id = ? AND restored_version > 0",
+                rs -> {
+                    result.put(rs.getString("chat_id"), rs.getLong("restored_version"));
+                }, userId);
+        return result;
     }
 
     /** 彻底删除指定或全部回收站会话。 */

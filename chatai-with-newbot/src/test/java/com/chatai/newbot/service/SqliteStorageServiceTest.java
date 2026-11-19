@@ -62,6 +62,29 @@ class SqliteStorageServiceTest {
         assertEquals(16384, db.queryForObject("SELECT max_output_tokens FROM t_model_config WHERE id='old'", Integer.class));
     }
 
+    /** 旧库缺少 restored_version 列时，必须先补列再建索引，保证升级启动成功。 */
+    @Test
+    void chatSessionRestoredVersion_旧库升级先补列再建索引() {
+        DriverManagerDataSource dataSource = new DriverManagerDataSource();
+        dataSource.setUrl("jdbc:sqlite:" + tempDir.resolve("chat-session-old-schema.db"));
+        JdbcTemplate db = new JdbcTemplate(dataSource);
+        // 手工构造本次改动前的 t_chat_session 结构（不含 restored_version）
+        db.execute("CREATE TABLE t_chat_session (" +
+                "user_id TEXT NOT NULL, chat_id TEXT NOT NULL, messages TEXT NOT NULL, meta TEXT, " +
+                "title TEXT, preview TEXT, last_time TEXT, msg_count INTEGER DEFAULT 0, " +
+                "version INTEGER NOT NULL DEFAULT 1, deleted_at TEXT, " +
+                "updated_at TEXT, updated_at_ts INTEGER DEFAULT 0, PRIMARY KEY (user_id, chat_id))");
+        SqliteSchemaInitializer initializer = new SqliteSchemaInitializer(db);
+        assertDoesNotThrow(initializer::createTables, "旧库升级不得因先建索引后补列而失败");
+        List<Map<String, Object>> columns = db.queryForList("PRAGMA table_info(t_chat_session)");
+        assertTrue(columns.stream().anyMatch(c -> "restored_version".equals(c.get("name"))),
+                "升级后应补充 restored_version 列");
+        Integer indexCount = db.queryForObject(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_chat_session_restored'",
+                Integer.class);
+        assertEquals(1, indexCount, "补列后应成功创建恢复版本索引");
+    }
+
     /** 旧表补列可重复执行，模型输出配置经过新增、读回、更新后仍保持完整。 */
     @Test
     void modelOutput_迁移及配置持久化() {
